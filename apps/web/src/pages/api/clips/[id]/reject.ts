@@ -1,9 +1,57 @@
-type AnyReq = unknown;
-type AnyRes = unknown;
+﻿import { ClipRejectInput } from '@cliply/shared/schemas';
+import type { NextApiRequest, NextApiResponse } from 'next';
 
-export default function handler(_req: AnyReq, _res: AnyRes): void {
-  void _req;
-  void _res;
-}
+import { requireUser } from '@/lib/auth';
+import { handler, ok, err } from '@/lib/http';
+import { logger } from '@/lib/logger';
+import { checkRateLimit } from '@/lib/rate-limit';
 
-export const __stub_marker__ = true;
+export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
+  const started = Date.now();
+  logger.info('clip_reject_start', { method: req.method ?? 'GET' });
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    res.status(405).json(err('method_not_allowed', 'Method not allowed'));
+    return;
+  }
+
+  const auth = requireUser(req);
+  const { userId, supabase } = auth;
+
+  const rate = await checkRateLimit(userId, 'clips:reject');
+  if (!rate.allowed) {
+    res.status(429).json(err('too_many_requests', 'Rate limited'));
+    return;
+  }
+
+  const idParam = (req.query?.id ?? '') as string | string[];
+  const clipId = Array.isArray(idParam) ? idParam[0] : idParam;
+
+  if (!clipId) {
+    res.status(400).json(err('invalid_request', 'missing id'));
+    return;
+  }
+
+  const parsed = ClipRejectInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+    return;
+  }
+
+  const update = await supabase.from('clips').update({ status: 'rejected' }).eq('id', clipId);
+  if (update.error) {
+    logger.error('clip_reject_update_failed', { clipId, message: update.error.message });
+    res.status(500).json(err('internal_error', 'Failed to reject clip'));
+    return;
+  }
+
+  logger.info('clip_reject_success', {
+    userId,
+    clipId,
+    durationMs: Date.now() - started,
+    remainingTokens: rate.remaining,
+  });
+
+  res.status(200).json(ok());
+});

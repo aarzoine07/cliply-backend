@@ -1,12 +1,31 @@
-﻿export class HttpError extends Error {
-  public readonly status: number;
-  public readonly expose: boolean;
+﻿export interface HttpErrorOptions {
+  code?: string;
+  details?: unknown;
+  cause?: unknown;
+  expose?: boolean;
+}
 
-  constructor(status: number, message: string, options?: { expose?: boolean; cause?: unknown }) {
-    super(message, options);
-    this.name = "HttpError";
+export class HttpError extends Error {
+  status: number;
+  code: string;
+  details?: unknown;
+  expose: boolean;
+
+  constructor(status: number, message: string, codeOrOptions?: string | HttpErrorOptions, details?: unknown) {
+    super(message);
+    this.name = 'HttpError';
     this.status = status;
-    this.expose = options?.expose ?? status < 500;
+
+    if (typeof codeOrOptions === 'string') {
+      this.code = codeOrOptions;
+      this.details = details;
+      this.expose = status < 500;
+    } else {
+      const options = codeOrOptions ?? {};
+      this.code = options.code ?? 'error';
+      this.details = options.details ?? options.cause ?? details;
+      this.expose = options.expose ?? status < 500;
+    }
   }
 }
 

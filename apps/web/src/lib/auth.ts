@@ -1,65 +1,120 @@
-﻿import type { SupabaseClient } from "@supabase/supabase-js";
+import { HttpError } from './errors';
+import { getRlsClient, type RlsClient } from './supabase';
 
-import { HttpError } from "@/lib/errors";
-import { getRlsClient } from "@/lib/supabase";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type HeaderValue = string | string[] | undefined;
+type HeaderRecord = Record<string, HeaderValue>;
+type HeadersInput = HeaderRecord | Headers;
+
+type NormalizedHeaders = Record<string, string>;
+
+function isHeaders(value: unknown): value is Headers {
+  return typeof Headers !== 'undefined' && value instanceof Headers;
+}
+
+function firstHeaderValue(value: HeaderValue): string | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const trimmed = entry.trim();
+      if (trimmed) return trimmed;
+    }
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizeHeaders(input?: HeadersInput): NormalizedHeaders {
+  if (!input) return {};
+
+  const normalized: NormalizedHeaders = {};
+
+  if (isHeaders(input)) {
+    input.forEach((value, key) => {
+      const trimmed = value.trim();
+      if (trimmed) {
+        normalized[key.toLowerCase()] = trimmed;
+      }
+    });
+    return normalized;
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    const normalizedValue = firstHeaderValue(value);
+    if (normalizedValue) {
+      normalized[key.toLowerCase()] = normalizedValue;
+    }
+  }
+
+  return normalized;
+}
+
+function parseAuthorization(value?: string): string | undefined {
+  if (!value) return undefined;
+  const [scheme, token] = value.split(/\s+/, 2);
+  if (!token || scheme.toLowerCase() !== 'bearer') {
+    throw new HttpError(400, 'invalid authorization header', 'invalid_header');
+  }
+  return token;
+}
+
+function ensureUuid(value: string, headerName: string): string {
+  if (!UUID_PATTERN.test(value)) {
+    throw new HttpError(400, 'invalid ' + headerName, 'invalid_header');
+  }
+  return value;
+}
 
 export type AuthContext = {
-  supabase: SupabaseClient;
   userId: string;
-  workspaceId: string;
-  accessToken: string;
+  workspaceId?: string | null;
+  accessToken?: string | null;
+  supabase: RlsClient;
 };
 
-export async function requireAuth(req: Request): Promise<AuthContext> {
-  const accessToken = extractBearerToken(req);
-  if (!accessToken) {
-    throw new HttpError(401, "missing or invalid authorization header");
+export function requireUser(req?: { headers?: HeadersInput }): AuthContext {
+  const normalized = normalizeHeaders(req?.headers);
+
+  const userHeader = normalized['x-debug-user'];
+  if (!userHeader) {
+    throw new HttpError(401, 'missing user', 'missing_user');
   }
 
+  const userId = ensureUuid(userHeader, 'x-debug-user');
+
+  const workspaceHeader = normalized['x-debug-workspace'];
+  const workspaceId = workspaceHeader ? ensureUuid(workspaceHeader, 'x-debug-workspace') : undefined;
+
+  const accessToken = parseAuthorization(normalized['authorization']);
   const supabase = getRlsClient(accessToken);
-  if (!supabase) {
-    throw new HttpError(500, "supabase client is not configured", { expose: false });
-  }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-  if (userError || !userData?.user) {
-    throw new HttpError(401, "unauthorized");
-  }
-
-  const workspaceId = await getWorkspaceIdForUser(supabase, userData.user.id);
-
-  return {
+  const context: AuthContext = {
+    userId,
     supabase,
-    userId: userData.user.id,
-    workspaceId,
-    accessToken,
   };
-}
 
-export async function getWorkspaceIdForUser(supabase: SupabaseClient, userId: string): Promise<string> {
-  const { data, error } = await supabase
-    .from("workspaces")
-    .select("id")
-    .eq("owner_id", userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "failed to resolve workspace", { cause: error, expose: false });
+  if (workspaceId !== undefined) {
+    context.workspaceId = workspaceId;
   }
 
-  if (!data?.id) {
-    throw new HttpError(403, "workspace not found for user");
+  if (accessToken !== undefined) {
+    context.accessToken = accessToken;
   }
 
-  return data.id;
+  return context;
 }
 
-function extractBearerToken(req: Request): string | null {
-  const header = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!header) return null;
-  const [scheme, token] = header.split(" ");
-  if (!scheme || !token) return null;
-  if (scheme.toLowerCase() !== "bearer") return null;
-  return token.trim() || null;
+export async function requireAuth(req: Request): Promise<AuthContext> {
+  const headersRecord: HeaderRecord = {};
+  req.headers.forEach((value, key) => {
+    headersRecord[key] = value;
+  });
+
+  return requireUser({ headers: headersRecord });
 }

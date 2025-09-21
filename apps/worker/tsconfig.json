@@ -1,8 +1,23 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "composite": true,
+    "incremental": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../../node_modules/.cache/cliply-types/apps-worker",
+    "tsBuildInfoFile": "../../node_modules/.cache/cliply-types/apps-worker.tsbuildinfo",
+    "noEmit": false
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ],
+  "references": [
+    {
+      "path": "../../packages/shared"
+    }
+  ]
 }
