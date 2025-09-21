@@ -1,0 +1,32 @@
+name: Cliply Backend Agent
+version: 1.0.0
+schema: v1
+
+models:
+  - name: GPT-4.1
+    provider: openai
+    model: gpt-4.1
+    apiKey: ${OPENAI_API_KEY}
+
+  - name: GPT-4o-mini
+    provider: openai
+    model: gpt-4o-mini
+    apiKey: ${OPENAI_API_KEY}
+
+roles:
+  chat: GPT-4.1
+  autocomplete: GPT-4o-mini
+  edit: GPT-4.1
+
+commands:
+  - name: Dev server
+    run: pnpm --filter @cliply/web dev
+
+  - name: Typecheck
+    run: pnpm typecheck
+
+  - name: Lint
+    run: pnpm lint
+
+  - name: Worker
+    run: pnpm --filter @cliply/worker dev

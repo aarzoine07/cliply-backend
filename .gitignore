@@ -1,0 +1,14 @@
+# dependencies / builds
+node_modules
+dist
+.next
+out
+# env/secrets
+.env
+.env.*
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
