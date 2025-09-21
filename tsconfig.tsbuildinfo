@@ -1,0 +1,1 @@
+{"root":["./apps/web/next-env.d.ts","./apps/web/src/index.ts","./apps/web/src/app/layout.tsx","./apps/web/src/app/page.tsx","./apps/web/src/app/api/health/route.ts","./apps/web/src/lib/supabase.ts","./apps/worker/src/index.ts","./packages/shared/src/env.ts","./packages/shared/src/http.ts","./packages/shared/src/index.ts","./packages/shared/src/logging.ts"],"version":"5.9.2"}
