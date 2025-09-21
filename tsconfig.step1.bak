@@ -38,23 +38,13 @@
     "apps/**/*.tsx",
     "packages/**/*.ts",
     "packages/**/*.tsx",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "db/**/*.sql",
+    "scripts/**/*.sh"
   ],
   "exclude": [
     "node_modules",
     "dist",
     "build"
-  ],
-  "files": [],
-  "references": [
-    {
-      "path": "./apps/web"
-    },
-    {
-      "path": "./apps/worker"
-    },
-    {
-      "path": "./packages/shared"
-    }
   ]
 }

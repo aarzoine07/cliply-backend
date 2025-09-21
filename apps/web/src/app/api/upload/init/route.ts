@@ -23,13 +23,17 @@ type ErrorResponse = {
 
 export async function POST(req: Request) {
   let userId: string | undefined;
-  let workspaceId: string | undefined;
+  let workspaceId: string | null | undefined;
   let projectId: string | undefined;
 
   try {
     const auth = await requireAuth(req);
     userId = auth.userId;
-    workspaceId = auth.workspaceId;
+    workspaceId = auth.workspaceId ?? null;
+
+    if (!workspaceId) {
+      throw new HttpError(400, 'workspace required', 'missing_workspace');
+    }
 
     const body = await parseJson(req);
     const validation = UploadInitInputSchema.safeParse(body);

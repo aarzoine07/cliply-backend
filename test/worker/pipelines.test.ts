@@ -1,1 +1,7 @@
-export const workerPipelinesTestPlaceholder = true;
+import { describe, it, expect } from 'vitest';
+
+describe('placeholder', () => {
+  it('passes', () => {
+    expect(true).toBe(true);
+  });
+});

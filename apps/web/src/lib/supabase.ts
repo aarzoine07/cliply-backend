@@ -1,49 +1,49 @@
-﻿import { getEnv } from "@cliply/shared/env";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+﻿import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-type Clients = {
-  rls?: SupabaseClient;
-  admin?: SupabaseClient;
-};
+import { getEnv } from './env';
 
-let clients: Clients = {};
+export type RlsClient = SupabaseClient;
+export type AdminClient = SupabaseClient;
 
-const baseAuthConfig = {
-  persistSession: false,
-  autoRefreshToken: false,
-  detectSessionInUrl: false,
+const baseOptions = {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
 } as const;
 
-export function getRlsClient(accessToken?: string): SupabaseClient | undefined {
+let cachedAnon: SupabaseClient | null = null;
+let cachedAdmin: SupabaseClient | null = null;
+
+export function getRlsClient(accessToken?: string): RlsClient {
   const env = getEnv();
-  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return undefined;
 
-  if (!accessToken) {
-    if (!clients.rls) {
-      clients.rls = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-        auth: baseAuthConfig,
-      });
-    }
-    return clients.rls;
-  }
-
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    auth: baseAuthConfig,
-    global: {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+  if (accessToken) {
+    return createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+      ...baseOptions,
+      global: {
+        headers: { Authorization: `Bearer ${accessToken}` },
       },
-    },
-  });
-}
-
-export function getAdminClient(): SupabaseClient | undefined {
-  const env = getEnv();
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return undefined;
-  if (!clients.admin) {
-    clients.admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-      auth: baseAuthConfig,
     });
   }
-  return clients.admin;
+
+  if (!cachedAnon) {
+    cachedAnon = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, baseOptions);
+  }
+
+  return cachedAnon;
+}
+
+export function getAdminClient(): AdminClient {
+  const env = getEnv();
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY missing');
+  }
+
+  if (!cachedAdmin) {
+    cachedAdmin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, baseOptions);
+  }
+
+  return cachedAdmin;
 }
