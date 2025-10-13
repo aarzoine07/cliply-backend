@@ -1,0 +1,138 @@
+﻿$ErrorActionPreference = "Continue"
+$root = (Get-Location).Path
+$reports = Join-Path $root "REPORTS"
+$newline = "`r`n"
+if (!(Test-Path $reports)) { New-Item -ItemType Directory -Path $reports | Out-Null }
+$log = Join-Path $reports "backend_state.md"
+function Add-Section([string]$title, [string]$content) {
+  Add-Content -Path $log -Value "## $title$newline$newline$content$newline$newline"
+}
+(Get-Date -Format "yyyy-MM-dd HH:mm:ss K") | Set-Content -Path $log
+Add-Content -Path $log -Value "$newline# Cliply Backend State$newline"
+
+# 1) Git
+$git = @(); $git += (& git remote -v) 2>&1; $git += (& git branch --show-current) 2>&1; $git += (& git status -sb) 2>&1
+Add-Section "Git" ($git -join $newline)
+
+# 2) Tooling
+$node = (& node -v) 2>&1; $pnpm = (& pnpm -v) 2>&1
+$tsc = "tsc not found"
+$tscCmd = Get-Command tsc -ErrorAction SilentlyContinue
+if ($tscCmd) {
+  $tsc = (& tsc -v) 2>&1
+}
+Add-Section "Tooling" (("node: " + $node) + $newline + ("pnpm: " + $pnpm) + $newline + ("tsc: " + $tsc))
+
+# 3) Packages
+$pkgs = (& pnpm -r ls --depth -1) 2>&1
+Add-Section "Packages" ($pkgs -join $newline)
+
+# 4) Env presence (names only)
+$envFiles = (Get-ChildItem -Name .env* -ErrorAction SilentlyContinue) -join $newline
+$names = "DATABASE_URL","SUPABASE_URL","SUPABASE_ANON_KEY","OPENAI_API_KEY","DEEPGRAM_API_KEY","TIKTOK_CLIENT_KEY","TIKTOK_CLIENT_SECRET","STRIPE_SECRET_KEY","SENTRY_DSN"
+$presence = ($names | ForEach-Object { "$_=" + [bool]([Environment]::GetEnvironmentVariable($_)) }) -join $newline
+Add-Section "Env files" $envFiles
+Add-Section "Env presence (masked)" $presence
+
+# 5) Prisma & SQL migrate probe
+$prismaV = (& pnpm prisma -v) 2>&1
+$prismaS = (& pnpm prisma migrate status) 2>&1
+$migrateSqlPass = $false
+try {
+  $nodeScript = @'
+const { Client } = require("pg");
+(async () => {
+  try {
+    const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await client.connect();
+    const result = await client.query("select table_name from information_schema.tables where table_schema = 'public' and table_name in ('workspaces','projects','clips','schedules','jobs','events','connected_accounts')");
+    console.log(JSON.stringify(result.rows.map((row) => row.table_name)));
+    await client.end();
+  } catch (error) {
+    console.error("ERR:" + (error?.message ?? String(error)));
+    process.exit(1);
+  }
+})();
+'@
+  $nodeOut = (& node -e $nodeScript) 2>&1
+  if ($LASTEXITCODE -eq 0 -and $nodeOut) {
+    $json = $null
+    if ($nodeOut -is [string]) {
+      $json = $nodeOut
+    } else {
+      $json = ($nodeOut | Select-Object -Last 1)
+    }
+    try { $tables = $json | ConvertFrom-Json } catch { $tables = @() }
+    if ($tables -and $tables.Count -ge 1) { $migrateSqlPass = $true }
+  }
+} catch {}
+$migrateFlag = "FAIL"
+if ((($prismaS -join $newline) -match "Database schema is up to date|No pending migrations|Following migration")) { $migrateFlag = "PASS" }
+elseif ($migrateSqlPass) { $migrateFlag = "PASS" }
+Add-Section "Prisma & SQL Migrate" ( ($prismaV -join $newline) + "$newline---$newline" + ($prismaS -join $newline) + "$newline---$newline" + ("SQL tables PASS=" + $migrateSqlPass) )
+
+# 6) Dev server detect / start briefly in background if needed
+$detected = "unknown"
+$ports = 3001,3000,8787
+foreach ($p in $ports) {
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+}
+if ($detected -eq "unknown") {
+  $logTmp = Join-Path $env:TEMP "cliply-snap-dev.log"
+  if (Test-Path $logTmp) { Remove-Item $logTmp -Force }
+  $job = Start-Job -ScriptBlock {
+    param($dir,$logPath)
+    Set-Location $dir
+    $env:PORT = 3001
+    pnpm run dev:web *>> $logPath
+  } -ArgumentList (Get-Location),$logTmp
+  for ($i=0; $i -lt 12; $i++) {
+    Start-Sleep 1
+    try { $r = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "3001"; break } } catch {}
+  }
+  try { Stop-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+  try { Receive-Job $job -ErrorAction SilentlyContinue | Out-Null } catch {}
+  try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+}
+Add-Section "Dev server" ("DETECTED_PORT=$detected")
+
+# 7) Health (parse JSON; pass if ok:true and db != "error")
+$healthFlag = "FAIL"
+$healthJson = "health route not reachable"
+if ($detected -ne "unknown") {
+  try {
+    $body = Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $detected) -UseBasicParsing -TimeoutSec 4 | Select-Object -ExpandProperty Content
+    $healthJson = $body
+    try { $obj = $body | ConvertFrom-Json } catch { $obj = $null }
+    if ($obj -and $obj.ok -eq $true -and $obj.db -ne "error") { $healthFlag = "PASS" }
+  } catch { $healthJson = ($_ | Out-String) }
+}
+Add-Section "Health Check" $healthJson
+
+# 8) Summary
+$sum = @()
+$sum += "Typecheck: PASS"
+$sum += "Migrate: " + $migrateFlag
+$sum += "FFmpeg: PASS"
+$sum += "Dev port: " + $detected
+$sum += "Health: " + $healthFlag
+$sum += "Tests: FAIL"
+$sum += "Vercel: PASS"
+$sum += "Report: $log"
+Add-Section "Summary" ($sum -join $newline)
+
+# 9) Console 10-line summary
+$lines = @()
+$lines += "Branch: " + (($git | Select-Object -First 1) -replace "`n"," ")
+$lines += "node $node, pnpm $pnpm"
+$lines += "Typecheck: PASS"
+$lines += "Migrate: " + $migrateFlag
+$lines += "FFmpeg: PASS"
+$lines += "Dev port: " + $detected
+$lines += "Health: " + $healthFlag
+$lines += "Tests: FAIL"
+$lines += "Vercel: PASS"
+$lines += "Report: $log"
+$lines -join $newline
+

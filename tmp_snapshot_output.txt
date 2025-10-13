@@ -1,0 +1,10 @@
+﻿Branch: origin	https://github.com/aarzoine07/cliply-backend.git (fetch)
+node v22.17.0, pnpm 10.15.0
+Typecheck: PASS
+Migrate: FAIL
+FFmpeg: PASS
+Dev port: 3001
+Health: FAIL
+Tests: FAIL
+Vercel: PASS
+Report: C:\Users\aarzo\cliply-backend\REPORTS\backend_state.md

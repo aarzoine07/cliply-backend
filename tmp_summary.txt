@@ -1,0 +1,10 @@
+﻿+       ~
+Unexpected token '}' in expression or statement.
+At C:\Users\aarzo\cliply-backend\scripts\snapshot.ps1:76 char:5
++     }
++     ~
+Unexpected token '}' in expression or statement.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+ 

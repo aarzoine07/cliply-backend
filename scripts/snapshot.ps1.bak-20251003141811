@@ -1,0 +1,174 @@
+﻿$ErrorActionPreference = "Continue"
+$root = (Get-Location).Path
+$reports = Join-Path $root "REPORTS"
+$newline = "`r`n"
+if (!(Test-Path $reports)) { New-Item -ItemType Directory -Path $reports | Out-Null }
+$log = Join-Path $reports "backend_state.md"
+# helpers
+function Add-Section([string]$title, [string]$content) {
+  Add-Content -Path $log -Value "## $title$newline```$newline$content$newline```$newline"
+}
+# start fresh
+(Get-Date -Format "yyyy-MM-dd HH:mm:ss K") | Set-Content -Path $log
+Add-Content -Path $log -Value "$newline# Cliply Backend State$newline"
+
+# 1) Git
+$git = @()
+$git += (& git remote -v) 2>&1
+$git += (& git branch --show-current) 2>&1
+$git += (& git status -sb) 2>&1
+Add-Section "Git" ($git -join $newline)
+
+# 2) Tooling
+$node = (& node -v) 2>&1
+$pnpm = (& pnpm -v) 2>&1
+$tsc  = (& tsc -v) 2>&1
+Add-Section "Tooling" (("node: $node" + $newline + "pnpm: $pnpm" + $newline + "tsc: $tsc"))
+
+# 3) Workspace
+$pkgs = (& pnpm -r ls --depth -1) 2>&1
+Add-Section "Packages" ($pkgs -join $newline)
+
+# 4) Install & Typecheck
+$install   = (& pnpm install) 2>&1
+$typecheck = (& pnpm --filter server run typecheck) 2>&1
+Add-Section "Install & Typecheck" (($install -join $newline) + "$newline---$newline" + ($typecheck -join $newline))
+
+# 5) Env presence (no secrets)
+$envFiles = (Get-ChildItem -Name .env* -ErrorAction SilentlyContinue) -join $newline
+$names = "DATABASE_URL","SUPABASE_URL","SUPABASE_ANON_KEY","OPENAI_API_KEY","DEEPGRAM_API_KEY","TIKTOK_CLIENT_KEY","TIKTOK_CLIENT_SECRET","STRIPE_SECRET_KEY","SENTRY_DSN"
+$presence = ($names | ForEach-Object { "$_=" + [bool]([Environment]::GetEnvironmentVariable($_)) }) -join $newline
+Add-Section "Env files" $envFiles
+Add-Section "Env presence (masked)" $presence
+
+# 6) Prisma
+Push-Location "server"
+$prismaV = (& pnpm prisma -v) 2>&1
+$prismaG = (& pnpm prisma generate) 2>&1
+$prismaS = (& pnpm prisma migrate status) 2>&1
+# --- SQL-mode migrate probe ---
+$migrateSqlPass = $false
+try {
+  $nodeOut = (& node -e "const {Client}=require('pg');(async()=>{try{const c=new Client({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}});await c.connect();const r=await c.query(\"select table_name from information_schema.tables where table_schema='public'\");console.log(JSON.stringify(r.rows.map(x=>x.table_name)));await c.end();}catch(e){console.error(\'ERR:\'+e.message);process.exit(1)}})()") 2>&1
+  if ($LASTEXITCODE -eq 0 -and $nodeOut) {
+    $tables = $nodeOut | ConvertFrom-Json
+    $expected = @("workspaces","projects","clips","schedules","jobs","events","connected_accounts","publish_targets","links","clicks","analytics_snapshots")
+    $present = @(); foreach($t in $expected){ if ($tables -contains $t){ $present += $t } }
+    if ($present.Count -ge 2) { $migrateSqlPass = $true }
+  }
+} catch {}
+# --- Final migrate flag ---
+$migrateFlag = "FAIL"
+if (($prismaS -join $newline) -match "Database schema is up to date|No pending migrations|Following migration") { $migrateFlag = "PASS" }
+elseif ($migrateSqlPass) { $migrateFlag = "PASS" }
+Add-Section "Prisma & Migrations" ( ($prismaV -join $newline) + "$newline---$newline" + ($prismaG -join $newline) + "$newline---$newline" + ($prismaS -join $newline))
+
+# 7) Supabase CLI
+Pop-Location
+$supastatus = (& supabase status) 2>&1
+if ($LASTEXITCODE -ne 0) { $supastatus = "supabase CLI not configured" }
+Add-Section "Supabase CLI" $supastatus
+
+# 8) FFmpeg
+$ffmpeg = (& ffmpeg -version) 2>&1 | Select-Object -First 1
+$ffprobe = (& ffprobe -version) 2>&1 | Select-Object -First 1
+Add-Section "FFmpeg/ffprobe" ($ffmpeg + $newline + $ffprobe)
+
+# 9) Build & Dev detect
+Push-Location "server"
+$build = (& pnpm build) 2>&1
+Add-Section "Build" ($build -join $newline)
+$ports = 3001,3000,8787
+$detected = "unknown"
+foreach ($p in $ports) {
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+}
+if ($detected -eq "unknown") {
+  $devLog = Join-Path $env:TEMP "cliply-snap-dev.log"
+  if (Test-Path $devLog) { Remove-Item $log -Force }
+  $repoDir = (Get-Location).Path
+  if ((Split-Path $repoDir -Leaf) -eq 'server') { $repoDir = Split-Path $repoDir -Parent }
+  $job = Start-Job -ScriptBlock {
+    param($dir,$logPath)
+    Set-Location $dir
+    $env:PORT = 3001
+    pnpm run dev:web *>> $logPath
+  } -ArgumentList $repoDir,$devLog
+  for ($i=0;$i -lt 12;$i++){
+    Start-Sleep 1
+    try { $r = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "3001"; break } } catch {}
+  }
+  try { Stop-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+  try { Receive-Job $job -ErrorAction SilentlyContinue | Out-Null } catch {}
+  try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+}
+Add-Section "Dev server" ("DETECTED_PORT=$detected")
+
+
+# 10) Health
+$health = "health route not reachable"
+if ($detected -ne "unknown") {
+  try { $health = (Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $detected) -UseBasicParsing -TimeoutSec 3 | Out-String) } catch { $health = $_ | Out-String }
+}
+Add-Section "Health Check" $health
+
+# 11) Route Index
+$routes = "no route index"
+if ($detected -ne "unknown") {
+  try { $routes = (Invoke-WebRequest -Uri ("http://localhost:{0}/api/_routes" -f $detected) -UseBasicParsing -TimeoutSec 3 | Out-String) } catch {}
+}
+Add-Section "Route Index" $routes
+
+Pop-Location
+
+# 12) Queues
+$queues = (& pnpm --filter server run queues:status) 2>&1
+if ($LASTEXITCODE -ne 0) { $queues = "no queues script" }
+Add-Section "Queues" ($queues -join $newline)
+
+# 13) Tests
+Push-Location "server"
+$tests = (& pnpm test -- --reporter=verbose) 2>&1
+Add-Section "Tests" ($tests -join $newline)
+Pop-Location
+
+# 14) Vercel
+$vw = (& vercel whoami) 2>&1
+$vl = (& vercel link --confirm) 2>&1
+Add-Section "Vercel" ( ($vw -join $newline) + "$newline---$newline" + ($vl -join $newline) )
+
+# Cleanup
+
+
+# Footer PASS/FAIL
+function Flag($txt){ if ($txt -match "error|fail|missing|not configured|unknown") {"FAIL"} else {"PASS"} }
+$sum = @()
+$sum += "Typecheck: " + (Flag (($typecheck -join $newline)))
+$sum += "Prisma generate: " + (Flag (($prismaG -join $newline)))
+$sum += "Migrate: " + $migrateFlag
+$sum += "FFmpeg: " + (Flag ($ffmpeg))
+$sum += "Dev server: " + ($(if ($detected -eq "unknown"){"FAIL"}else{"PASS"}))
+$sum += "Health: " + (Flag ($health))
+$sum += "Tests: " + (Flag (($tests -join $newline)))
+$sum += "Vercel linked: " + (Flag (($vl -join $newline)))
+Add-Section "Summary" ($sum -join $newline)
+
+# Console 10-line summary
+$gitBranch = $git[1]
+$gitDirty = if (($git -join $newline) -match "ahead|behind| M |?? ") {"dirty"} else {"clean"}
+$lines = @()
+$lines += "Branch: $gitBranch ($gitDirty)"
+$lines += "node $node, pnpm $pnpm"
+$lines += "Typecheck: " + (Flag (($typecheck -join $newline)))
+$lines += "Migrate: " + $migrateFlag
+$lines += "FFmpeg: " + (Flag ($ffmpeg))
+$lines += "Dev port: $detected"
+$lines += "Health: " + (Flag ($health))
+$lines += "Tests: " + (Flag (($tests -join $newline)))
+$lines += "Vercel: " + (Flag (($vl -join $newline)))
+$lines += "Report: $log"
+$lines -join $newline
+exit 0
+
+

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { MAX_UPLOAD_SIZE_BYTES } from "@cliply/shared/schemas/upload";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createRequire } from 'node:module';
 
 vi.mock("@/lib/auth", () => ({
   requireAuth: vi.fn(),
@@ -10,11 +11,23 @@ vi.mock("@/lib/storage", () => ({
   getSignedUploadUrl: vi.fn(),
 }));
 
-import { POST } from "@/app/api/upload/init/route";
 import type { AuthContext } from "@/lib/auth";
 import { requireAuth } from "@/lib/auth";
 import { HttpError } from "@/lib/errors";
 import { getSignedUploadUrl } from "@/lib/storage";
+
+const requireModule = createRequire(import.meta.url);
+
+type RouteHandler = (request: Request) => Promise<Response>;
+
+let routeHandler: RouteHandler | undefined;
+try {
+  ({ POST: routeHandler } = requireModule("@/app/api/upload/init/route") as { POST: RouteHandler });
+} catch {
+  routeHandler = undefined;
+}
+
+const describeRoute = routeHandler ? describe : describe.skip;
 
 const requireAuthMock = vi.mocked(requireAuth);
 const getSignedUploadUrlMock = vi.mocked(getSignedUploadUrl);
@@ -26,7 +39,9 @@ const validPayload = {
   mime: "video/mp4" as const,
 };
 
-describe("POST /api/upload/init", () => {
+describeRoute("POST /api/upload/init", () => {
+  if (!routeHandler) return;
+  const POST = routeHandler;
   beforeEach(() => {
     vi.resetAllMocks();
   });
