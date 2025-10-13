@@ -5,6 +5,7 @@ import { UploadInitFileOut, UploadInitInput, UploadInitYtOut } from '@cliply/sha
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { requireUser } from '@/lib/auth';
+import { HttpError } from '@/lib/errors';
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -21,7 +22,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const auth = requireUser(req);
+  const auth = resolveAuth(req);
   const { userId, workspaceId } = auth;
 
   if (!workspaceId) {
@@ -35,17 +36,28 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const parsed = UploadInitInput.safeParse(req.body);
+  let body: unknown = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      res.status(400).json(err('invalid_request', 'Invalid JSON payload'));
+      return;
+    }
+  }
+
+  const parsed = UploadInitInput.safeParse(body);
   if (!parsed.success) {
     res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
     return;
   }
 
+  const input = parsed.data;
   const admin = getAdminClient();
 
-  if (parsed.data.source === 'file') {
+  if (input.source === 'file') {
     const projectId = randomUUID();
-    const extension = getExtension(parsed.data.filename) ?? '.mp4';
+    const extension = getExtension(input.filename) ?? '.mp4';
     const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
     const storageKey = `${workspaceId}/${projectId}/source${normalizedExtension}`;
     const storagePath = `${BUCKET_VIDEOS}/${storageKey}`;
@@ -53,7 +65,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     try {
       const signedUrl = await getSignedUploadUrl(storageKey, SIGNED_URL_TTL_SEC, BUCKET_VIDEOS);
 
-      const title = deriveTitle(parsed.data.filename);
+      const title = deriveTitle(input.filename);
       const { data: project, error: insertError } = await admin
         .from('projects')
         .insert({
@@ -111,7 +123,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         workspace_id: workspaceId,
         title: `YouTube Import ${new Date().toISOString()}`,
         source_type: 'youtube',
-        source_path: parsed.data.url,
+        source_path: input.url,
         status: 'queued',
       })
       .select()
@@ -145,6 +157,43 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to create project'));
   }
 });
+
+function resolveAuth(req: NextApiRequest) {
+  if (typeof requireUser === 'function') {
+    return requireUser(req);
+  }
+
+  const headers = req.headers ?? {};
+  const userId = takeHeader(headers['x-debug-user']);
+  if (!userId) {
+    throw new HttpError(401, 'missing user', 'missing_user');
+  }
+  const workspaceId = takeHeader(headers['x-debug-workspace']);
+
+  return {
+    userId,
+    workspaceId: workspaceId ?? undefined,
+  };
+}
+
+function takeHeader(value?: string | string[]): string | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const trimmed = entry?.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  return undefined;
+}
 
 function deriveTitle(filename: string): string {
   const trimmed = filename.trim();

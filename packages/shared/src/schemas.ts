@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 
 import {
   EXTENSION_MIME_MAP,
@@ -159,14 +159,5 @@ export const ProductAttachInput = z
 
 /** ---------- Types from schemas ---------- */
 
-export type TUploadInitInput = z.infer<typeof UploadInitInput>;
-export type TUploadInitFileOut = z.infer<typeof UploadInitFileOut>;
-export type TUploadInitYtOut = z.infer<typeof UploadInitYtOut>;
-export type TClipMetaUpdateInput = z.infer<typeof ClipMetaUpdateInput>;
-export type TClipApproveInput = z.infer<typeof ClipApproveInput>;
-export type TClipRejectInput = z.infer<typeof ClipRejectInput>;
-export type TAIClipMetaRequest = z.infer<typeof AIClipMetaRequest>;
-export type TAIClipMetaResponse = z.infer<typeof AIClipMetaResponse>;
-export type TPublishYouTubeInput = z.infer<typeof PublishYouTubeInput>;
-export type TScheduleCancelInput = z.infer<typeof ScheduleCancelInput>;
-export type TProductAttachInput = z.infer<typeof ProductAttachInput>;
+
+export * from './schemas/jobs';

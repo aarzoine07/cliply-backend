@@ -1,48 +1,51 @@
 {
-  "name": "cliply-backend",
-  "private": true,
-  "packageManager": "pnpm@10.15.0",
-  "scripts": {
-    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
-    "build": "pnpm -r build",
-    "lint": "eslint .",
-    "typecheck": "tsc -b",
-    "test": "vitest run --reporter=verbose",
-    "format": "prettier . --check",
-    "format:write": "prettier . --write",
-    "devcheck": "bash scripts/dev-check.sh",
-    "test:watch": "vitest",
-    "worker": "pnpm --filter @cliply/worker dev",
-    "web": "pnpm --filter @cliply/web dev",
-    "db:gen": "ts-node ./scripts/gen-types.ts"
-  },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "devDependencies": {
-    "@eslint/js": "^9.36.0",
-    "@types/express": "^5.0.3",
-    "@types/node": "^24.5.2",
-    "@types/supertest": "^6.0.3",
-    "@typescript-eslint/eslint-plugin": "^8.44.0",
-    "@typescript-eslint/parser": "^8.44.0",
-    "@vitest/coverage-v8": "^3.2.4",
-    "eslint": "^9.36.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import": "^2.32.0",
-    "express": "^5.1.0",
-    "globals": "^16.4.0",
-    "prettier": "^3.6.2",
-    "supertest": "^7.1.4",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.19.0",
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.57.4",
-    "zod": "^4.1.9"
-  },
-  "type": "module"
+    "name":  "cliply-backend",
+    "private":  true,
+    "packageManager":  "pnpm@10.15.0",
+    "scripts":  {
+                    "dev":  "pnpm --parallel --filter \"./apps/*\" dev",
+                    "build":  "pnpm -r build",
+                    "lint":  "eslint .",
+                    "typecheck":  "tsc -b",
+                    "test":  "vitest run --reporter=verbose",
+                    "format":  "prettier . --check",
+                    "format:write":  "prettier . --write",
+                    "devcheck":  "bash scripts/dev-check.sh",
+                    "test:watch":  "vitest",
+                    "worker":  "pnpm --filter @cliply/worker dev",
+                    "web":  "pnpm --filter @cliply/web dev",
+                    "db:gen":  "ts-node ./scripts/gen-types.ts",
+                    "db:apply:sql":  "tsx scripts/db/apply-sql.ts",
+                    "dev:web":  "tsx apps/web/src/server.ts"
+                },
+    "workspaces":  [
+                       "apps/*",
+                       "packages/*"
+                   ],
+    "devDependencies":  {
+                            "@eslint/js":  "^9.36.0",
+                            "@types/express":  "^5.0.3",
+                            "@types/node":  "^24.5.2",
+                            "@types/supertest":  "^6.0.3",
+                            "@typescript-eslint/eslint-plugin":  "^8.44.0",
+                            "@typescript-eslint/parser":  "^8.44.0",
+                            "@vitest/coverage-v8":  "^3.2.4",
+                            "eslint":  "^9.36.0",
+                            "eslint-config-prettier":  "^10.1.8",
+                            "eslint-plugin-import":  "^2.32.0",
+                            "express":  "^5.1.0",
+                            "globals":  "^16.4.0",
+                            "pg":  "^8.16.3",
+                            "prettier":  "^3.6.2",
+                            "supertest":  "^7.1.4",
+                            "ts-node":  "^10.9.2",
+                            "tsx":  "^4.20.5",
+                            "typescript":  "^5.9.2",
+                            "vitest":  "^3.2.4"
+                        },
+    "dependencies":  {
+                         "@supabase/supabase-js":  "^2.57.4",
+                         "zod":  "^4.1.9"
+                     },
+    "type":  "module"
 }

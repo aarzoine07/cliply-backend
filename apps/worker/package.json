@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -b",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts"
   }

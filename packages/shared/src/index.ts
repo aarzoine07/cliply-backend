@@ -16,8 +16,3 @@ export {
   UploadInitInputSchema,
   UploadInitResponseSchema,
 } from "./schemas/upload";
-
-export type {
-  UploadInitInput,
-  UploadInitResponse,
-} from "./schemas/upload";
