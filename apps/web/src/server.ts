@@ -33,7 +33,7 @@ app.get("/api/health", async (_req, res) => {
   try {
     client = new Client({
       connectionString: url,
-      ssl: { require: true, rejectUnauthorized: false },
+ssl: { rejectUnauthorized: false },
       connectionTimeoutMillis: 8000,
     });
     await client.connect();

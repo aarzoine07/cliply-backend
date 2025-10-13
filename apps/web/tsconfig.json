@@ -32,7 +32,8 @@
     "emitDeclarationOnly": true,
     "declarationDir": "../../node_modules/.cache/cliply-types/apps-web",
     "tsBuildInfoFile": "../../node_modules/.cache/cliply-types/apps-web.tsbuildinfo",
-    "noEmit": false
+    "noEmit": false,
+    "module": "esnext"
   },
   "include": [
     "src",
