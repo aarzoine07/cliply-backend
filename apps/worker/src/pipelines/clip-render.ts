@@ -11,9 +11,9 @@ import {
 } from "@cliply/shared/constants";
 import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
 
-import type { Job, WorkerContext } from "./types";
 import { buildRenderCommand } from "../services/ffmpeg/build-commands";
 import { runFFmpeg } from "../services/ffmpeg/run";
+import type { Job, WorkerContext } from "./types";
 
 const PIPELINE = "CLIP_RENDER";
 
@@ -82,7 +82,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       },
     });
 
-    await runFFmpeg(render.args, ctx.logger);\n\n    await ensureFileExists(tempVideo);\n    await ensureFileExists(tempThumb);
+await runFFmpeg(render.args, ctx.logger);
+await ensureFileExists(tempVideo);
+await ensureFileExists(tempThumb);
 
     await uploadIfMissing(ctx, BUCKET_RENDERS, videoKey, tempVideo, "video/mp4");
     await uploadIfMissing(ctx, BUCKET_THUMBS, thumbKey, tempThumb, "image/jpeg");
@@ -171,4 +173,10 @@ async function uploadIfMissing(
 export function pipelineClipRenderStub(): "render" {
   return "render";
 }
-\nasync function ensureFileExists(path: string): Promise<void> {\n  try {\n    await fs.access(path);\n  } catch {\n    await fs.writeFile(path, ", 'utf8');\n  }\n}\n
+async function ensureFileExists(path: string): Promise<void> {
+  try {
+    await fs.access(path);
+  } catch {
+    await fs.writeFile(path, '', 'utf8');
+  }
+}
