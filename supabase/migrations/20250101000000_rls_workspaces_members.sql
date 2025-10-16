@@ -47,10 +47,9 @@ DROP POLICY IF EXISTS workspaces_owner_read ON public.workspaces;
 CREATE POLICY workspaces_owner_read
   ON public.workspaces
   FOR SELECT
-  USING (auth.uid() IS NOT NULL AND auth.uid() = owner_id)
-  WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = owner_id);
-COMMENT ON POLICY workspaces_owner_read ON public.workspaces
-  IS 'Permits workspace owners to read their own workspace records.';
+  USING (auth.uid() IS NOT NULL AND auth.uid() = owner_id);
+COMMENT ON POLICY workspaces_owner_read ON public.workspaces IS
+  'Owners can read their own workspace.';
 
 DROP POLICY IF EXISTS workspaces_owner_update ON public.workspaces;
 CREATE POLICY workspaces_owner_update
@@ -65,8 +64,7 @@ DROP POLICY IF EXISTS workspaces_owner_delete ON public.workspaces;
 CREATE POLICY workspaces_owner_delete
   ON public.workspaces
   FOR DELETE
-  USING (auth.uid() IS NOT NULL AND auth.uid() = owner_id)
-  WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = owner_id);
+  USING (auth.uid() IS NOT NULL AND auth.uid() = owner_id);
 COMMENT ON POLICY workspaces_owner_delete ON public.workspaces
   IS 'Restricts workspace deletions to the owning user.';
 
@@ -74,10 +72,9 @@ DROP POLICY IF EXISTS workspaces_owner_insert ON public.workspaces;
 CREATE POLICY workspaces_owner_insert
   ON public.workspaces
   FOR INSERT
-  USING (auth.uid() IS NOT NULL)
   WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = owner_id);
 COMMENT ON POLICY workspaces_owner_insert ON public.workspaces
-  IS 'Allows any authenticated user to create a workspace they personally own.';
+  IS 'Ensures inserted workspaces are owned by the current user.';
 
 -- =============================
 -- workspace_members RLS policies
@@ -103,15 +100,6 @@ CREATE POLICY workspace_members_member_read
       WHERE wm_self.workspace_id = workspace_members.workspace_id
         AND wm_self.user_id = auth.uid()
     )
-  )
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm_self
-      WHERE wm_self.workspace_id = workspace_members.workspace_id
-        AND wm_self.user_id = auth.uid()
-    )
   );
 COMMENT ON POLICY workspace_members_member_read ON public.workspace_members
   IS 'Allows workspace members to view the roster for workspaces they belong to.';
@@ -120,7 +108,6 @@ DROP POLICY IF EXISTS workspace_members_owner_insert ON public.workspace_members
 CREATE POLICY workspace_members_owner_insert
   ON public.workspace_members
   FOR INSERT
-  USING (auth.uid() IS NOT NULL)
   WITH CHECK (
     auth.uid() IS NOT NULL
     AND EXISTS (
@@ -163,15 +150,6 @@ CREATE POLICY workspace_members_owner_delete
   ON public.workspace_members
   FOR DELETE
   USING (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspaces w
-      WHERE w.id = workspace_members.workspace_id
-        AND w.owner_id = auth.uid()
-    )
-  )
-  WITH CHECK (
     auth.uid() IS NOT NULL
     AND EXISTS (
       SELECT 1

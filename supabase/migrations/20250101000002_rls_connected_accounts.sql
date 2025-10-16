@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS public.connected_accounts (
   workspace_id uuid NOT NULL REFERENCES public.workspaces (id) ON DELETE CASCADE,
   platform text NOT NULL CHECK (platform IN ('tiktok', 'youtube')),
   account_username text,
-  access_token_encrypted_ref text,
-  refresh_token_encrypted_ref text,
+  --access_token_encrypted_ref text,
+  --refresh_token_encrypted_ref text,
   scopes text[],
   expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -19,10 +19,12 @@ CREATE TABLE IF NOT EXISTS public.connected_accounts (
 );
 
 COMMENT ON TABLE public.connected_accounts IS 'External social accounts connected per workspace; tokens stored as encrypted references.';
-COMMENT ON COLUMN public.connected_accounts.access_token_encrypted_ref IS 'Opaque reference to encrypted access token material; never store plaintext tokens.';
-COMMENT ON COLUMN public.connected_accounts.refresh_token_encrypted_ref IS 'Opaque reference to encrypted refresh token material; never store plaintext tokens.';
+--COMMENT ON COLUMN public.connected_accounts.access_token_encrypted_ref IS 'Opaque reference to encrypted access token material; never store plaintext tokens.';
+--COMMENT ON COLUMN public.connected_accounts.refresh_token_encrypted_ref IS 'Opaque reference to encrypted refresh token material; never store plaintext tokens.';
 
 CREATE INDEX IF NOT EXISTS idx_connected_accounts_workspace_id ON public.connected_accounts (workspace_id);
+
+ALTER TABLE public.connected_accounts ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 CREATE INDEX IF NOT EXISTS idx_connected_accounts_expires_at ON public.connected_accounts (expires_at);
 
 ALTER TABLE public.connected_accounts ENABLE ROW LEVEL SECURITY;
@@ -45,15 +47,6 @@ CREATE POLICY connected_accounts_workspace_member_read
   ON public.connected_accounts
   FOR SELECT
   USING (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm
-      WHERE wm.workspace_id = connected_accounts.workspace_id
-        AND wm.user_id = auth.uid()
-    )
-  )
-  WITH CHECK (
     auth.uid() IS NOT NULL
     AND EXISTS (
       SELECT 1

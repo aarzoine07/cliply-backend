@@ -36,8 +36,7 @@ DROP POLICY IF EXISTS users_self_select ON public.users;
 CREATE POLICY users_self_select
   ON public.users
   FOR SELECT
-  USING (auth.uid() IS NOT NULL AND auth.uid() = id)
-  WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = id);
+  USING (auth.uid() IS NOT NULL AND auth.uid() = id);
 COMMENT ON POLICY users_self_select ON public.users
   IS 'Allows each authenticated user to fetch their own profile row only.';
 
@@ -54,8 +53,7 @@ DROP POLICY IF EXISTS users_self_delete ON public.users;
 CREATE POLICY users_self_delete
   ON public.users
   FOR DELETE
-  USING (auth.uid() IS NOT NULL AND auth.uid() = id)
-  WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = id);
+  USING (auth.uid() IS NOT NULL AND auth.uid() = id);
 COMMENT ON POLICY users_self_delete ON public.users
   IS 'Restricts profile deletions to the corresponding user.';
 
@@ -63,7 +61,6 @@ DROP POLICY IF EXISTS users_self_insert ON public.users;
 CREATE POLICY users_self_insert
   ON public.users
   FOR INSERT
-  USING (auth.uid() IS NOT NULL)
   WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = id);
 COMMENT ON POLICY users_self_insert ON public.users
   IS 'Allows authenticated users to insert a profile row that matches their auth user id.';

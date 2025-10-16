@@ -68,15 +68,6 @@ CREATE POLICY events_audit_workspace_member_read
       WHERE wm.workspace_id = events_audit.workspace_id
         AND wm.user_id = auth.uid()
     )
-  )
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm
-      WHERE wm.workspace_id = events_audit.workspace_id
-        AND wm.user_id = auth.uid()
-    )
   );
 COMMENT ON POLICY events_audit_workspace_member_read ON public.events_audit
   IS 'Permits workspace members to view audit events belonging to their workspace.';
@@ -85,12 +76,9 @@ DROP POLICY IF EXISTS events_audit_service_insert ON public.events_audit;
 CREATE POLICY events_audit_service_insert
   ON public.events_audit
   FOR INSERT
-  USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 COMMENT ON POLICY events_audit_service_insert ON public.events_audit
   IS 'Restricts audit log insertion to service_role jobs to maintain integrity.';
-
--- No explicit UPDATE/DELETE policies for non-service roles; absence blocks client writes.
 
 -- =============================
 -- dmca_reports RLS policies
@@ -116,15 +104,6 @@ CREATE POLICY dmca_reports_workspace_member_read
       WHERE wm.workspace_id = dmca_reports.workspace_id
         AND wm.user_id = auth.uid()
     )
-  )
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm
-      WHERE wm.workspace_id = dmca_reports.workspace_id
-        AND wm.user_id = auth.uid()
-    )
   );
 COMMENT ON POLICY dmca_reports_workspace_member_read ON public.dmca_reports
   IS 'Permits workspace members to review DMCA reports tied to their workspace.';
@@ -133,15 +112,6 @@ DROP POLICY IF EXISTS dmca_reports_member_insert ON public.dmca_reports;
 CREATE POLICY dmca_reports_member_insert
   ON public.dmca_reports
   FOR INSERT
-  USING (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm
-      WHERE wm.workspace_id = dmca_reports.workspace_id
-        AND wm.user_id = auth.uid()
-    )
-  )
   WITH CHECK (
     auth.uid() IS NOT NULL
     AND dmca_reports.reporter_id = auth.uid()
@@ -163,5 +133,3 @@ CREATE POLICY dmca_reports_service_update
   WITH CHECK (auth.role() = 'service_role');
 COMMENT ON POLICY dmca_reports_service_update ON public.dmca_reports
   IS 'Restricts DMCA status updates to service_role moderation systems.';
-
--- No explicit DELETE policy: only service_role (via full access) can remove rows.
