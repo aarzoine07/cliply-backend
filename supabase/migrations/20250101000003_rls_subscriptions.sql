@@ -53,15 +53,6 @@ CREATE POLICY subscriptions_workspace_member_read
       WHERE wm.workspace_id = subscriptions.workspace_id
         AND wm.user_id = auth.uid()
     )
-  )
-  WITH CHECK (
-    auth.uid() IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM public.workspace_members wm
-      WHERE wm.workspace_id = subscriptions.workspace_id
-        AND wm.user_id = auth.uid()
-    )
   );
 COMMENT ON POLICY subscriptions_workspace_member_read ON public.subscriptions
   IS 'Permits workspace members to view billing data for their own workspace only.';
@@ -70,7 +61,6 @@ DROP POLICY IF EXISTS subscriptions_service_insert ON public.subscriptions;
 CREATE POLICY subscriptions_service_insert
   ON public.subscriptions
   FOR INSERT
-  USING (auth.role() = 'service_role')
   WITH CHECK (auth.role() = 'service_role');
 COMMENT ON POLICY subscriptions_service_insert ON public.subscriptions
   IS 'Restricts subscription record creation to service role handlers (Stripe webhooks).';

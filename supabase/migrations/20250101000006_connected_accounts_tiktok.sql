@@ -1,14 +1,15 @@
--- Supabase migration: TikTok connected accounts model with strict RLS.
+-- Supabase migration: TikTok connected accounts model with workspace-scoped RLS.
+-- Ensures multi-tenant isolation with explicit service_role bypass.
 
 SET check_function_bodies = off;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Ensure the connected_accounts table exists with required columns.
+-- Ensure base table and required columns exist
 CREATE TABLE IF NOT EXISTS public.connected_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id uuid NOT NULL REFERENCES public.workspaces (id) ON DELETE CASCADE,
-  platform text NOT NULL,
+  workspace_id uuid REFERENCES public.workspaces (id) ON DELETE CASCADE,
+  platform text,
   access_token_encrypted_ref text,
   refresh_token_encrypted_ref text,
   scopes text[],
@@ -17,30 +18,39 @@ CREATE TABLE IF NOT EXISTS public.connected_accounts (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Standardize column definitions for TikTok-only usage.
+-- Add missing columns if table already existed
+ALTER TABLE public.connected_accounts
+  ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES public.workspaces (id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS platform text,
+  ADD COLUMN IF NOT EXISTS access_token_encrypted_ref text,
+  ADD COLUMN IF NOT EXISTS refresh_token_encrypted_ref text,
+  ADD COLUMN IF NOT EXISTS scopes text[],
+  ADD COLUMN IF NOT EXISTS expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+-- Ensure NOT NULL constraints apply safely
 ALTER TABLE public.connected_accounts
   ALTER COLUMN workspace_id SET NOT NULL,
   ALTER COLUMN platform SET NOT NULL;
 
--- Restrict platform values to TikTok only.
+-- Update constraints and indexes
 ALTER TABLE public.connected_accounts
   DROP CONSTRAINT IF EXISTS connected_accounts_platform_check;
 ALTER TABLE public.connected_accounts
   ADD CONSTRAINT connected_accounts_platform_check
   CHECK (platform IN ('tiktok'));
 
--- Remove legacy unique constraints to replace with desired unique index.
 ALTER TABLE public.connected_accounts
   DROP CONSTRAINT IF EXISTS connected_accounts_workspace_platform_unique;
 
--- Create indexes for uniqueness and token expiry lookups.
 CREATE UNIQUE INDEX IF NOT EXISTS connected_accounts_workspace_platform_key
   ON public.connected_accounts (workspace_id, platform);
 
 CREATE INDEX IF NOT EXISTS connected_accounts_expires_idx
   ON public.connected_accounts (expires_at);
 
--- Descriptive comments for security-sensitive columns.
+-- Comments for documentation
 COMMENT ON TABLE public.connected_accounts
   IS 'OAuth accounts connected per workspace; stores references to encrypted tokens for TikTok.';
 
@@ -53,7 +63,7 @@ COMMENT ON COLUMN public.connected_accounts.refresh_token_encrypted_ref
 COMMENT ON COLUMN public.connected_accounts.scopes
   IS 'TikTok OAuth scopes associated with this connection (e.g. video.upload, video.publish).';
 
--- Keep timestamps current on update.
+-- Maintain updated_at automatically
 CREATE OR REPLACE FUNCTION public.set_connected_accounts_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -70,12 +80,11 @@ CREATE TRIGGER trg_connected_accounts_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION public.set_connected_accounts_updated_at();
 
--- ============================================================
--- Row-Level Security policies for multi-tenant access control.
--- ============================================================
+-- Enable and enforce RLS
 ALTER TABLE public.connected_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.connected_accounts FORCE ROW LEVEL SECURITY;
 
+-- RLS policies
 DROP POLICY IF EXISTS service_role_full_access ON public.connected_accounts;
 CREATE POLICY service_role_full_access
   ON public.connected_accounts
@@ -99,5 +108,3 @@ CREATE POLICY workspace_member_read
   );
 COMMENT ON POLICY workspace_member_read ON public.connected_accounts
   IS 'Allows workspace members to view connected account metadata for their workspace.';
-
--- End of migration.

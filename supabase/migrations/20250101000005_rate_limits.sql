@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.rate_limits (
 
 COMMENT ON TABLE public.rate_limits IS 'Workspace-scoped token buckets used for request throttling and feature gating.';
 
+ALTER TABLE public.rate_limits ADD COLUMN IF NOT EXISTS workspace_id uuid;
 CREATE INDEX IF NOT EXISTS idx_rate_limits_workspace_id ON public.rate_limits (workspace_id);
 
 -- ============================================================
@@ -141,5 +142,3 @@ CREATE POLICY rate_limits_workspace_member_read
   );
 COMMENT ON POLICY rate_limits_workspace_member_read ON public.rate_limits
   IS 'Allows workspace members to read their own rate limit configuration.';
-
--- End of migration.
