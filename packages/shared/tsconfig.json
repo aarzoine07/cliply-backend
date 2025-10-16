@@ -10,7 +10,10 @@
     "noEmit": false
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "auth/**/*.ts",
+    "billing/**/*.ts",
+    "types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
