@@ -1,4 +1,5 @@
-import { PLAN_MATRIX, type PlanLimits, type PlanName } from "@cliply/shared/billing/planMatrix";
+import { PLAN_MATRIX, type PlanLimits } from "@cliply/shared/billing/planMatrix";
+import type { PlanName } from "@cliply/shared/types/auth";
 
 const BILLING_PLAN_REQUIRED = "BILLING_PLAN_REQUIRED" as const;
 const BILLING_PLAN_LIMIT = "BILLING_PLAN_LIMIT" as const;

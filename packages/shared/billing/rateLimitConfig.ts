@@ -1,11 +1,4 @@
-export type RateLimitFeature = "upload" | "render" | "publish" | "ai_caption";
-
-export interface RateLimitDefinition {
-  /** Maximum tokens allowed in the bucket at any given time. */
-  capacity: number;
-  /** Tokens refilled per hour for the feature bucket. */
-  refill_rate: number;
-}
+import type { RateLimitDefinition, RateLimitFeature } from "../types/rateLimit";
 
 export type RateLimitConfig = Record<RateLimitFeature, RateLimitDefinition>;
 

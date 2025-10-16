@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
-import type { PlanName } from "@cliply/shared/billing/planMatrix";
+import type { PlanName } from "@cliply/shared/types/auth";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -45,7 +45,6 @@ function mapSubscriptionStatus(status: Stripe.Subscription.Status): SupportedSub
     case "incomplete":
     case "incomplete_expired":
     case "paused":
-    case "draft":
       return "incomplete";
     default:
       return "incomplete";

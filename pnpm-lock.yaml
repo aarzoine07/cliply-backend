@@ -75,6 +75,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@cliply/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       next:
         specifier: 14.2.3
         version: 14.2.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -84,6 +87,9 @@ importers:
       react-dom:
         specifier: 18.3.1
         version: 18.3.1(react@18.3.1)
+      stripe:
+        specifier: ^14.23.0
+        version: 14.25.0
     devDependencies:
       '@types/pg':
         specifier: ^8.15.5
@@ -101,7 +107,17 @@ importers:
         specifier: ^9.5.4
         version: 9.5.4(typescript@5.9.2)(webpack@5.102.1)
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@cliply/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@supabase/supabase-js':
+        specifier: ^2.57.4
+        version: 2.57.4
+      stripe:
+        specifier: ^14.23.0
+        version: 14.25.0
 
   packages/shared: {}
 
@@ -2253,6 +2269,10 @@ packages:
 
   strip-literal@3.0.0:
     resolution: {integrity: sha512-TcccoMhJOM3OebGhSBEmp3UZ2SfDMZUEBdRA/9ynfLi8yYajyWX3JiXArcJt4Umh4vISpspkQIY8ZZoCqjbviA==}
+
+  stripe@14.25.0:
+    resolution: {integrity: sha512-wQS3GNMofCXwH8TSje8E1SE8zr6ODiGtHQgPtO95p9Mb4FhKC9jvXR2NUTpZ9ZINlckJcFidCmaTFV4P6vsb9g==}
+    engines: {node: '>=12.*'}
 
   styled-jsx@5.1.1:
     resolution: {integrity: sha512-pW7uC1l4mBZ8ugbiZrcIsiIvVx1UmTfw7UkC3Um2tmfUq9Bhk8IiyEIPl6F8agHgjzku6j0xQEZbfA5uSgSaCw==}
@@ -4924,6 +4944,11 @@ snapshots:
   strip-literal@3.0.0:
     dependencies:
       js-tokens: 9.0.1
+
+  stripe@14.25.0:
+    dependencies:
+      '@types/node': 24.5.2
+      qs: 6.14.0
 
   styled-jsx@5.1.1(react@18.3.1):
     dependencies:

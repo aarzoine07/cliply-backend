@@ -49,7 +49,7 @@ export async function refreshTikTokTokensJob(): Promise<void> {
   const threshold = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
   const { data: accounts, error } = await supabase
-    .from<ConnectedAccountRow>("connected_accounts")
+    .from("connected_accounts")
     .select("workspace_id, access_token_encrypted_ref, refresh_token_encrypted_ref, expires_at")
     .eq("platform", "tiktok")
     .lte("expires_at", threshold);
@@ -64,13 +64,15 @@ export async function refreshTikTokTokensJob(): Promise<void> {
     return;
   }
 
-  for (const account of accounts) {
+  const typedAccounts = accounts as ConnectedAccountRow[];
+
+  for (const account of typedAccounts) {
     try {
       const refreshToken = await sealedBoxDecryptRef(account.refresh_token_encrypted_ref);
 
       const form = new URLSearchParams({
-        client_key: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
+        client_key: CLIENT_ID!,
+        client_secret: CLIENT_SECRET!,
         grant_type: "refresh_token",
         refresh_token: refreshToken,
       });
@@ -87,11 +89,11 @@ export async function refreshTikTokTokensJob(): Promise<void> {
         continue;
       }
 
-      const payload: {
+      const payload = (await response.json()) as {
         access_token?: string;
         refresh_token?: string;
         expires_in?: number;
-      } = await response.json();
+      };
 
       if (!payload.access_token || !payload.refresh_token || !payload.expires_in) {
         console.error(`⚠️ Missing fields in refresh response for ${account.workspace_id}`);
