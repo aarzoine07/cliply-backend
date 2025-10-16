@@ -4,7 +4,19 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./auth/context": "./auth/context.ts",
+    "./types/auth": "./types/auth.ts",
+    "./types/billing": "./types/billing.ts",
+    "./types/rateLimit": "./types/rateLimit.ts",
+    "./billing/planMatrix": "./billing/planMatrix.ts",
+    "./billing/planGate": "./billing/planGate.ts",
+    "./billing/stripePlanMap": "./billing/stripePlanMap.ts",
+    "./billing/checkRateLimit": "./billing/checkRateLimit.ts",
+    "./billing/rateLimitConfig": "./billing/rateLimitConfig.ts",
+    "./logging/redactSensitive": "./logging/redactSensitive.ts",
+    "./logging/logger": "./logging/logger.ts",
+    "./logging/auditLogger": "./logging/auditLogger.ts"
   },
   "main": "./src/index.ts",
   "scripts": {
