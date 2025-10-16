@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
-import type { PlanName } from "@cliply/shared/billing/planMatrix";
+import type { PlanName } from "@cliply/shared/types/auth";
 import { BillingErrorCode, billingErrorResponse } from "@cliply/shared/types/billing";
 
 type SupportedSubscriptionStatus = "active" | "trialing" | "canceled" | "incomplete" | "past_due";
@@ -58,7 +58,6 @@ function mapSubscriptionStatus(status: Stripe.Subscription.Status): SupportedSub
     case "incomplete":
     case "incomplete_expired":
     case "paused":
-    case "draft":
       return "incomplete";
     default:
       return "incomplete";

@@ -1,9 +1,9 @@
+import type { PlanName } from "../types/auth";
+
 /**
  * Core Cliply plan capabilities used for gating features and enforcing quotas.
  * Values here must mirror Stripe product configuration and Supabase plan checks.
  */
-
-export type PlanName = "basic" | "growth" | "agency";
 
 /** Feature toggles supported by each plan. */
 export interface PlanFeature {

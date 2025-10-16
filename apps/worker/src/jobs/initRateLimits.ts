@@ -1,10 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  RATE_LIMIT_CONFIG,
-  type RateLimitFeature,
-} from "@cliply/shared/billing/rateLimitConfig";
-import type { PlanName } from "@cliply/shared/billing/planMatrix";
+import { RATE_LIMIT_CONFIG } from "@cliply/shared/billing/rateLimitConfig";
+import type { PlanName } from "@cliply/shared/types/auth";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -36,7 +33,7 @@ export async function initRateLimitsJob(): Promise<void> {
   console.log("⚙️ Starting rate-limit initializer...");
 
   const { data: subs, error } = await supabase
-    .from<SubscriptionRow>("subscriptions")
+    .from("subscriptions")
     .select("workspace_id, plan_name")
     .eq("status", "active");
 
@@ -50,7 +47,9 @@ export async function initRateLimitsJob(): Promise<void> {
     return;
   }
 
-  for (const sub of subs) {
+  const typedSubs = subs as SubscriptionRow[];
+
+  for (const sub of typedSubs) {
     const { workspace_id, plan_name } = sub;
     const plan = (plan_name ?? "basic") as PlanName;
     const config = RATE_LIMIT_CONFIG[plan];
@@ -60,7 +59,7 @@ export async function initRateLimitsJob(): Promise<void> {
       continue;
     }
 
-    for (const feature of Object.keys(config) as RateLimitFeature[]) {
+    for (const feature of Object.keys(config) as Array<keyof typeof config>) {
       const { capacity, refill_rate } = config[feature];
       const nowIso = new Date().toISOString();
 

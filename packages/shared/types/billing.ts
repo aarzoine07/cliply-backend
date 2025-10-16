@@ -26,13 +26,13 @@ export function billingErrorResponse(code: BillingErrorCode, message: string, st
   };
 }
 
-export interface PlanFeature {
+export interface BillingPlanFeatureDescriptor {
   key: string;
   label: string;
   description?: string;
 }
 
-export interface PlanGateResult {
+export interface BillingPlanGateResult {
   active: boolean;
   message?: string;
 }

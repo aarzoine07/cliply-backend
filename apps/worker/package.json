@@ -6,6 +6,11 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@cliply/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.57.4",
+    "stripe": "^14.23.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",

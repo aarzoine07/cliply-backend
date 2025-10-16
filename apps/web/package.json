@@ -10,9 +10,11 @@
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
+    "@cliply/shared": "workspace:*",
     "next": "14.2.3",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "stripe": "^14.23.0"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",
