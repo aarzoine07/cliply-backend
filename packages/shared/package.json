@@ -16,7 +16,9 @@
     "./billing/rateLimitConfig": "./billing/rateLimitConfig.ts",
     "./logging/redactSensitive": "./logging/redactSensitive.ts",
     "./logging/logger": "./logging/logger.ts",
-    "./logging/auditLogger": "./logging/auditLogger.ts"
+    "./logging/auditLogger": "./logging/auditLogger.ts",
+    "./logger": "./logger.ts",
+    "./sentry": "./sentry.ts"
   },
   "main": "./src/index.ts",
   "scripts": {

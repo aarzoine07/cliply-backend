@@ -9,6 +9,11 @@ const EnvSchema = z.object({
     SUPABASE_URL: z.string().url().optional(),
     SUPABASE_ANON_KEY: z.string().min(20).optional(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+    WORKER_POLL_MS: z.string().optional(),
+    WORKER_HEARTBEAT_MS: z.string().optional(),
+    WORKER_RECLAIM_MS: z.string().optional(),
+    WORKER_STALE_SECONDS: z.string().optional(),
+    LOG_SAMPLE_RATE: z.string().optional(),
     // Sentry / Stripe / Deepgram placeholders (we’ll add later steps)
     SENTRY_DSN: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),

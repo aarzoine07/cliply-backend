@@ -28,3 +28,4 @@ export * from "../types/rateLimit";
 export * from "../logging/redactSensitive";
 export * from "../logging/logger";
 export * from "../logging/auditLogger";
+export * from "./sentry";

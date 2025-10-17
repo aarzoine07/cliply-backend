@@ -14,7 +14,8 @@
     "auth/**/*.ts",
     "billing/**/*.ts",
     "types/**/*.ts",
-    "logging/**/*.ts"
+    "logging/**/*.ts",
+    "./*.ts"
   ],
   "exclude": [
     "node_modules"
