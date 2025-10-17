@@ -1,49 +1,45 @@
-﻿import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+﻿import { getEnv } from "../../../../packages/shared/env";
+import { logJSON } from "../../../../packages/shared/logger";
+import { Client } from "pg";
 
-import { getEnv } from './env';
+function addSslmodeRequire(url: string): string {
+  if (!url) return url;
+  if (url.includes("?")) return url.includes("sslmode=") ? url : url + "&sslmode=require";
+  return url + "?sslmode=require";
+}
 
-export type RlsClient = SupabaseClient;
-export type AdminClient = SupabaseClient;
+export async function pgCheck(): Promise<{ ok: boolean; db?: string; error?: string }> {
+  const { DATABASE_URL } = getEnv();
 
-const baseOptions = {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-} as const;
+  // Ensure sslmode=require at runtime (in-memory only)
+  const url = addSslmodeRequire(DATABASE_URL);
 
-let cachedAnon: SupabaseClient | null = null;
-let cachedAdmin: SupabaseClient | null = null;
+  // Scope TLS relaxers to this function only
+  const prevTLS = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  try {
+    if (prevTLS === undefined) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-export function getRlsClient(accessToken?: string): RlsClient {
-  const env = getEnv();
-
-  if (accessToken) {
-    return createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-      ...baseOptions,
-      global: {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const client = new Client({
+      connectionString: url,
+      ssl: { require: true, rejectUnauthorized: false },
+      connectionTimeoutMillis: 4000,
     });
-  }
 
-  if (!cachedAnon) {
-    cachedAnon = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, baseOptions);
+    try {
+      await client.connect();
+      const r = await client.query("select current_database() as db");
+      return { ok: true, db: r.rows?.[0]?.db ?? "unknown" };
+    } catch (e: any) {
+      logJSON({ service: "api", event: "pg_error", message: e?.message });
+      return { ok: false, error: e?.message ?? "unknown" };
+    } finally {
+      try { await client.end(); } catch {}
+    }
+  } finally {
+    // restore process env
+    if (prevTLS === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTLS;
   }
-
-  return cachedAnon;
 }
 
-export function getAdminClient(): AdminClient {
-  const env = getEnv();
-  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY missing');
-  }
 
-  if (!cachedAdmin) {
-    cachedAdmin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, baseOptions);
-  }
-
-  return cachedAdmin;
-}
