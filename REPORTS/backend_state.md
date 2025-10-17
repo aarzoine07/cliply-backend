@@ -1,109 +1,29 @@
-2025-10-09 03:40:24 -04:00
+ï»¿# Cliply Backend State
 
-# Cliply Backend State
+Generated: 2025-10-16 12:55:13 -04:00
 
 ## Git
 
+## main...origin/main
+ M REPORTS/backend_state.md
+ M apps/web/src/lib/supabase.ts
+ M apps/web/src/pages/api/health.ts
+ M apps/web/src/server.ts
+ M package.json
+ M scripts/snapshot.ps1
+ M vitest.config.ts
+?? packages/shared/env.ts
+?? packages/shared/logger.ts
+?? test/example.test.ts
+
 origin	https://github.com/aarzoine07/cliply-backend.git (fetch)
 origin	https://github.com/aarzoine07/cliply-backend.git (push)
-scaffold/step0-non-destructive
-## scaffold/step0-non-destructive...origin/scaffold/step0-non-destructive [ahead 1]
- M .vscode/settings.json
- M apps/web/package.json
- D apps/web/src/app/api/health/route.js
- D apps/web/src/app/api/health/route.ts
- D apps/web/src/app/api/upload/init/route.js
- D apps/web/src/app/api/upload/init/route.ts
- M apps/web/src/pages/api/clips/[id]/approve.ts
- M apps/web/src/pages/api/upload/init.ts
- M apps/web/test/api/upload-init.test.ts
- M apps/worker/package.json
- M apps/worker/src/jobs/backoff.ts
- M apps/worker/src/jobs/claim.ts
- M apps/worker/src/jobs/run.ts
- M apps/worker/src/pipelines/clip-render.ts
- M apps/worker/src/pipelines/highlight-detect.ts
- M apps/worker/src/pipelines/publish-youtube.ts
- M apps/worker/src/pipelines/thumbnail.ts
- M apps/worker/src/pipelines/transcribe.ts
- M apps/worker/src/services/captions/srt.ts
- M apps/worker/src/services/ffmpeg/build-commands.ts
- M apps/worker/src/services/ffmpeg/run.ts
- M apps/worker/src/services/transcriber/deepgram.ts
- M apps/worker/src/services/transcriber/index.ts
- M apps/worker/src/services/transcriber/whisper.ts
- M apps/worker/src/services/youtube/client.ts
- M package.json
- M packages/shared/src/index.ts
- M packages/shared/src/schemas.ts
- M packages/shared/src/schemas/upload.ts
- M pnpm-lock.yaml
-?? REPORTS/
-?? _supabase_cli/
-?? apps/web/src/server.ts
-?? apps/web/src/server.ts.bak-20251005042747
-?? apps/web/src/server.ts.bak-20251005042759
-?? apps/web/src/server.ts.bak-20251005045824
-?? apps/web/src/server.ts.bak-20251005050058
-?? apps/web/src/server.ts.bak-20251005065803
-?? apps/web/src/server.ts.bak-20251005070956
-?? apps/web/test/routes.duplication.guard.test.ts
-?? apps/worker/src/pipelines/types.ts
-?? apps/worker/test/
-?? packages/shared/src/schemas/index.ts
-?? packages/shared/src/schemas/jobs.ts
-?? scripts/db/
-?? scripts/snapshot.ps1
-?? scripts/snapshot.ps1.bak
-?? scripts/snapshot.ps1.bak-20251001-022017
-?? scripts/snapshot.ps1.bak-20251003133003
-?? scripts/snapshot.ps1.bak-20251003133944
-?? scripts/snapshot.ps1.bak-20251003141542
-?? scripts/snapshot.ps1.bak-20251003141627
-?? scripts/snapshot.ps1.bak-20251003141756
-?? scripts/snapshot.ps1.bak-20251003141811
-?? scripts/snapshot.ps1.bak-20251003151016
-?? scripts/snapshot.ps1.bak-20251003151108
-?? scripts/snapshot.ps1.bak-20251003155726
-?? scripts/snapshot.ps1.bak-20251005041743
-?? scripts/snapshot.ps1.bak-20251005041815
-?? scripts/snapshot.ps1.bak-20251005042001
-?? scripts/snapshot.ps1.bak-20251005042901
-?? scripts/snapshot.ps1.bak-20251005043146
-?? scripts/snapshot.ps1.bak-20251005142354
-?? scripts/snapshot.ps1.bak-20251005142424
-?? scripts/snapshot.ps1.bak-20251005142440
-?? scripts/snapshot.ps1.bak-20251005142501
-?? scripts/snapshot.ps1.bak-20251005142528
-?? scripts/snapshot.sh
-?? scripts/test.ps1
-?? supabase/
-?? temp_patch.diff
-?? test/worker/jobs.flow.test.ts
-?? tmp_dbcheck.js
-?? tmp_dbcheck.txt
-?? tmp_health.json
-?? tmp_list_tables.cjs
-?? tmp_list_tables.js
-?? tmp_logtail.txt
-?? tmp_masked.txt
-?? tmp_port.txt
-?? tmp_routes.json
-?? tmp_server_ok.txt
-?? tmp_server_pid.txt
-?? tmp_snapshot_output.txt
-?? tmp_snapshot_raw.txt
-?? tmp_summary.txt
-?? tmp_tables.json
-?? tmp_tables.txt
 
-
-## Tooling
+## Tooling (node/pnpm/tsc)
 
 node: v22.17.0
 pnpm: 10.15.0
 tsc: tsc not found
-
 
 ## Packages
 
@@ -115,9 +35,9 @@ cliply-backend C:\Users\aarzo\cliply-backend (PRIVATE)
 
 @cliply/shared@0.0.1 C:\Users\aarzo\cliply-backend\packages\shared (PRIVATE)
 
+## Env presence (names only)
 
-## Env files
-
+Env files:
 .env
 .env.back
 .env.bak-20251005044023
@@ -127,9 +47,7 @@ cliply-backend C:\Users\aarzo\cliply-backend (PRIVATE)
 .env.bak-20251005045130
 .env.local
 
-
-## Env presence (masked)
-
+Env vars:
 DATABASE_URL=True
 SUPABASE_URL=False
 SUPABASE_ANON_KEY=False
@@ -140,41 +58,60 @@ TIKTOK_CLIENT_SECRET=False
 STRIPE_SECRET_KEY=False
 SENTRY_DSN=False
 
+## SQL Tables Probe
 
-## Prisma & SQL Migrate
+Tables found (14):
+workspace_members
+org_workspaces
+projects
+schedules
+clips
+jobs
+connected_accounts
+events
+rate_limits
+clip_products
+idempotency
+products
+organizations
+workspaces
 
-'prisma' is not recognized as an internal or external command,
-operable program or batch file.
-undefined
-GÇëERR_PNPM_RECURSIVE_EXEC_FIRST_FAILGÇë Command "prisma" not found
----
-'prisma' is not recognized as an internal or external command,
-operable program or batch file.
-undefined
-GÇëERR_PNPM_RECURSIVE_EXEC_FIRST_FAILGÇë Command "prisma" not found
----
-SQL tables PASS=False
+Required tables present: 7 of 7
+Migrate flag: PASS
 
+## Dev server detect
 
-## Dev server
-
-DETECTED_PORT=3001
-
+Detected port: 3001
 
 ## Health Check
 
-{"ok":true,"service":"api","env":"development","uptime_ms":1779453,"db":"ok","db_name":"postgres"}
+Detected port: 3001
+Health flag: PASS
+Payload:
+{"ok":true,"service":"api","env":"development","uptime_ms":23572,"db":"ok","db_name":"postgres"}
 
+## Tests
+
+
+[1m[46m RUN [49m[22m [36mv3.2.4 [39m[90mC:/Users/aarzo/cliply-backend[39m
+
+ [32mÎ“Â£Ã´[39m test/example.test.ts[2m > [22mmath[2m > [22madds numbers[32m 1[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Start at [22m 12:55:14
+[2m   Duration [22m 564ms[2m (transform 50ms, setup 0ms, collect 36ms, tests 2ms, environment 1ms, prepare 187ms)[22m
+
+
+Tests flag: PASS
 
 ## Summary
 
 Typecheck: PASS
-Migrate: FAIL
+Migrate: PASS
 FFmpeg: PASS
 Dev port: 3001
 Health: PASS
-Tests: FAIL
+Tests: PASS
 Vercel: PASS
 Report: C:\Users\aarzo\cliply-backend\REPORTS\backend_state.md
-
-

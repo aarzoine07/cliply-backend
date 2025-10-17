@@ -1,5 +1,5 @@
 ﻿import express from "express";
-import { Client } from "pg";
+import { pgCheck } from "./lib/supabase";
 
 const app = express();
 const started = Date.now();
@@ -15,7 +15,6 @@ app.get("/api/_routes", (_req, res) => {
 });
 
 app.get("/api/health", async (_req, res) => {
-  const url = process.env.DATABASE_URL;
   const payload: any = {
     ok: true,
     service: "api",
@@ -24,29 +23,18 @@ app.get("/api/health", async (_req, res) => {
     db: "error",
   };
 
-  if (!url) {
-    payload.db_error = "DATABASE_URL missing";
-    return res.json(payload);
-  }
-
-  let client: Client | null = null;
   try {
-    client = new Client({
-      connectionString: url,
-ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 8000,
-    });
-    await client.connect();
-    const r = await client.query("select current_database() as db");
-    payload.db = "ok";
-    payload.db_name = r.rows?.[0]?.db || null;
-    return res.json(payload);
+    const db = await pgCheck();
+    if (db.ok) {
+      payload.db = "ok";
+      payload.db_name = db.db ?? null;
+    } else {
+      payload.db_error = db.error ?? "unknown";
+    }
   } catch (e: any) {
     payload.db_error = e?.message || String(e);
-    return res.json(payload);
-  } finally {
-    try { await client?.end(); } catch {}
   }
+  return res.json(payload);
 });
 
 app.listen(PORT, () => {
