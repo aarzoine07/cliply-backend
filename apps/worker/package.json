@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/worker.ts"
   },
   "dependencies": {
     "@cliply/shared": "workspace:*",
@@ -12,9 +12,11 @@
     "stripe": "^14.23.0"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -b",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   }
 }

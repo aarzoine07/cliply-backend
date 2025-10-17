@@ -1,5 +1,7 @@
 ﻿import type { NextApiRequest, NextApiResponse } from 'next';
 
+import { captureException } from '@/lib/sentry';
+
 import { HttpError } from './errors';
 import { logger } from './logger';
 
@@ -35,6 +37,10 @@ export function handler(
       }
 
       logger.error('unhandled_error', { message: (error as Error)?.message ?? 'unknown' });
+      captureException(error, {
+        route: req.url,
+        method: req.method,
+      });
       if (!res.headersSent) {
         res.status(500).json(err('internal_error', 'Something went wrong'));
       }
