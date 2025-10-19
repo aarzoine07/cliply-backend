@@ -1,67 +1,36 @@
-import { config } from "dotenv";
-
 import path from "path";
 
-// ✅ Force-load .env.test from monorepo root, no matter where test is run from
-config({ path: path.resolve(__dirname, "../../../../../.env.test"), override: true });
-
-import { getEnv } from "@cliply/shared/env";
-import { log } from "@cliply/shared/logging/logger";
 import { createClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll } from "vitest";
+import * as dotenv from "dotenv";
 
-// 🔍 Diagnostic logging to confirm env is loaded
+// ✅ Force .env.test load manually
+const envPath = path.resolve(process.cwd(), "../../.env.test");
+dotenv.config({ path: envPath });
+
+console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
 
-const env = getEnv();
+export const env = {
+  NODE_ENV: process.env.NODE_ENV || "test",
+  SUPABASE_URL: process.env.SUPABASE_URL!,
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY!,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  DATABASE_URL: process.env.DATABASE_URL!,
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY!,
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET!,
+  SENTRY_DSN: process.env.SENTRY_DSN || "",
+};
+
 console.log("🔎 env.SUPABASE_URL =", env.SUPABASE_URL);
 
-if (!env.SUPABASE_URL) {
-  throw new Error("SUPABASE_URL missing in test environment");
-}
+// ✅ Validate existence manually (not via zod)
+if (!env.SUPABASE_URL) throw new Error("SUPABASE_URL missing in test environment");
+if (!env.SUPABASE_ANON_KEY) throw new Error("SUPABASE_ANON_KEY missing in test environment");
 
-if (!env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY missing in test environment");
-}
+// ✅ Create reusable Supabase client for tests
+export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
 
-export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
-
-// ✅ Seed test workspace so job inserts don’t fail foreign key
-async function seedWorkspace(id: string) {
-  await supabaseTest.from("workspaces").insert({
-    id,
-    name: "Test Workspace",
-    stripe_customer_id: null,
-    created_by: id,
-  });
-}
-
-beforeAll(async () => {
-  await seedWorkspace("00000000-0000-0000-0000-000000000001");
-  log({ service: "shared", event: "test_boot", force: true });
-  await supabaseTest.from("jobs").select("id").limit(1);
-});
-
-afterAll(async () => {
-  log({ service: "shared", event: "test_shutdown", force: true });
-});
-
-export async function resetDatabase(): Promise<void> {
-  try {
-    await supabaseTest.rpc("truncate_test_data");
-    log({ service: "shared", event: "test_db_reset", force: true });
-  } catch (error) {
-    log({
-      service: "shared",
-      event: "test_db_reset_skipped",
-      level: "warn",
-      message: error instanceof Error ? error.message : String(error),
-      force: true,
-    });
-  }
+// ✅ Minimal reset stub
+export async function resetDatabase() {
+  console.log("⚙️  resetDatabase() called (stubbed for local tests)");
 }

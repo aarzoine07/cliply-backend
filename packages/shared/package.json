@@ -18,7 +18,9 @@
     "./logging/logger": "./logging/logger.ts",
     "./logging/auditLogger": "./logging/auditLogger.ts",
     "./logger": "./logger.ts",
-    "./sentry": "./sentry.ts"
+    "./sentry": "./sentry.ts",
+    "./test/setup": "./test/setup.ts",
+    "./test/loadEnv": "./test/loadEnv.ts"
   },
   "main": "./src/index.ts",
   "scripts": {

@@ -1,43 +1,24 @@
 {
-  "editor.formatOnSave": true,
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "eslint.validate": ["typescript", "typescriptreact", "javascript"],
-  "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit",
-    "source.organizeImports": "explicit"
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
   },
-  "openaiChat.tools.terminal.autoApprove": {
-    "/^pnpm( |$)/": true,
-    "/^npm( |$)/": true,
-    "/^npx( |$)/": true,
-    "/^node( |$)/": true,
-    "/^git( |$)/": true,
-    "/^tsc( |$)/": true,
-    "/^prisma( |$)/": true,
-    "/^supabase( |$)/": true,
-    "/^vercel( |$)/": true,
-    "/^curl( |$)/": true,
-    "/^ffmpeg( |$)/": true,
-    "/^ffprobe( |$)/": true,
-    "/^bash( |$)/": true,
-    "/^sh( |$)/": true,
-
-    // ❌ never auto-approve obviously destructive commands
-    "/^rm( |$)/": false,
-    "/^rmdir( |$)/": false,
-    "/^del( |$)/i": false,
-    "/^format( |$)/i": false,
-
-    // ✅ IMPORTANT: approve the FULL command line Codex uses on Windows
-    // powershell.exe -Command <tool> ...
-    { "pattern": "/^powershell(\\.exe)?\\b.*-Command\\s+(node|pnpm|npm|npx|git|tsc|prisma|supabase|vercel|curl|ffmpeg|ffprobe)\\b/i", "approve": true, "matchCommandLine": true },
-
-    // cmd.exe /d /c <tool> ... (some setups use cmd wrapper)
-    { "pattern": "/^cmd(\\.exe)?\\b.*\\s(/d\\s)?(/c\\s)?(node|pnpm|npm|npx|git|tsc|prisma|supabase|vercel|curl|ffmpeg|ffprobe)\\b/i", "approve": true, "matchCommandLine": true },
-
-    // VS Code integrated bash on Windows (git-bash or WSL bridges)
-    { "pattern": "/^bash(\\.exe)?\\b.*\\s(node|pnpm|npm|npx|git|tsc|prisma|supabase|vercel|curl|ffmpeg|ffprobe)\\b/i", "approve": true, "matchCommandLine": true }
-  },
-  "openaiChat.tools.shell.requireApproval": "never",
-  "openaiChat.tools.shell.workspaceApproved": true
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
+  "deno.lint": true,
+  "deno.unstable": [
+    "bare-node-builtins",
+    "byonm",
+    "sloppy-imports",
+    "unsafe-proto",
+    "webgpu",
+    "broadcast-channel",
+    "worker-options",
+    "cron",
+    "kv",
+    "ffi",
+    "fs",
+    "http",
+    "net"
+  ]
 }
