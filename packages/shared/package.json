@@ -25,5 +25,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
   }
 }

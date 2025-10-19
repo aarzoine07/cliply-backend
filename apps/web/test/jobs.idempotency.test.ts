@@ -1,8 +1,9 @@
+import "../../../packages/shared/test/loadEnv"; // ✅ load env vars first
+
 import crypto from "crypto";
 
-import { beforeAll, describe, expect, it } from "vitest";
-
 import { resetDatabase, supabaseTest } from "@cliply/shared/test/setup";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const ROUTE = "jobs/enqueue";

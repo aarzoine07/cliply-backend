@@ -1,13 +1,15 @@
+// apps/web/vitest.config.ts
+
+import path from "path";
+
+import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  plugins: [tsconfigPaths()],
   test: {
-    globals: true,
     environment: "node",
-    setupFiles: ["@cliply/shared/test/setup.ts"],
-    coverage: {
-      reporter: ["text", "json-summary"],
-      exclude: ["**/node_modules/**"],
-    },
+    include: ["test/**/*.test.ts"],
+    setupFiles: [path.resolve(__dirname, "../../packages/shared/test/setup.ts")],
   },
 });

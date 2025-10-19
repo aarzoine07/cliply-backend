@@ -1,9 +1,11 @@
-﻿import { defineConfig } from "vitest/config";
+﻿import path from "path";
+
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     environment: "node",
-    threads: false,
-    include: ["test/example.test.ts"],
+    include: ["test/**/*.test.ts"],
+    setupFiles: [path.resolve(__dirname, "../../packages/shared/test/setup.ts")],
   },
 });
