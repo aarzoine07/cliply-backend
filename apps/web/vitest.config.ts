@@ -1,15 +1,18 @@
 // apps/web/vitest.config.ts
 
-import path from "path";
-
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {
-    environment: "node",
-    include: ["test/**/*.test.ts"],
-    setupFiles: [path.resolve(__dirname, "../../packages/shared/test/setup.ts")],
+    include: ["apps/web/test/**/*.test.ts", "test/**/*.test.ts"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*",
+    ],
   },
 });
