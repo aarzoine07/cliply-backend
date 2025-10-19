@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^17.2.3",
     "zod": "^4.1.9"
   },
   "type": "module"

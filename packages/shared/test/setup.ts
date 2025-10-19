@@ -1,13 +1,20 @@
 import { config } from "dotenv";
-import { createClient } from "@supabase/supabase-js";
-import { beforeAll, afterAll } from "vitest";
+
+import path from "path";
+
+// ✅ Force-load .env.test from monorepo root, no matter where test is run from
+config({ path: path.resolve(__dirname, "../../../../../.env.test"), override: true });
 
 import { getEnv } from "@cliply/shared/env";
 import { log } from "@cliply/shared/logging/logger";
+import { createClient } from "@supabase/supabase-js";
+import { afterAll, beforeAll } from "vitest";
 
-config({ path: ".env.test", override: true });
+// 🔍 Diagnostic logging to confirm env is loaded
+console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
 
 const env = getEnv();
+console.log("🔎 env.SUPABASE_URL =", env.SUPABASE_URL);
 
 if (!env.SUPABASE_URL) {
   throw new Error("SUPABASE_URL missing in test environment");
@@ -24,7 +31,18 @@ export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_
   },
 });
 
+// ✅ Seed test workspace so job inserts don’t fail foreign key
+async function seedWorkspace(id: string) {
+  await supabaseTest.from("workspaces").insert({
+    id,
+    name: "Test Workspace",
+    stripe_customer_id: null,
+    created_by: id,
+  });
+}
+
 beforeAll(async () => {
+  await seedWorkspace("00000000-0000-0000-0000-000000000001");
   log({ service: "shared", event: "test_boot", force: true });
   await supabaseTest.from("jobs").select("id").limit(1);
 });

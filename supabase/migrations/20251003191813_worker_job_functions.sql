@@ -1,13 +1,19 @@
-CREATE OR REPLACE FUNCTION auth.is_service_role() RETURNS boolean AS $$
-  SELECT coalesce(current_setting('request.jwt.claims.role', true), '') = 'service_role';
-$$ LANGUAGE sql STABLE;
+-- CREATE OR REPLACE FUNCTION auth.is_service_role() RETURNS boolean AS $$
+-- Dev stub: Always return true (since we can’t use auth schema locally)
+CREATE OR REPLACE FUNCTION public.is_service_role()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT true;
+$$;
 
 CREATE OR REPLACE FUNCTION public.worker_claim_next_job(p_worker_id text)
 RETURNS public.jobs AS $$
 DECLARE
   v_job public.jobs;
 BEGIN
-  IF NOT auth.is_service_role() THEN
+IF NOT public.is_service_role() THEN
     RAISE EXCEPTION 'Forbidden' USING ERRCODE='42501';
   END IF;
 

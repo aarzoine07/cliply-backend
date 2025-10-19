@@ -1,8 +1,10 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { createClient } from "@supabase/supabase-js";
+import "../../../packages/shared/test/loadEnv"; // 👈 force env load first
 
 import { getEnv } from "@cliply/shared/env";
-import { resetDatabase } from "@cliply/shared/test/setup";
+import { createClient } from "@supabase/supabase-js";
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { resetDatabase } from "../../../packages/shared/test/setup"; // 👈 fixed path manually
 
 const env = getEnv();
 
@@ -14,15 +16,14 @@ if (!env.SUPABASE_ANON_KEY) {
   throw new Error("SUPABASE_ANON_KEY missing for RLS test");
 }
 
-const JWT_A = process.env.TEST_JWT_A;
-const JWT_B = process.env.TEST_JWT_B;
+const JWT_A = process.env.SUPABASE_JWT_A; // 👈 matches .env.test
+const JWT_B = process.env.SUPABASE_JWT_B;
 
 if (!JWT_A || !JWT_B) {
-  throw new Error("TEST_JWT_A and TEST_JWT_B must be set in the test environment");
+  throw new Error("SUPABASE_JWT_A and SUPABASE_JWT_B must be set in the test environment");
 }
 
 const workspaceA = "00000000-0000-0000-0000-000000000001";
-const workspaceB = "00000000-0000-0000-0000-000000000002";
 
 const clientA = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
   global: {
