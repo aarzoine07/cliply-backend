@@ -1,60 +1,9 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": [
-      "node"
-    ],
-    "jsx": "react-jsx",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "apps/web/src/*"
-      ],
-      "@cliply/shared": [
-        "packages/shared/src/index.ts"
-      ],
-      "@cliply/shared/*": [
-        "packages/shared/src/*"
-      ]
-    },
-    "lib": [
-      "ES2022"
-    ],
-    "noEmit": true,
-    "composite": false,
-    "declaration": false,
-    "incremental": false
-  },
-  "include": [
-    "apps/**/*.ts",
-    "apps/**/*.tsx",
-    "packages/**/*.ts",
-    "packages/**/*.tsx",
-    "test/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "build"
-  ],
+  
   "files": [],
   "references": [
-    {
-      "path": "./apps/web"
-    },
-    {
-      "path": "./apps/worker"
-    },
-    {
-      "path": "./packages/shared"
-    }
+    { "path": "./apps/web" },
+    { "path": "./apps/worker" },
+    { "path": "./packages/shared" }
   ]
 }

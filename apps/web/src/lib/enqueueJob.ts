@@ -1,9 +1,11 @@
-import crypto from "crypto";
-
-import { createClient, type PostgrestError, type SupabaseClient } from "@supabase/supabase-js";
+import * as crypto from "crypto";
 
 import { getEnv } from "@cliply/shared/env";
-import type { JobKind, JobPayload, JobRow } from "@cliply/shared/types/supabase.jobs";
+import type { Database } from "@cliply/shared/types/supabase";
+import { createClient, type PostgrestError, type SupabaseClient } from "@supabase/supabase-js";
+type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
+type JobKind = string;
+type JobPayload = Record<string, unknown>;
 
 export interface EnqueueParams {
   workspaceId: string;
@@ -52,6 +54,7 @@ function getServiceClient(): SupabaseClient {
   return cachedClient;
 }
 
+
 function clampPriority(priority: number | undefined): number {
   const defaultPriority = 5;
   if (priority === undefined) return defaultPriority;
@@ -60,7 +63,9 @@ function clampPriority(priority: number | undefined): number {
   return Math.min(9, Math.max(1, normalized));
 }
 
-function normalizeRunAt(runAt?: string): { ok: true; value: string } | { ok: false; error: string } {
+function normalizeRunAt(
+  runAt?: string
+): { ok: true; value: string } | { ok: false; error: string } {
   if (!runAt) {
     return { ok: true, value: new Date().toISOString() };
   }
@@ -110,7 +115,7 @@ function isEnqueueResponse(value: unknown): value is EnqueueResponse {
 async function fetchIdempotentResponse(
   supabase: SupabaseClient,
   workspaceId: string,
-  keyHash: string,
+  keyHash: string
 ): Promise<{ error?: PostgrestError; response?: EnqueueResponse }> {
   const { data, error } = await supabase
     .from("idempotency_keys")
@@ -134,15 +139,20 @@ async function fetchIdempotentResponse(
 
 export async function enqueueJob(params: EnqueueParams): Promise<EnqueueResponse> {
   const supabase = getServiceClient();
-  const priority = clampPriority(params.priority);
-  const runAtResult = normalizeRunAt(params.runAt);
-  if (!runAtResult.ok) {
-    return { ok: false, error: runAtResult.error };
-  }
+const priority = clampPriority(params.priority);
+const runAtResult = normalizeRunAt(params.runAt);
+if (!runAtResult.ok) {
+  const errMsg =
+    typeof runAtResult === "object" && "error" in runAtResult
+      ? runAtResult.error
+      : "Invalid runAt value";
+  return { ok: false, error: errMsg };
+}
 
   const runAt = runAtResult.value;
   const keyHash = buildHash(params.kind, params.payload, runAt, params.dedupeKey);
 
+  // 1️⃣ Check existing idempotent key
   const existing = await fetchIdempotentResponse(supabase, params.workspaceId, keyHash);
   if (existing.error) {
     return { ok: false, error: existing.error.message };
@@ -151,6 +161,7 @@ export async function enqueueJob(params: EnqueueParams): Promise<EnqueueResponse
     return existing.response;
   }
 
+  // 2️⃣ Insert new job
   const { data: job, error: insertError } = await supabase
     .from("jobs")
     .insert({
@@ -167,14 +178,20 @@ export async function enqueueJob(params: EnqueueParams): Promise<EnqueueResponse
     return { ok: false, error: insertError?.message ?? "Failed to insert job" };
   }
 
-  const response: EnqueueResponse = { ok: true, jobId: job.id };
+const response: EnqueueResponse = { ok: true, jobId: String(job.id) };
 
-  const { error: idempotencyError } = await supabase.from("idempotency_keys").insert({
-    workspace_id: params.workspaceId,
-    route: SERVICE_ROUTE,
-    key_hash: keyHash,
-    response,
-  });
+  // 3️⃣ Store or reuse idempotency key (UPSERT instead of INSERT)
+  const { error: idempotencyError } = await supabase
+    .from("idempotency_keys")
+    .upsert(
+      {
+        workspace_id: params.workspaceId,
+        route: SERVICE_ROUTE,
+        key_hash: keyHash,
+        response,
+      },
+      { onConflict: "workspace_id,route,key_hash" }
+    );
 
   if (idempotencyError) {
     if (idempotencyError.code === "23505") {
@@ -183,6 +200,7 @@ export async function enqueueJob(params: EnqueueParams): Promise<EnqueueResponse
         return retry.response;
       }
     }
+    return { ok: false, error: idempotencyError.message };
   }
 
   return response;
