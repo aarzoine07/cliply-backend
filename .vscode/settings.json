@@ -20,5 +20,13 @@
     "fs",
     "http",
     "net"
+  ],
+  "cSpell.words": [
+    "Supabase",
+    "supabase",
+    "SUPABASE",
+    "Postgrest",
+    "Postgres",
+    "PostgrestError"
   ]
 }

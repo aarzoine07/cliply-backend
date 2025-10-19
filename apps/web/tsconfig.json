@@ -1,52 +1,12 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "src/*"
-      ],
-      "@cliply/shared": [
-        "../../packages/shared/src/index.ts"
-      ],
-      "@cliply/shared/*": [
-        "../../packages/shared/src/*"
-      ]
-    },
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "allowJs": true,
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "strictNullChecks": true,
-    "composite": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
-    "declarationDir": "../../node_modules/.cache/cliply-types/apps-web",
-    "tsBuildInfoFile": "../../node_modules/.cache/cliply-types/apps-web.tsbuildinfo",
-    "noEmit": false,
-    "module": "esnext"
-  },
-  "include": [
-    "src",
-    ".next/types/**/*.ts",
-    "src/**/*.ts",
-    "src/**/*.tsx"
-  ],
-  "exclude": [
-    "node_modules"
-  ],
-  "references": [
-    {
-      "path": "../../packages/shared"
+      "@cliply/shared": ["../../packages/shared/src/index.ts"],
+      "@cliply/shared/*": ["../../packages/shared/src/*"]
     }
-  ]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"],
+  "exclude": ["node_modules"]
 }
