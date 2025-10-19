@@ -1,1 +1,1 @@
-export { initSentry, captureError } from "./src/sentry";
+export * from "./src/sentry";

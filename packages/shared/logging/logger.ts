@@ -89,7 +89,11 @@ function normaliseEntry(entry: LogEntry): NormalisedEntry {
   const jobId = entry.jobId;
   const message = entry.message;
   const error = entry.error;
-  const level = entry.level ?? (event.toLowerCase().includes("error") || event.toLowerCase().includes("fail") ? "error" : "info");
+  const level =
+    entry.level ??
+    (event.toLowerCase().includes("error") || event.toLowerCase().includes("fail")
+      ? "error"
+      : "info");
   const meta = entry.meta ?? {};
   const force = Boolean(entry.force);
 
@@ -113,7 +117,7 @@ export function log(entry: LogEntry): void {
     return;
   }
 
-  const safe = redact(rest) as Omit<NormalisedEntry, "level" | "force">;
+  const safe = redact(rest as any) as Omit<NormalisedEntry, "level" | "force">;
 
   const output: Record<string, unknown> = {
     ts: safe.ts,
@@ -148,14 +152,20 @@ export function log(entry: LogEntry): void {
 type LegacyLevel = "info" | "warn" | "error";
 
 function extractKnownFields(context: Record<string, unknown> | undefined) {
-  if (!context) return { service: undefined, workspaceId: undefined, jobId: undefined, message: undefined, error: undefined, meta: {} as Record<string, unknown> };
+  if (!context)
+    return {
+      service: undefined,
+      workspaceId: undefined,
+      jobId: undefined,
+      message: undefined,
+      error: undefined,
+      meta: {} as Record<string, unknown>,
+    };
 
   const service = (context.service as string | undefined) ?? undefined;
   const workspaceId =
-    (context.workspaceId as string | undefined) ??
-    (context.workspace_id as string | undefined);
-  const jobId =
-    (context.jobId as string | undefined) ?? (context.job_id as string | undefined);
+    (context.workspaceId as string | undefined) ?? (context.workspace_id as string | undefined);
+  const jobId = (context.jobId as string | undefined) ?? (context.job_id as string | undefined);
   const message = context.message as string | undefined;
   const error = context.error as string | undefined;
 
@@ -178,7 +188,12 @@ function extractKnownFields(context: Record<string, unknown> | undefined) {
   return { service, workspaceId, jobId, message, error, meta };
 }
 
-function legacyLog(level: LegacyLevel, event: string, context?: Record<string, unknown>, meta?: unknown) {
+function legacyLog(
+  level: LegacyLevel,
+  event: string,
+  context?: Record<string, unknown>,
+  meta?: unknown,
+) {
   const extracted = extractKnownFields(context);
   const mergedMeta: Record<string, unknown> = {
     ...extracted.meta,
