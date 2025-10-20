@@ -3,7 +3,8 @@ import path from "path";
 
 import { resetDatabase } from "@cliply/shared/test/setup";
 import { createClient } from "@supabase/supabase-js";
-import * as dotenv from "dotenv";
+import dotenv from "dotenv";
+dotenv.config({ path: "../../.env.test", override: true });
 import { beforeAll, describe, expect, it } from "vitest";
 
 // ✅ Force-load .env.test

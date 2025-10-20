@@ -1,6 +1,7 @@
 import path from "path";
 
-import * as dotenv from "dotenv";
+import dotenv from "dotenv";
+dotenv.config({ path: "../../.env.test", override: true });
 
 // ✅ Force .env.test load manually (ensures Supabase URL + keys exist)
 const envPath = path.resolve(process.cwd(), "../../.env.test");
