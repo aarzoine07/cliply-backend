@@ -1,10 +1,10 @@
--- Define moddatetime() trigger helper if missing
-CREATE OR REPLACE FUNCTION public.moddatetime()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$;
+-- utility trigger to auto-update updated_at
+create or replace function public.moddatetime()
+returns trigger as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$ language plpgsql;
+
+-- generic example usage (each table adds its own trigger)
