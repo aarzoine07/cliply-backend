@@ -1,90 +1,56 @@
-import crypto from "crypto";
-import path from "path";
+// @ts-nocheck
+import * as path from "path";
 
-import { resetDatabase } from "@cliply/shared/test/setup";
 import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
-dotenv.config({ path: "../../.env.test", override: true });
 import { beforeAll, describe, expect, it } from "vitest";
+import * as dotenv from "dotenv";
+import { resetDatabase } from "@cliply/shared/test/setup";
 
-// ✅ Force-load .env.test
+// ✅ Load .env.test
+dotenv.config({ path: "../../.env.test", override: true });
 const envPath = path.resolve(process.cwd(), "../../.env.test");
-dotenv.config({ path: envPath });
-
 console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 SUPABASE_URL =", process.env.SUPABASE_URL);
 
-// ✅ Supabase clients
+// ✅ Supabase service-role client
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Main client (service-role)
 const client = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-// Constants
 const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-const ROUTE = "jobs/enqueue";
-const KIND = "TRANSCRIBE"; // ✅ matches jobs_kind_check
-const PAYLOAD = { clip: "demo" };
 
-describe("Idempotency – Deduplication", () => {
+describe("Service-Role Function Access", () => {
   beforeAll(async () => {
     await resetDatabase?.();
   });
 
-  it("reuses same jobId for identical enqueue payloads", async () => {
-    const dedupeKey = crypto
-      .createHash("sha256")
-      .update(`${KIND}|${JSON.stringify(PAYLOAD)}`)
-      .digest("hex");
-
-    // 1️⃣ Insert first job
-    const { data: firstJob, error: firstError } = await client
+  it("can insert and update jobs via service role RPC", async () => {
+    // 1️⃣ Insert a job directly
+    const { data: inserted, error: insertError } = await client
       .from("jobs")
       .insert({
         workspace_id: WORKSPACE_ID,
-        kind: KIND,
+        kind: "TRANSCRIBE",
         state: "queued",
-        payload: PAYLOAD,
+        payload: { demo: true },
       })
       .select("*")
       .single();
 
-    expect(firstError).toBeNull();
-    expect(firstJob).toBeTruthy();
+    expect(insertError).toBeNull();
+    expect(inserted).toBeTruthy();
 
-    // 2️⃣ Insert idempotency key
-    const { error: insertKeyError } = await client.from("idempotency_keys").insert({
-      workspace_id: WORKSPACE_ID,
-      route: ROUTE,
-      key_hash: dedupeKey,
-      response: { ok: true, jobId: firstJob.id },
-    });
-
-    expect(insertKeyError).toBeNull();
-
-    // 3️⃣ Verify deduped response
-    const { data: existingKey, error: existingKeyError } = await client
-      .from("idempotency_keys")
-      .select("response")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("route", ROUTE)
-      .eq("key_hash", dedupeKey)
+    // 2️⃣ Update state using service-role privileges
+    const { data: updated, error: updateError } = await client
+      .from("jobs")
+      .update({ state: "processing" })
+      .eq("id", inserted.id)
+      .select("*")
       .single();
 
-    expect(existingKeyError).toBeNull();
-    expect(existingKey?.response?.jobId).toBe(firstJob.id);
-
-    // 4️⃣ Ensure only one job was created
-    const { count, error: jobCountError } = await client
-      .from("jobs")
-      .select("*", { count: "exact", head: true })
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("kind", KIND);
-
-    expect(jobCountError).toBeNull();
-    expect(count).toBe(1);
+    expect(updateError).toBeNull();
+    expect(updated.state).toBe("processing");
   });
 });

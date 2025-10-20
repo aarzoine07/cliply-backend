@@ -25,6 +25,7 @@
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "dotenv": "^17.2.3",
+    "dotenv-defaults": "^5.0.2",
     "next-transpile-modules": "^10.0.1",
     "node-fetch": "^3.3.2",
     "ts-loader": "^9.5.4",
