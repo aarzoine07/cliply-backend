@@ -46,12 +46,12 @@ describe("🧩 Service-Role Function Verification", () => {
     // 2️⃣ Update job state
     const { data: updated, error: updateError } = await client
       .from("jobs")
-      .update({ state: "processing" })
+      .update({ state: "running" })
       .eq("id", inserted.id)
       .select("*")
       .single();
 
     expect(updateError).toBeNull();
-    expect(updated.state).toBe("processing");
+    expect(updated.state).toBe("running");
   });
 });
