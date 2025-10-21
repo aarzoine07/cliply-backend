@@ -22,11 +22,12 @@
     "net"
   ],
   "cSpell.words": [
-    "Supabase",
-    "supabase",
-    "SUPABASE",
-    "Postgrest",
+    "apikey",
     "Postgres",
-    "PostgrestError"
+    "Postgrest",
+    "PostgrestError",
+    "supabase",
+    "Supabase",
+    "SUPABASE"
   ]
 }
