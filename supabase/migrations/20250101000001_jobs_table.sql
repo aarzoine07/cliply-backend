@@ -4,7 +4,7 @@ create table if not exists public.jobs (
   workspace_id uuid not null,
   kind text not null check (kind in ('TRANSCRIBE','HIGHLIGHT_DETECT','CLIP_RENDER','PUBLISH_TIKTOK','ANALYTICS_INGEST')),
   priority int default 5 check (priority between 1 and 9),
-  state text default 'queued' check (state in ('queued','running','done','error')),
+ state text not null default 'queued' check (state in ('queued','processing','done','failed')),
   payload jsonb default '{}'::jsonb,
   result jsonb,
   attempts int default 0,
