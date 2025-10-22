@@ -23,11 +23,21 @@
   ],
   "cSpell.words": [
     "apikey",
+    "conname",
+    "fkey",
+    "keyhash",
+    "KTVK",
+    "pkey",
+    "plpgsql",
+    "polname",
     "Postgres",
     "Postgrest",
     "PostgrestError",
+    "ROWTYPE",
+    "schemaname",
     "supabase",
     "Supabase",
-    "SUPABASE"
+    "SUPABASE",
+    "Uodkm"
   ]
 }

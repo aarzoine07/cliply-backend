@@ -1,6 +1,6 @@
 create sequence "public"."events_id_seq";
 
-create sequence "public"."jobs_id_seq";
+-- removed legacy bigint id sequence (jobs now uses UUID)
 
 drop trigger if exists "trg_jobs_updated_at" on "public"."jobs";
 
@@ -482,9 +482,8 @@ alter table "public"."jobs" alter column "attempts" set not null;
 
 alter table "public"."jobs" alter column "created_at" set not null;
 
-alter table "public"."jobs" alter column "id" set default nextval('jobs_id_seq'::regclass);
-
-alter table "public"."jobs" alter column "id" set data type bigint using "id"::bigint;
+-- removed legacy bigint id sequence (jobs now uses UUID)
+-- removed legacy bigint cast for jobs.id
 
 alter table "public"."jobs" alter column "max_attempts" set not null;
 
@@ -508,7 +507,7 @@ alter table "public"."workspaces" alter column "created_at" set not null;
 
 alter sequence "public"."events_id_seq" owned by "public"."events"."id";
 
-alter sequence "public"."jobs_id_seq" owned by "public"."jobs"."id";
+-- removed legacy bigint id sequence (jobs now uses UUID)
 
 drop sequence if exists "public"."idempotency_keys_id_seq";
 
