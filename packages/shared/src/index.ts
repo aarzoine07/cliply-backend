@@ -32,4 +32,3 @@ export { captureError, initSentry } from "./sentry";
 // re-export shared types so imports like "@cliply/shared/types/..." resolve
 
 export * from "./types/supabase";
-export * from "./types/supabase.jobs";
