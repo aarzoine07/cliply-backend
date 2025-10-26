@@ -124,6 +124,9 @@ importers:
       dotenv-defaults:
         specifier: ^5.0.2
         version: 5.0.2
+      jose:
+        specifier: ^6.1.0
+        version: 6.1.0
       next-transpile-modules:
         specifier: ^10.0.1
         version: 10.0.1
@@ -1816,6 +1819,9 @@ packages:
   jest-worker@27.5.1:
     resolution: {integrity: sha512-7vuh85V5cdDofPyxn58nrPjBktZo0u9x1g8WtjQol+jZDaE+fhN+cIvTj11GndBnMnyfrUOG1sZQxCdjKh+DKg==}
     engines: {node: '>= 10.13.0'}
+
+  jose@6.1.0:
+    resolution: {integrity: sha512-TTQJyoEoKcC1lscpVDCSsVgYzUDg/0Bt3WE//WiTPK6uOCQC2KZS4MpugbMWt/zyjkopgZoXhZuCi00gLudfUA==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -4734,6 +4740,8 @@ snapshots:
       '@types/node': 24.5.2
       merge-stream: 2.0.0
       supports-color: 8.1.1
+
+  jose@6.1.0: {}
 
   joycon@3.1.1: {}
 

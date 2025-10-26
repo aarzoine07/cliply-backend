@@ -2,6 +2,7 @@ import "../../../packages/shared/test/loadEnv";
 import { getEnv } from "@cliply/shared/env";
 import { createClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it } from "vitest";
+
 import { resetDatabase } from "../../../packages/shared/test/setup";
 
 const env = getEnv();

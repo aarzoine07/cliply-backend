@@ -14,8 +14,20 @@ max_rows = 1000
 enabled = true
 site_url = "http://127.0.0.1:54321"
 additional_redirect_urls = ["http://localhost:54321"]
-jwt_secret = "super-secret-local-jwt-token-with-at-least-32-characters"
+
+# ✅ JWK for RS256 public key verification
+jwt_secret = '''
+{
+  "kty": "RSA",
+  "alg": "RS256",
+  "use": "sig",
+  "kid": "cliply-local",
+  "n": "rh2EeUsgF_w2f4npx0bprYkMB0aV1EFUtbnVR-x3ghyv8OYdSAzKRauLvlvGVXi7tq83boAai3aYJf3TLroHdyxppmrASVO165yJWeaFuhxb8RIiTvmcPLA8vQ2l6wbK6E2y3NYagi-L6E8bZdDI_mHm-Ei2gG0L2iS-v-TkVfshRy0CKhPxszcmSeM1tQycX-am3rdtOaE3wPHk48Z2AtmJB7lLbDGo9g6U0n5i1BCsbTBBYIjRsGyeARhlEzXyOV7lP1HC7C4foCQqzDxEfexwP0T1V_nF1XP45HRT4PVTKqrPsVCza23JWHbiwr-8jHiWMn_PxNfspbb_HpR3tw",
+  "e": "AQAB"
+}
+'''
 jwt_expiry = 3600
+
 
 
 [api.tls]
@@ -56,3 +68,6 @@ enabled = true
 port = 54323
 api_url = "http://127.0.0.1"
 openai_api_key = "env(OPENAI_API_KEY)"
+
+[analytics]
+enabled = false
