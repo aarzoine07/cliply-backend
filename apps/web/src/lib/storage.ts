@@ -1,8 +1,10 @@
-import { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC } from '@cliply/shared';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { getEnv } from './env';
-import { getAdminClient } from './supabase';
+// With this:
+const BUCKET_VIDEOS = "videos";
+const SIGNED_URL_TTL_SEC = 60 * 5; // 5 minutes
+import { getEnv } from "./env";
+import { getAdminClient } from "./supabase";
 
 const ensuredBuckets = new Set<string>();
 
@@ -16,7 +18,7 @@ async function ensureBucket(admin: SupabaseClient, bucket: string): Promise<void
 
   if (!data) {
     const { error: createError } = await admin.storage.createBucket(bucket, { public: false });
-    if (createError && !/already exists/i.test(createError.message ?? '')) {
+    if (createError && !/already exists/i.test(createError.message ?? "")) {
       throw createError;
     }
   }
@@ -43,19 +45,19 @@ export async function getSignedUploadUrl(
 
   const env = getEnv();
   if (!env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY missing');
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
   }
 
-  const baseUrl = env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, '');
-  const key = storageKey.replace(/^\/+/, '');
+  const baseUrl = env.SUPABASE_URL.replace(/\/+$/, "");
+  const key = storageKey.replace(/^\/+/, "");
   const requestUrl = new URL(`${baseUrl}/storage/v1/object/upload/sign/${bucket}/${key}`);
 
   const response = await fetch(requestUrl, {
-    method: 'POST',
+    method: "POST",
     headers: {
       apikey: env.SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ expiresIn: ttlSec }),
   });
@@ -67,7 +69,7 @@ export async function getSignedUploadUrl(
 
   const { url } = (await response.json()) as { url?: string };
   if (!url) {
-    throw new Error('failed_to_parse_signed_upload_response');
+    throw new Error("failed_to_parse_signed_upload_response");
   }
 
   return `${baseUrl}/storage/v1${url}`;
