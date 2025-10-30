@@ -4,7 +4,8 @@
     "baseUrl": ".",
     "paths": {
       "@cliply/shared": ["../../packages/shared/src/index.ts"],
-      "@cliply/shared/*": ["../../packages/shared/src/*"]
+      "@cliply/shared/*": ["../../packages/shared/src/*"],
+      "@/*": ["src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"],
