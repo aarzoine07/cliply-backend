@@ -36,7 +36,7 @@ const WORKER_ID = `${process.env.HOSTNAME ?? "local"}:${process.pid}:${Date.now(
 let shuttingDown = false;
 let reclaimTimer: ReturnType<typeof setInterval> | null = null;
 
-initSentry();
+initSentry("worker");
 
 async function heartbeatLoop(): Promise<void> {
   while (!shuttingDown) {

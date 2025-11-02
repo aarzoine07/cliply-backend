@@ -32,6 +32,7 @@
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {
+    "@sentry/node": "^8.42.0",
     "dotenv": "^17.2.3"
   }
 }
