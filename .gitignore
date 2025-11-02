@@ -1,8 +1,15 @@
 # dependencies / builds
 node_modules
+.pnpm-store
 dist
+build
 .next
 out
+.turbo
+.cache
+
+# AI/temp folders
+.cursor-tmp
 # env/secrets
 .env
 .env.*
