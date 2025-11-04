@@ -58,30 +58,23 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   try {
+    
     // Create Stripe checkout session
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      success_url: successUrl ?? `${process.env.NEXT_PUBLIC_APP_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl ?? `${process.env.NEXT_PUBLIC_APP_URL}/billing/cancel`,
-      metadata: {
-        workspace_id: workspaceId,
-        user_id: userId,
-      },
-      subscription_data: {
-        metadata: {
-          workspace_id: workspaceId,
-          user_id: userId,
-        },
-        trial_period_days: STRIPE_PLAN_MAP[priceId].trial_days,
-      },
-    });
+    // ✅ explicitly type the call against Stripe.Checkout.SessionCreateParams
+const params: Stripe.Checkout.SessionCreateParams = {
+  mode: "subscription",
+  payment_method_types: ["card"],
+  line_items: [
+    {
+      price: priceId,
+      quantity: 1,
+    },
+  ],
+  success_url: successUrl,
+  cancel_url: cancelUrl,
+};
+
+const session = await stripe.checkout.sessions.create(params);
 
     logger.info('billing_checkout_success', {
       userId,

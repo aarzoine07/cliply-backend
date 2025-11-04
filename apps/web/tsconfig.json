@@ -1,13 +1,14 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "target": "es2015",
     "baseUrl": ".",
     "paths": {
       "@cliply/shared": [
         "../../packages/shared/src/index.ts"
       ],
       "@cliply/shared/*": [
-        "../../packages/shared/src/*"
+        "../../packages/shared/*"
       ],
       "@/*": [
         "src/*"
@@ -25,10 +26,11 @@
     "incremental": true,
     "module": "esnext",
     "esModuleInterop": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
+    "downlevelIteration": true,
     "plugins": [
       {
         "name": "next"

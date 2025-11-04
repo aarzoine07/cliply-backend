@@ -54,6 +54,26 @@ export function getAdminClient(): SupabaseClient {
 }
 
 // ---------------------------------------------------------------------------
+// HEALTH CHECK (pgCheck)
+// ---------------------------------------------------------------------------
+export async function pgCheck(): Promise<{ ok: boolean; db?: string; error?: string }> {
+  const env = getEnv();
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: baseAuthConfig,
+  });
+
+  try {
+    const { error } = await client.from("projects").select("id").limit(1);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: true, db: "projects" };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? "unknown error" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TYPE EXPORTS
 // ---------------------------------------------------------------------------
 export type RlsClient = ReturnType<typeof getRlsClient>;

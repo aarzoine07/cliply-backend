@@ -24,25 +24,35 @@ export function handler(
       await fn(req, res);
     } catch (error) {
       if (error instanceof HttpError) {
-        logger.warn('http_error', {
+        logger.warn("http_error", {
           status: error.status,
-          code: error.code,
+          code: error.code ?? "unknown_error",
         });
+
         if (!res.headersSent) {
-          res
-            .status(error.status)
-            .json(err(error.code, error.expose ? error.message : 'Something went wrong', error.details));
+          const code = error.code ?? "unknown_error";
+          const message = (error as any).expose
+            ? error.message
+            : "Something went wrong";
+          const details = (error as any).details;
+
+          res.status(error.status).json(err(code, message, details));
         }
+
         return;
       }
 
-      logger.error('unhandled_error', { message: (error as Error)?.message ?? 'unknown' });
+      logger.error("unhandled_error", {
+        message: (error as Error)?.message ?? "unknown",
+      });
+
       captureException(error, {
         route: req.url,
         method: req.method,
       });
+
       if (!res.headersSent) {
-        res.status(500).json(err('internal_error', 'Something went wrong'));
+        res.status(500).json(err("internal_error", "Something went wrong"));
       }
     }
   };

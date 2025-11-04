@@ -108,10 +108,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
+  const supabase = createClient(
+    SUPABASE_URL ?? "",
+    SUPABASE_ANON_KEY ?? "",
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    },
+  );
+
 
   const {
     data: { user },
@@ -126,7 +131,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const workspaceId = extractWorkspaceId(user);
+  const workspaceId = extractWorkspaceId(user as any);
   if (!workspaceId) {
     logger.warn("analytics_basic_workspace_missing", { user_id: user.id });
     res
@@ -139,7 +144,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { data: byState, error: stateError } = await supabase
       .from("jobs")
       .select("state, count:id")
-      .group("state");
+   //   .group("state");
 
     if (stateError) {
       throw stateError;
@@ -148,7 +153,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { data: byKind, error: kindError } = await supabase
       .from("jobs")
       .select("kind, count:id")
-      .group("kind");
+//
 
     if (kindError) {
       throw kindError;
