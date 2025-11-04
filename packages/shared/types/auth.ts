@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type PlanName = "basic" | "growth" | "agency";
+export type PlanName = "basic" | "pro" | "premium";
 
 export interface AuthContext {
   user_id: string;
@@ -19,7 +19,7 @@ export enum AuthErrorCode {
 export const AuthContextSchema = z.object({
   user_id: z.string().uuid(),
   workspace_id: z.string().uuid(),
-  plan: z.enum(["basic", "growth", "agency"]),
+  plan: z.enum(["basic", "pro", "premium"]),
 });
 
 export function authErrorResponse(code: AuthErrorCode, message: string, status: number) {

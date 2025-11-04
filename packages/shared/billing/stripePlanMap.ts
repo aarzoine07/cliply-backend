@@ -12,23 +12,23 @@ export interface StripePlanConfig {
 
 /**
  * Stripe Price IDs mapped to Cliply plans.
- * Replace the placeholder price_* values with live IDs in production.
+ * These are live production Price IDs from Stripe Dashboard.
  */
 export const STRIPE_PLAN_MAP: Record<string, StripePlanConfig> = {
-  price_basic_001: {
+  price_1SPAJQJ2vBRZZMLQFeAuYJK5: {
     plan: "basic",
     trial_days: 7,
     downgrade_behavior: "grace_period",
     upgrade_behavior: "immediate",
   },
-  price_growth_001: {
-    plan: "growth",
+  price_1SPALSJ2vBRZZMLQjM9eLBkf: {
+    plan: "pro",
     trial_days: 7,
     downgrade_behavior: "grace_period",
     upgrade_behavior: "immediate",
   },
-  price_agency_001: {
-    plan: "agency",
+  price_1SPAM7J2vBRZZMLQQaPkyiEW: {
+    plan: "premium",
     trial_days: 14,
     downgrade_behavior: "grace_period",
     upgrade_behavior: "prorate",

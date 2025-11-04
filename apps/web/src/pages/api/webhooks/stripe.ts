@@ -310,6 +310,15 @@ export async function POST(req: NextRequest) {
 
   try {
     switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        // Retrieve the full subscription object to process it
+        if (session.subscription && typeof session.subscription === "string") {
+          const subscription = await stripe.subscriptions.retrieve(session.subscription);
+          await upsertSubscriptionRecord(subscription, event.type, event.id);
+        }
+        break;
+      }
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;

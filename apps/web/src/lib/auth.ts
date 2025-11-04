@@ -1,5 +1,6 @@
 import { HttpError } from './errors';
-import { getRlsClient, type RlsClient } from './supabase';
+import { getRlsClient } from "./supabase.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -75,7 +76,7 @@ export type AuthContext = {
   userId: string;
   workspaceId?: string | null;
   accessToken?: string | null;
-  supabase: RlsClient;
+  supabase: SupabaseClient;
 };
 
 export function requireUser(req?: { headers?: HeadersInput }): AuthContext {

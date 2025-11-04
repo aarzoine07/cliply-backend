@@ -57,8 +57,8 @@ export const PLAN_MATRIX: PlanMatrix = {
       concurrent_jobs: 2,
     },
   },
-  /** Growth — small teams scaling their content workflows. */
-  growth: {
+  /** Pro — small teams scaling their content workflows. */
+  pro: {
     description: "Growing teams needing faster throughput and AI assistance.",
     limits: {
       schedule: true,
@@ -72,8 +72,8 @@ export const PLAN_MATRIX: PlanMatrix = {
       concurrent_jobs: 6,
     },
   },
-  /** Agency — agencies managing multiple clients with high volume demands. */
-  agency: {
+  /** Premium — agencies managing multiple clients with high volume demands. */
+  premium: {
     description: "Agencies coordinating multiple brands with high volume needs.",
     limits: {
       schedule: true,

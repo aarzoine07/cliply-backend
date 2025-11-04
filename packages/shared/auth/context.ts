@@ -105,7 +105,7 @@ function ensureWorkspaceId(req: Request): string {
 }
 
 function isPlanName(value: unknown): value is PlanName {
-  return value === "basic" || value === "growth" || value === "agency";
+  return value === "basic" || value === "pro" || value === "premium";
 }
 
 export async function buildAuthContext(req: Request): Promise<AuthContext> {
