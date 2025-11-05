@@ -1,0 +1,127 @@
+import type { NextApiRequest, NextApiResponse } from "next";
+import { createClient } from "@supabase/supabase-js";
+
+function sealedBoxEncryptRef(plaintext: string): string {
+  return `sbx:${Buffer.from(plaintext).toString("base64url")}`;
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      console.error("TikTok OAuth error:", error);
+      return res.redirect("/integrations?error=tiktok_auth_failed");
+    }
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ ok: false, error: "Missing authorization code" });
+    }
+
+    if (!state || typeof state !== "string") {
+      return res.status(400).json({ ok: false, error: "Missing state parameter" });
+    }
+
+    // Decode state to get workspace_id and user_id
+    let workspace_id: string;
+    let user_id: string;
+    try {
+      const decoded = JSON.parse(Buffer.from(state, "base64url").toString());
+      workspace_id = decoded.workspace_id;
+      user_id = decoded.user_id;
+    } catch {
+      return res.status(400).json({ ok: false, error: "Invalid state parameter" });
+    }
+
+    // Exchange code for tokens
+    const clientKey = process.env.TIKTOK_CLIENT_KEY;
+    const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
+    const redirectUri = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
+
+    if (!clientKey || !clientSecret || !redirectUri) {
+      return res.status(500).json({ ok: false, error: "TikTok OAuth not configured" });
+    }
+
+    const tokenRes = await fetch("https://open-api.tiktok.com/oauth/token/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_key: clientKey,
+        client_secret: clientSecret,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    const tokenData = await tokenRes.json();
+
+    if (!tokenRes.ok || !tokenData.access_token) {
+      console.error("TikTok token exchange failed:", tokenData);
+      return res.redirect("/integrations?error=tiktok_token_failed");
+    }
+
+    // Get user info to store external_id
+    const userInfoRes = await fetch("https://open.tiktokapis.com/v2/user/info/", {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    });
+
+    let externalId = "unknown";
+    if (userInfoRes.ok) {
+      const userInfo = await userInfoRes.json();
+      externalId = userInfo.data?.user?.open_id || "unknown";
+    }
+
+    // Store encrypted tokens in database
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false },
+      }
+    );
+
+    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+
+    // Upsert to handle reconnections
+    const { error: dbError } = await supabase
+      .from("connected_accounts")
+      .upsert(
+        {
+          user_id,
+          workspace_id,
+          platform: "tiktok",
+          provider: "tiktok",
+          external_id: externalId,
+          access_token_encrypted_ref: sealedBoxEncryptRef(tokenData.access_token),
+          refresh_token_encrypted_ref: sealedBoxEncryptRef(tokenData.refresh_token),
+          expires_at: expiresAt,
+          scopes: ["user.info.basic", "video.upload", "video.publish"],
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "workspace_id,platform",
+        }
+      );
+
+    if (dbError) {
+      console.error("Failed to store TikTok tokens:", dbError);
+      return res.redirect("/integrations?error=tiktok_storage_failed");
+    }
+
+    // Log audit event
+    await supabase.from("events_audit").insert({
+      workspace_id,
+      actor_id: user_id,
+      event_type: "tiktok.connected",
+      payload: { platform: "tiktok", external_id: externalId },
+    });
+
+    res.redirect("/integrations?connected=tiktok");
+  } catch (error) {
+    console.error("TikTok OAuth callback error:", error);
+    res.redirect("/integrations?error=tiktok_unexpected");
+  }
+}
