@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import { buildAuthContext } from "@cliply/shared/auth/context";
-import { logger } from "@cliply/shared/logging/logger";
-
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -25,12 +23,21 @@ function getSupabaseClient() {
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
+    // Lazy import shared modules to prevent Vercel from statically evaluating them
+    const [{ buildAuthContext }, { logger }] = await Promise.all([
+      import("@cliply/shared/auth/context"),
+      import("@cliply/shared/logging/logger"),
+    ]);
+
     const auth = await buildAuthContext(request);
     if (!auth.workspace_id) {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: "COMPLIANCE_WORKSPACE_MISSING", message: "Workspace context missing." },
+          error: {
+            code: "COMPLIANCE_WORKSPACE_MISSING",
+            message: "Workspace context missing.",
+          },
         },
         { status: 401 },
       );
@@ -47,41 +54,27 @@ export async function GET(request: Request): Promise<NextResponse> {
       .limit(1)
       .maybeSingle();
 
-    if (lastEventError) {
-      throw new Error(`Failed to fetch last audit event: ${lastEventError.message}`);
-    }
+    if (lastEventError) throw new Error(lastEventError.message);
 
-    const { count: totalCount, error: totalCountError } = await supabase
+    const { count: totalCount } = await supabase
       .from("events_audit")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId);
 
-    if (totalCountError) {
-      throw new Error(`Failed to count audit events: ${totalCountError.message}`);
-    }
-
     const staleCutoff = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
-    const { count: staleCount, error: staleCountError } = await supabase
+    const { count: staleCount } = await supabase
       .from("events_audit")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .lt("created_at", staleCutoff);
 
-    if (staleCountError) {
-      throw new Error(`Failed to count stale events: ${staleCountError.message}`);
-    }
-
-    const { data: recentIntegrations, error: integrationError } = await supabase
+    const { data: recentIntegrations } = await supabase
       .from("events_audit")
       .select("event_type, created_at")
       .eq("workspace_id", workspaceId)
       .in("event_type", ["stripe_sync", "oauth_tiktok_refreshed"])
       .order("created_at", { ascending: false })
       .limit(5);
-
-    if (integrationError) {
-      throw new Error(`Failed to fetch integration audit events: ${integrationError.message}`);
-    }
 
     const health = {
       workspace_id: workspaceId,
@@ -94,7 +87,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     logger.info("Audit health check", { workspace_id: workspaceId }, health);
     return NextResponse.json({ ok: true, data: health });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load audit health.";
+    const [{ logger }] = await Promise.all([
+      import("@cliply/shared/logging/logger"),
+    ]);
+    const message =
+      error instanceof Error ? error.message : "Failed to load audit health.";
     logger.error("Audit health endpoint failure", {}, { error: message });
     return NextResponse.json(
       {
