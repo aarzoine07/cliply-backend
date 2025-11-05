@@ -3,14 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 
 import { buildAuthContext } from "@cliply/shared/auth/context";
 
-const TOKEN_URL =
-  process.env.TIKTOK_TOKEN_URL ?? "https://open.tiktokapis.com/v2/oauth/token/";
-const TIKTOK_CLIENT_ID = process.env.TIKTOK_CLIENT_ID;
-const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
-const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI;
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function readCookie(req: Request, name: string): string | null {
   const raw = req.headers.get("cookie") ?? "";
@@ -31,6 +25,14 @@ async function sealedBoxEncryptRef(plaintext: string): Promise<string> {
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
+    const TOKEN_URL =
+      process.env.TIKTOK_TOKEN_URL ?? "https://open.tiktokapis.com/v2/oauth/token/";
+    const TIKTOK_CLIENT_ID = process.env.TIKTOK_CLIENT_ID;
+    const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
+    const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI;
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
     if (!TIKTOK_CLIENT_ID || !TIKTOK_CLIENT_SECRET || !TIKTOK_REDIRECT_URI) {
       return NextResponse.json(
         {

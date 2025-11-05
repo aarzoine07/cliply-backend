@@ -3,10 +3,8 @@ import { randomBytes } from "crypto";
 
 import { buildAuthContext } from "@cliply/shared/auth/context";
 
-const TIKTOK_AUTH_BASE =
-  process.env.TIKTOK_AUTH_BASE ?? "https://www.tiktok.com/v2/auth/authorize/";
-const TIKTOK_CLIENT_ID = process.env.TIKTOK_CLIENT_ID;
-const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const SCOPES = ["video.upload", "video.publish", "video.list", "user.info.basic"];
 
@@ -16,6 +14,11 @@ function base64url(bytes: Buffer): string {
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
+    const TIKTOK_AUTH_BASE =
+      process.env.TIKTOK_AUTH_BASE ?? "https://www.tiktok.com/v2/auth/authorize/";
+    const TIKTOK_CLIENT_ID = process.env.TIKTOK_CLIENT_ID;
+    const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI;
+
     if (!TIKTOK_CLIENT_ID || !TIKTOK_REDIRECT_URI) {
       return NextResponse.json(
         {

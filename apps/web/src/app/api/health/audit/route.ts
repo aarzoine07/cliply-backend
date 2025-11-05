@@ -4,19 +4,24 @@ import { createClient } from "@supabase/supabase-js";
 import { buildAuthContext } from "@cliply/shared/auth/context";
 import { logger } from "@cliply/shared/logging/logger";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("Supabase configuration is missing for audit health endpoint.");
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const STALE_THRESHOLD_DAYS = 90;
 const STALE_THRESHOLD_MS = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+
+function getSupabaseClient() {
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase configuration is missing for audit health endpoint.");
+  }
+
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
@@ -32,6 +37,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
 
     const workspaceId = auth.workspace_id;
+    const supabase = getSupabaseClient();
 
     const { data: lastEventData, error: lastEventError } = await supabase
       .from("events_audit")
