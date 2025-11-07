@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = 'force-dynamic';
+
 function sealedBoxEncryptRef(plaintext: string): string {
   return `sbx:${Buffer.from(plaintext).toString("base64url")}`;
 }
