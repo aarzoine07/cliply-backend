@@ -20,6 +20,24 @@ function hasServiceRoleAccess(req: NextApiRequest) {
   return scheme?.toLowerCase() === "bearer" && token === SERVICE_ROLE_KEY;
 }
 
+function isAuthorizedCronRequest(req: NextApiRequest) {
+  // Vercel Cron Jobs send Authorization: Bearer <CRON_SECRET>
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const headerValue = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    if (headerValue) {
+      const [scheme, token] = headerValue.split(/\s+/, 2);
+      if (scheme?.toLowerCase() === "bearer" && token === cronSecret) {
+        return true;
+      }
+    }
+  }
+  // Fallback to service role access for manual testing
+  return hasServiceRoleAccess(req);
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { SUPABASE_URL, SERVICE_ROLE_KEY } = getEnv();
   const client = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -33,7 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
 
-  if (!hasServiceRoleAccess(req)) {
+  if (!isAuthorizedCronRequest(req)) {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
