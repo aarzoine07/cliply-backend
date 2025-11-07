@@ -26,7 +26,7 @@ console.log("🔎 env.SUPABASE_URL =", env.SUPABASE_URL);
 if (!env.SUPABASE_URL) throw new Error("SUPABASE_URL missing in test environment");
 if (!env.SUPABASE_ANON_KEY) throw new Error("SUPABASE_ANON_KEY missing in test environment");
 
-export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
