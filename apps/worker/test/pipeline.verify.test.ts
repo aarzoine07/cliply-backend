@@ -4,7 +4,7 @@ import { supabaseTest, resetDatabase } from "@cliply/shared/test/setup";
 const SEEDED_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const SEEDED_USER_ID = "00000000-0000-0000-0000-000000000101";
 const SEEDED_PROJECT_ID = "00000000-0000-0000-0000-000000000201";
-const WORKER_ID = "e2e-verify-worker";
+const WORKER_ID = "00000000-0000-0000-0000-000000000999";
 
 describe("E2E pipeline verification", () => {
   beforeAll(async () => {
@@ -91,6 +91,7 @@ describe("E2E pipeline verification", () => {
 
     expect(enqueueError).toBeNull();
 
+    // Use correct UUID parameter
     const { data: claimed, error: claimError } = await supabaseTest.rpc("worker_claim_next_job", {
       p_worker_id: WORKER_ID,
     });
@@ -99,7 +100,7 @@ describe("E2E pipeline verification", () => {
     expect(claimed).toBeTruthy();
     expect(claimed?.id).toBe(jobRow.id);
     expect(claimed?.state).toBe("running");
-    expect(claimed?.locked_by).toBe(WORKER_ID);
+    expect(claimed?.worker_id).toBe(WORKER_ID); // corrected field
     expect(claimed?.kind).toBe("TRANSCRIBE");
 
     const { data: events, error: eventsError } = await supabaseTest
@@ -132,8 +133,9 @@ describe("E2E pipeline verification", () => {
       expect(jobRow).toBeTruthy();
       expect(jobRow.state).toBe("queued");
 
+      // Use correct UUID param — remove concatenation
       const { data: claimed, error: claimError } = await supabaseTest.rpc("worker_claim_next_job", {
-        p_worker_id: `${WORKER_ID}-${kind}`,
+        p_worker_id: WORKER_ID,
       });
 
       expect(claimError).toBeNull();
@@ -142,7 +144,7 @@ describe("E2E pipeline verification", () => {
 
       const { error: finishError } = await supabaseTest.rpc("worker_finish", {
         p_job_id: claimed.id,
-        p_worker_id: `${WORKER_ID}-${kind}`,
+        p_worker_id: WORKER_ID, // use UUID only
         p_result: { verified: true, kind },
       });
 
