@@ -30,9 +30,10 @@ jobs:
       - name: Run tests
         env:
           SUPABASE_URL: "https://test.supabase.local"
-          SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.fake.key"
+          SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImV4cCI6MTk5OTk5OTk5OSwiaWF0IjoxNjAwMDAwMDAwfQ.somerandomsignaturestring0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
           STRIPE_SECRET_KEY: "sk_test_12345"
           STRIPE_WEBHOOK_SECRET: "whsec_12345"
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_12345"
         run: pnpm test
+
 
