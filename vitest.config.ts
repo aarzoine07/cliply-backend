@@ -1,4 +1,4 @@
-﻿// vitest.config.ts (repo root)
+﻿// vitest.config.ts (root)
 
 import path from "path";
 import { defineConfig } from "vitest/config";
@@ -6,6 +6,11 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "apps/web/src"),
+    },
+  },
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
@@ -15,4 +20,3 @@ export default defineConfig({
     },
   },
 });
-
