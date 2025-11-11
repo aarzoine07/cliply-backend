@@ -8,26 +8,21 @@ on:
 
 jobs:
   build-and-test:
-    name: Build and Test
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-        run_install: false
-
-      - name: Setup Node.js
+      - name: Setup Node.js (20) + cache
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "pnpm"
+          cache: pnpm
+
+      - name: Enable Corepack (pnpm from packageManager)
+        run: corepack enable
 
       - name: Install dependencies
-        # Keep this until pnpm-lock.yaml is committed
         run: pnpm install --no-frozen-lockfile
 
       - name: Type check
@@ -35,5 +30,3 @@ jobs:
 
       - name: Run tests
         run: pnpm test
-
-
