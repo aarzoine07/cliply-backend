@@ -1,8 +1,11 @@
+// packages/shared/test/setup.ts
+
 console.log("🔍 CI ENV SNAPSHOT:", {
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 });
+
 import * as path from "path";
 import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
@@ -29,9 +32,14 @@ export const env = {
 console.log("🔎 env.SUPABASE_URL =", env.SUPABASE_URL);
 
 if (!env.SUPABASE_URL) throw new Error("SUPABASE_URL missing in test environment");
-if (!env.SUPABASE_ANON_KEY) throw new Error("SUPABASE_ANON_KEY missing in test environment");
+if (!env.SUPABASE_ANON_KEY && !env.SUPABASE_SERVICE_ROLE_KEY)
+  throw new Error("No Supabase key found in test environment");
 
-export const supabaseTest = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+// ✅ use service role if present, else fall back to anon
+export const supabaseTest = createClient(
+  env.SUPABASE_URL,
+  env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY
+);
 
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
@@ -44,9 +52,11 @@ export function createTestJwt(userId: string, workspaceId: string) {
     exp: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hour
   };
 
-  return jwt.sign(payload, env.SUPABASE_SERVICE_ROLE_KEY, {
-    algorithm: "HS256",
-  });
+  return jwt.sign(
+    payload,
+    env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY,
+    { algorithm: "HS256" }
+  );
 }
 
 export async function resetDatabase() {
