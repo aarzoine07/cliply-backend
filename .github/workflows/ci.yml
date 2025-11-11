@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,11 +32,15 @@ jobs:
         env:
           SUPABASE_URL: "https://test.supabase.local"
 
-          # set both names to guarantee supabase-js picks one
+          # both anon keys to satisfy all references
           SUPABASE_ANON_KEY: >-
             eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImV4cCI6MTk5OTk5OTk5OSwiaWF0IjoxNjAwMDAwMDAwfQ.somerandomsignaturestring0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
           NEXT_PUBLIC_SUPABASE_ANON_KEY: >-
             eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImV4cCI6MTk5OTk5OTk5OSwiaWF0IjoxNjAwMDAwMDAwfQ.somerandomsignaturestring0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+
+          # ✅ add service role key for tests needing admin access
+          SUPABASE_SERVICE_ROLE_KEY: >-
+            service-role-test-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
 
           STRIPE_SECRET_KEY: "sk_test_12345"
           STRIPE_WEBHOOK_SECRET: "whsec_12345"
