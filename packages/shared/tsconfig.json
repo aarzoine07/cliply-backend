@@ -14,6 +14,6 @@
     "allowSyntheticDefaultImports": true,
     "noEmit": false
   },
-  "include": ["src"]
+  "include": ["src", "billing", "logging", "types"]
 }
 
