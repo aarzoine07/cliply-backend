@@ -1,14 +1,23 @@
 {
   "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "Node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "target": "ES2022",
     "lib": ["ES2022"],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
-    "noEmit": true
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@cliply/shared/*": ["../../packages/shared/src/*"]
+    },
+    "customConditions": ["node", "import", "require"],
+    "verbatimModuleSyntax": false
   },
+  "include": ["src", "test"],
   "references": [{ "path": "../../packages/shared" }]
 }
+
 

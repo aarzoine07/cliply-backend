@@ -11,9 +11,9 @@ import {
 } from "@cliply/shared/constants";
 import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
 
-import { buildRenderCommand } from "../services/ffmpeg/build-commands";
-import { runFFmpeg } from "../services/ffmpeg/run";
-import type { Job, WorkerContext } from "./types";
+import { buildRenderCommand } from "../services/ffmpeg/build-commands.js";
+import { runFFmpeg } from "../services/ffmpeg/run.js";
+import type { Job, WorkerContext } from "./types.js";
 
 const PIPELINE = "CLIP_RENDER";
 

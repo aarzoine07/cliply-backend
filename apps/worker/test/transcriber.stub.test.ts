@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { getTranscriber } from '../src/services/transcriber';
+import { getTranscriber } from '../src/services/transcriber/index.js';
+import { afterEach } from "vitest";
 
 describe('stub transcriber', () => {
   const originalKey = process.env.DEEPGRAM_API_KEY;

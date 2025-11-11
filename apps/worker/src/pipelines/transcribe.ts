@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/shared/constants';
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 
-import type { Job, WorkerContext } from './types';
-import { getTranscriber } from '../services/transcriber';
+import type { Job, WorkerContext } from './types.js';
+import { getTranscriber } from '../services/transcriber/index.js';
 
 const PIPELINE = 'TRANSCRIBE';
 const TRANSCRIPT_SRT = 'transcript.srt';

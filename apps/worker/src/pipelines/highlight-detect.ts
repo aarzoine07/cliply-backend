@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
 
-import type { Job, WorkerContext } from './types';
+import type { Job, WorkerContext } from './types.js';
 
 const PIPELINE = 'HIGHLIGHT_DETECT';
 
