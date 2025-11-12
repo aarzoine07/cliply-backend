@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSrt, secToTimestamp, timestampToSec, toSrt } from "../src/services/captions/srt";
+import { parseSrt, secToTimestamp, timestampToSec, toSrt } from "../src/services/captions/srt.js";
 
 describe('srt utils', () => {
   it('converts seconds to timestamp and back', () => {

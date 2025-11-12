@@ -1,6 +1,6 @@
 import { PUBLISH_YOUTUBE } from "@cliply/shared/schemas/jobs";
-import type { Job, WorkerContext } from "./types";
-import { YouTubeClient } from "../services/youtube/client";
+import type { Job, WorkerContext } from "./types.js";
+import { YouTubeClient } from "../services/youtube/client.js";
 
 const PIPELINE = "PUBLISH_YOUTUBE";
 

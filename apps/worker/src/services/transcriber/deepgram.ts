@@ -1,4 +1,4 @@
-import { type TranscribeResult, type Transcriber } from './index';
+import { type TranscribeResult, type Transcriber } from './index.js';
 
 export class DeepgramTranscriber implements Transcriber {
   constructor(private readonly apiKey: string | undefined) {

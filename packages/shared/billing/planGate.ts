@@ -60,14 +60,17 @@ export function checkPlanAccess(plan: PlanName, feature: keyof PlanLimits): Plan
 export function enforcePlanAccess(plan: PlanName, feature: keyof PlanLimits): void {
   const result = checkPlanAccess(plan, feature);
   if (!result.active) {
-    // Map the reason to a stable billing error code and HTTP status.
-    const code = result.reason === "limit" ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
+    const reason = (result as any).reason;
+    const message = (result as any).message;
+    const code = reason === "limit" ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
+
     throw {
       code,
-      message: result.message ?? `${String(feature)} requires an upgraded plan.`,
+      message: message ?? `${String(feature)} requires an upgraded plan.`,
       status: code === BILLING_PLAN_LIMIT ? 429 : 403,
     };
   }
 }
 
 export { BILLING_PLAN_LIMIT, BILLING_PLAN_REQUIRED };
+

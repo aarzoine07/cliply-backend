@@ -1,7 +1,7 @@
 {
   "name": "@cliply/shared",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -29,7 +29,8 @@
     "./test/loadEnv": "./test/loadEnv.ts",
     "./env": "./src/env.ts"
   },
-  "main": "./src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",

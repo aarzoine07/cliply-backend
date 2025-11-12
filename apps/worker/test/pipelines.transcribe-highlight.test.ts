@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS } from '@cliply/shared/constants';
-import type { Job, WorkerContext } from '../src/pipelines/types';
-import { run as runTranscribe } from '../src/pipelines/transcribe';
-import { run as runHighlightDetect } from '../src/pipelines/highlight-detect';
+import type { Job, WorkerContext } from '../src/pipelines/types.js';
+import { run as runTranscribe } from '../src/pipelines/transcribe.js';
+import { run as runHighlightDetect } from '../src/pipelines/highlight-detect.js';
 
 const WORKSPACE_ID = '11111111-1111-1111-1111-111111111111';
 const PROJECT_ID = '22222222-2222-4222-8222-222222222222';
@@ -20,7 +21,7 @@ const MOCK_SEGMENTS = [
   { start: 50, end: 59, text: 'Wrap with a tip so they share it.', confidence: 0.91 },
 ];
 
-vi.mock('../src/services/transcriber', () => {
+vi.mock('../src/services/transcriber/index.js', () => {
   const transcribe = vi.fn(async () => ({
     srt: '1\n00:00:00,000 --> 00:00:05,000\nMock transcript\n',
     json: { segments: MOCK_SEGMENTS },
@@ -72,7 +73,7 @@ describe('transcribe + highlight-detect pipelines', () => {
     sentry = createSentryMock();
     ctx = {
       storage,
-      supabase,
+      supabase: supabase as unknown as SupabaseClient,
       logger,
       queue,
       sentry,

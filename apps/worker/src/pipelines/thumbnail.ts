@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { BUCKET_RENDERS, BUCKET_THUMBS, BUCKET_VIDEOS } from "@cliply/shared/constants";
 import { THUMBNAIL_GEN } from "@cliply/shared/schemas/jobs";
 
-import type { Job, WorkerContext } from "./types";
-import { runFFmpeg } from "../services/ffmpeg/run";
+import type { Job, WorkerContext } from "./types.js";
+import { runFFmpeg } from "../services/ffmpeg/run.js";
 
 const PIPELINE = "THUMBNAIL_GEN";
 

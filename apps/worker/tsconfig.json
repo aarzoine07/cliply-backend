@@ -1,23 +1,23 @@
 {
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "composite": true,
-    "incremental": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
-    "declarationDir": "../../node_modules/.cache/cliply-types/apps-worker",
-    "tsBuildInfoFile": "../../node_modules/.cache/cliply-types/apps-worker.tsbuildinfo",
-    "noEmit": false
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@cliply/shared/*": ["../../packages/shared/src/*"]
+    },
+    "customConditions": ["node", "import", "require"],
+    "verbatimModuleSyntax": false
   },
-  "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ],
-  "references": [
-    {
-      "path": "../../packages/shared"
-    }
-  ]
+  "include": ["src", "test"],
+  "references": [{ "path": "../../packages/shared" }]
 }
+
+
