@@ -39,7 +39,7 @@ describe("jobs queue: enqueue/claim/backoff", () => {
 
   it("enqueues pending job with attempts=0", async () => {
     const job = await enqueueJob(WS, "transcribe", { src: "/test-assets/sample.mp4" });
-    expect(job.status).toBe("pending");
+    expect(job.status).toBe("queued");
     expect(job.attempts).toBe(0);
   });
 
@@ -66,7 +66,7 @@ describe("jobs queue: enqueue/claim/backoff", () => {
     }
     
     if (hasNewSchema) {
-      update1.status = "pending";
+      update1.status = "queued";
       update1.next_run_at = new Date(secFromNow(backoff1)).toISOString();
     } else {
       update1.state = "queued";
@@ -95,7 +95,7 @@ describe("jobs queue: enqueue/claim/backoff", () => {
     }
     
     if (hasNewSchema) {
-      update2.status = "pending";
+      update2.status = "queued";
       update2.next_run_at = new Date(secFromNow(backoff2)).toISOString();
     } else {
       update2.state = "queued";
