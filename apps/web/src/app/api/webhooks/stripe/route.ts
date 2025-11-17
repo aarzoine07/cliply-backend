@@ -1,12 +1,6 @@
 import { NextRequest } from "next/server";
 import Stripe from "stripe";
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 function bufferToString(buffer: Uint8Array): string {
