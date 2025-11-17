@@ -8,6 +8,7 @@ const nextConfig = {
   },
   experimental: {
     forceSwcTransforms: true,
+    appDir: true,
   },
   transpilePackages: ["@cliply/shared"],
   webpack: (config) => {
