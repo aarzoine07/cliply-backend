@@ -13,7 +13,7 @@
     "stripe": "^14.23.0"
   },
   "scripts": {
-    "dev": "tsx watch src/worker.ts",
+    "dev": "dotenv -e .env.local -- tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts",

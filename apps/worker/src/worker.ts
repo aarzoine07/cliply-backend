@@ -5,52 +5,59 @@ import { getEnv } from "@cliply/shared/env";
 import type { JobRecord } from "./jobs/types.js";
 
 const env = getEnv();
+console.log("WORKER DB URL =", env.SUPABASE_URL);
+console.log("WORKER SERVICE ROLE KEY LENGTH =", env.SUPABASE_SERVICE_ROLE_KEY?.length);
+
 const supabase = createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!);
 
 const MAX_ATTEMPTS = 5;
 
-// Initialize Sentry if DSN is configured
+// Init Sentry
 if (env.SENTRY_DSN) {
   initSentry(env.SENTRY_DSN);
 }
 
+/**
+ * CLAIM NEXT JOB  — Pure SQL
+ * Matches your actual DB:
+ *   status: queued | running | succeeded | failed
+ *   state : queued | running | done | error
+ *   kind  : TRANSCRIBE | ...
+ */
 async function claimNextJobs(): Promise<JobRecord[]> {
-  // Try RPC first, fallback to atomic update
-  try {
-    const { data, error } = await supabase.rpc("claim_next_jobs");
-    if (!error && data) {
-      return Array.isArray(data) ? (data as JobRecord[]) : [data as JobRecord];
-    }
-  } catch {
-    // RPC doesn't exist, use atomic update approach
-  }
-
-  // Fallback: atomic claim using update with WHERE clause
-  const { data: jobs, error: sqlError } = await supabase
+  // 1) Direct SELECT
+  const { data: jobs, error: selectErr } = await supabase
     .from("jobs")
     .select("*")
-    .eq("status", "pending")
+    .eq("status", "queued")
     .lte("next_run_at", new Date().toISOString())
     .order("created_at", { ascending: true })
     .limit(1);
 
-  if (sqlError) throw sqlError;
+  if (selectErr) throw selectErr;
   if (!jobs || jobs.length === 0) return [];
 
-  // Atomically update status to processing (acts as a lock)
   const job = jobs[0];
-  const { data: updated, error: updateError } = await supabase
+
+  // 2) Update → running
+  const { data: updated, error: updateErr } = await supabase
     .from("jobs")
-    .update({ status: "processing" })
+    .update({
+      status: "running",
+      state: "running", // required for your schema
+    })
     .eq("id", job.id)
-    .eq("status", "pending")
+    .eq("status", "queued")
     .select()
     .single();
 
-  if (updateError || !updated) return [];
+  if (updateErr || !updated) return [];
   return [updated as JobRecord];
 }
 
+/**
+ * DISPATCH LOOP
+ */
 export async function dispatcherLoop() {
   while (true) {
     try {
@@ -58,65 +65,96 @@ export async function dispatcherLoop() {
 
       for (const job of jobs) {
         const start = Date.now();
-        logEvent(job.id, `${job.type}:start`);
+
+        const jobType = job.kind ?? job.type ?? "UNKNOWN";
+        logEvent(job.id, `${jobType}:start`);
 
         try {
           await runJob(job);
-          await supabase.from("jobs").update({ status: "completed" }).eq("id", job.id);
-          logEvent(job.id, `${job.type}:success`, { duration_ms: Date.now() - start });
-    } catch (err) {
-          const attempts = (job.attempts || 0) + 1;
-          const backoffSeconds = Math.min(300, Math.pow(2, attempts) * 30);
-          const nextRunAt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
 
-          const updateData: Partial<JobRecord> = {
+          await supabase
+            .from("jobs")
+            .update({
+              status: "succeeded",
+              state: "done",
+            })
+            .eq("id", job.id);
+
+          logEvent(job.id, `${jobType}:success`, {
+            duration_ms: Date.now() - start,
+          });
+
+        } catch (err) {
+          const attempts = (job.attempts || 0) + 1;
+
+          const backoffSeconds = Math.min(
+            300,
+            Math.pow(2, attempts) * 30
+          );
+
+          const updateData = {
             attempts,
             last_error: (err as Error).message,
-            next_run_at: nextRunAt,
+            next_run_at: new Date(Date.now() + backoffSeconds * 1000).toISOString(),
+            state: attempts >= MAX_ATTEMPTS ? "error" : "queued",
+            status: attempts >= MAX_ATTEMPTS ? "failed" : "queued",
           };
 
-          if (attempts >= MAX_ATTEMPTS) {
-            updateData.status = "failed";
-          } else {
-            updateData.status = "pending";
-          }
-
           await supabase.from("jobs").update(updateData).eq("id", job.id);
-          logEvent(job.id, `${job.type}:failure`, { attempts, backoffSeconds });
-          captureError(err, { jobId: job.id, jobType: job.type, attempts });
+
+          logEvent(job.id, `${jobType}:failure`, {
+            attempts,
+            backoffSeconds,
+          });
+
+          captureError(err, {
+            jobId: job.id,
+            jobType,
+            attempts,
+          });
         }
       }
 
-      await new Promise((r) => setTimeout(r, 5000));
-    } catch (error) {
-      console.error("Dispatcher error:", error);
       await new Promise((r) => setTimeout(r, 3000));
+
+    } catch (err) {
+      console.error("Dispatcher error:", err);
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 }
 
+/**
+ * RUN JOB
+ */
 async function runJob(job: JobRecord) {
-  switch (job.type) {
-    case "transcribe":
-      // placeholder: implement transcription logic
-      break;
-    case "render":
-      // placeholder: implement rendering logic
-      break;
+  const jobType = job.kind ?? job.type ?? "UNKNOWN";
+
+  switch (jobType) {
+    case "TRANSCRIBE":
+      // TODO implement real work
+      return;
+
+    case "RENDER":
+      // TODO implement real work
+      return;
+
     default:
-      throw new Error(`Unknown job type: ${job.type}`);
+      throw new Error(`Unknown job type: ${jobType}`);
   }
 }
 
-// Main entry point
+/**
+ * MAIN
+ */
 async function main() {
   console.log("Starting worker dispatcher...");
   await dispatcherLoop();
 }
 
-main().catch((error) => {
-  const err = error instanceof Error ? error : new Error(String(error));
-  captureError(err, { service: "worker", event: "worker_fatal" });
+main().catch((err) => {
+  captureError(err as Error, { service: "worker", event: "fatal" });
   console.error("Worker fatal error:", err);
   process.exit(1);
 });
+
