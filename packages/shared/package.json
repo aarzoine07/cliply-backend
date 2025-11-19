@@ -29,7 +29,7 @@
 
     "./constants": "./dist/constants.js",
 
-    "./logging": "./dist/logging/logger.js",
+    "./logging": "./dist/logging/index.js",
     "./logging/logger": "./dist/logging/logger.js",
     "./logging/redactSensitive": "./dist/logging/redactSensitive.js",
     "./logging/auditLogger": "./dist/logging/auditLogger.js",
