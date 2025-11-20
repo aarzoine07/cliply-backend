@@ -1,0 +1,19 @@
+
+> @cliply/web@ dev /Users/davidmaman/Desktop/cliply-backend/apps/web
+> next dev
+
+  ▲ Next.js 14.2.3
+  - Local:        http://localhost:3000
+  - Environments: .env.local
+
+ ✓ Starting...
+TypeError [ERR_INVALID_ARG_TYPE]: The "to" argument must be of type string. Received undefined
+    at Object.relative (node:path:1373:5)
+    at Watchpack.<anonymous> (/Users/davidmaman/Desktop/cliply-backend/node_modules/.pnpm/next@14.2.3_@babel+core@7.28.5_@opentelemetry+api@1.9.0_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js:381:55)
+    at Watchpack.emit (node:events:519:28)
+    at Watchpack._onTimeout (/Users/davidmaman/Desktop/cliply-backend/node_modules/.pnpm/next@14.2.3_@babel+core@7.28.5_@opentelemetry+api@1.9.0_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next/dist/compiled/watchpack/watchpack.js:1:37727)
+    at listOnTimeout (node:internal/timers:588:17)
+    at process.processTimers (node:internal/timers:523:7) {
+  code: 'ERR_INVALID_ARG_TYPE'
+}
+[?25h

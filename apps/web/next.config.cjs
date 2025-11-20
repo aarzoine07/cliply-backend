@@ -17,11 +17,8 @@ const nextConfig = {
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
-
-      // ✅ FIXED: Proper alias for shared/dist
-      "@cliply/shared": path.resolve(__dirname, "../../packages/shared/dist"),
+      "@cliply/shared": path.resolve(__dirname, "../../packages/shared/src"),
     };
-
     return config;
   },
 

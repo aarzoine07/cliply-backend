@@ -59,6 +59,7 @@ async function getPlanAndUsage(workspace_id: string) {
 
 export function withPlanGate(handler: NextApiHandler, action: "publish" | "schedule"): NextApiHandler {
   return async (req: NextApiRequest, res: NextApiResponse) => {
+    console.log("PLAN-GATE: running, wsid=", req.cookies["wsid"]);
     const workspace_id = req.cookies["wsid"];
 
     if (!workspace_id) {
