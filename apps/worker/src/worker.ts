@@ -1,7 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 import { logEvent } from "./services/logging.js";
-import { initSentry, captureError } from "@cliply/shared/sentry";
-import { getEnv } from "@cliply/shared/env";
+
+// @ts-ignore – CJS module imported into ESM
+import SentryModule from "@cliply/shared/sentry";
+
+const initSentry = SentryModule.initSentry;
+const captureError = SentryModule.captureError;
+
+
+// Env (CJS build → must import default and access properties at runtime)
+// @ts-ignore – CJS module imported into ESM
+import EnvModule from "@cliply/shared/env";
+const getEnv = EnvModule.getEnv;
+
 import type { JobRecord } from "./jobs/types.js";
 
 const env = getEnv();

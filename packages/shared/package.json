@@ -2,7 +2,6 @@
   "name": "@cliply/shared",
   "private": true,
   "version": "1.0.0",
-  "type": "module",
 
   "exports": {
     ".": "./dist/index.js",
@@ -23,11 +22,11 @@
     "./billing/rateLimitConfig": "./dist/billing/rateLimitConfig.js",
     "./billing/stripeWebhook": "./dist/billing/stripeWebhook.js",
 
-    "./schemas": "./dist/schemas.js",
-    "./schemas/jobs": "./dist/schemas/jobs.js",
-    "./schemas/upload": "./dist/schemas/upload.js",
+    "./schemas": "./dist/src/schemas.js",
+    "./schemas/jobs": "./dist/src/schemas/jobs.js",
+    "./schemas/upload": "./dist/src/schemas/upload.js",
 
-    "./constants": "./dist/constants.js",
+    "./constants": "./dist/src/constants.js",
 
     "./logging": "./dist/logging/index.js",
     "./logging/logger": "./dist/logging/logger.js",
@@ -35,7 +34,7 @@
     "./logging/auditLogger": "./dist/logging/auditLogger.js",
 
     "./logger": "./dist/logger.js",
-    "./sentry": "./dist/sentry.js",
+    "./sentry": "./dist/src/sentry.js",
 
     "./test/setup": "./dist/test/setup.js",
     "./test/loadEnv": "./dist/test/loadEnv.js",

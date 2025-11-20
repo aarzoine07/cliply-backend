@@ -20,7 +20,7 @@ async function upsertBillingCustomer(
 }
 
 import Stripe from "stripe";
-import { stripePriceToPlan } from "./stripePlanMap";
+import { stripePriceToPlan } from "@cliply/shared/billing/stripePlanMap";
 import { getAdminClient } from "../supabase/admin";
 import type { PlanName } from "../types/auth";
 
