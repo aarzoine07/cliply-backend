@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { withPlanGate } from "../../../src/middleware/planGate";
+import { withPlanGate } from "@cliply/shared/billing";
 import { createClient } from "@supabase/supabase-js";
 
 async function handler(req: NextApiRequest, res: NextApiResponse) {
