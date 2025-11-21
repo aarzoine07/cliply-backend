@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { BUCKET_RENDERS, BUCKET_THUMBS, BUCKET_VIDEOS } from "@cliply/shared/constants";
 import { THUMBNAIL_GEN } from "@cliply/shared/schemas/jobs";
 
-import type { Job, WorkerContext } from "./types";
-import { runFFmpeg } from "../services/ffmpeg/run";
+import type { Job, WorkerContext } from "./types.js";
+import { runFFmpeg } from "../services/ffmpeg/run.js";
+import { logEvent } from "../services/logging.js";
 
 const PIPELINE = "THUMBNAIL_GEN";
 
@@ -22,6 +23,8 @@ interface ClipRow {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  const start = Date.now();
+  logEvent(String(job.id), "thumbnail_job:start");
   try {
     const payload = THUMBNAIL_GEN.parse(job.payload);
     const clip = await fetchClip(ctx, payload.clipId);
@@ -85,7 +88,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       inputBucket,
       inputPathKey,
     });
+    logEvent(String(job.id), "thumbnail_job:success", { duration_ms: Date.now() - start });
   } catch (error) {
+    logEvent(String(job.id), "thumbnail_job:failure", { error: (error as Error).message });
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },

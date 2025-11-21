@@ -2,6 +2,7 @@
 
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
+import { resolve } from "path";
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
@@ -14,5 +15,7 @@ export default defineConfig({
       "**/.{idea,git,cache,output,temp}/**",
       "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*",
     ],
+    setupFiles: [resolve(__dirname, "../../packages/shared/test/setup.ts")],
   },
 });
+

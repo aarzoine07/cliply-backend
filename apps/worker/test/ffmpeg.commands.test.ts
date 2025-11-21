@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRenderCommand } from "../src/services/ffmpeg/build-commands";
+import { buildRenderCommand } from "../src/services/ffmpeg/build-commands.js";
 
 describe('buildRenderCommand', () => {
   it('builds expected args and filter graph', () => {

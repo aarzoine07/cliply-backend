@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { toSrt } from '../captions/srt';
+import { toSrt } from '../captions/srt.js';
 
 export interface TranscribeResult {
   srt: string;

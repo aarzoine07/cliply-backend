@@ -2,18 +2,22 @@
 import jwt from "jsonwebtoken";
 
 // ⚠️ MUST match the jwt_secret in supabase/config.toml
-const SECRET = "super-secret-local-jwt-token-with-at-least-32-characters";
+const SECRET = "super-secret-jwt-token-with-at-least-32-characters";
 
 // Workspace IDs used in tests
-const A = "00000000-0000-0000-0000-000000000001";
-const B = "00000000-0000-0000-0000-000000000002";
+const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+const WORKSPACE_B = "00000000-0000-0000-0000-000000000002";
 
-function mint(workspaceId) {
+// User IDs (must match seed.sql)
+const USER_A = "00000000-0000-0000-0000-000000000101";
+const USER_B = "00000000-0000-0000-0000-000000000102";
+
+function mint(userId, workspaceId) {
   return jwt.sign(
     {
       role: "authenticated",
       workspace_id: workspaceId,
-      sub: `test-${workspaceId}`,
+      sub: userId, // sub must match auth.uid() for RLS policies
     },
     SECRET,
     {
@@ -23,5 +27,5 @@ function mint(workspaceId) {
   );
 }
 
-console.log("SUPABASE_JWT_A=", mint(A));
-console.log("SUPABASE_JWT_B=", mint(B));
+console.log("SUPABASE_JWT_A=", mint(USER_A, WORKSPACE_A));
+console.log("SUPABASE_JWT_B=", mint(USER_B, WORKSPACE_B));

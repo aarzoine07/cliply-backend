@@ -4,17 +4,18 @@ import { randomUUID } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { BUCKET_RENDERS, BUCKET_THUMBS, BUCKET_TRANSCRIPTS, BUCKET_VIDEOS } from "@cliply/shared/constants";
-import type { Job, WorkerContext } from "../src/pipelines/types";
-import { run as runRender } from "../src/pipelines/clip-render";
-import { run as runThumbnail } from "../src/pipelines/thumbnail";
-import { run as runPublish } from "../src/pipelines/publish-youtube";
+import type { Job, WorkerContext } from "../src/pipelines/types.js";
+import { run as runRender } from "../src/pipelines/clip-render.js";
+import { run as runThumbnail } from "../src/pipelines/thumbnail.js";
+import { run as runPublish } from "../src/pipelines/publish-youtube.js";
 
 const WORKSPACE_ID = "11111111-1111-1111-1111-111111111111";
 const PROJECT_ID = "22222222-2222-4222-8222-222222222222";
 const CLIP_ID = "33333333-3333-4333-8333-333333333333";
 
-vi.mock("../src/services/ffmpeg/run", () => {
+vi.mock("../src/services/ffmpeg/run.js", () => {
   return {
     runFFmpeg: vi.fn(async (args: string[]) => {
       const outputs = args.filter((_, index) => {
@@ -30,7 +31,7 @@ vi.mock("../src/services/ffmpeg/run", () => {
   };
 });
 
-vi.mock("../src/services/youtube/client", () => {
+vi.mock("../src/services/youtube/client.js", () => {
   return {
     YouTubeClient: class {
       constructor(private readonly config: { accessToken: string }) {
@@ -65,7 +66,7 @@ describe("render + thumbnail + publish pipelines", () => {
     sentry = createSentryMock();
     ctx = {
       storage,
-      supabase,
+      supabase: supabase as unknown as SupabaseClient,
       logger,
       queue,
       sentry,

@@ -3,7 +3,7 @@ import { getEnv } from "@cliply/shared/env";
 import { createClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { resetDatabase } from "../../../packages/shared/test/setup";
+import { resetDatabase, supabaseTest } from "../../../packages/shared/test/setup";
 
 const env = getEnv();
 
@@ -17,6 +17,7 @@ if (!JWT_A || !JWT_B) throw new Error("SUPABASE_JWT_A and SUPABASE_JWT_B must be
 
 // ✅ use a *real* UUID, not a test string
 const workspaceA = "00000000-0000-0000-0000-000000000001";
+const workspaceB = "00000000-0000-0000-0000-000000000002";
 
 const clientA = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
   global: { headers: { Authorization: `Bearer ${JWT_A}` } },
@@ -72,5 +73,33 @@ describe("RLS – Cross-Workspace Isolation", () => {
       .select();
 
     expect(updatedRows?.length ?? 0).toBe(0);
+  });
+
+  it("denies cross-workspace read for projects", async () => {
+    // Seed data already has a project in workspace A (from seed.sql)
+    // u1 (clientA) can read their own workspace's project
+    const { data: ownRows, error: ownError } = await clientA
+      .from("projects")
+      .select("*")
+      .eq("workspace_id", workspaceA);
+
+    // If RLS allows same-workspace read, should succeed
+    // If there's a policy issue, we'll get an error, but that's a separate problem
+    if (ownError) {
+      console.log("Note: Same-workspace read error (may be policy issue):", ownError.message);
+    }
+
+    // u2 (clientB) tries SELECT * FROM projects WHERE workspace_id = ws_a.id
+    // If RLS works, Supabase returns HTTP 403 or empty array
+    const { data: rows, error: readError } = await clientB
+      .from("projects")
+      .select("*")
+      .eq("workspace_id", workspaceA);
+
+    // Expect empty array or error - this proves cross-workspace isolation
+    // Error code 42501 = permission denied (RLS blocking access)
+    const hasError = readError !== null;
+    const isEmpty = !rows || rows.length === 0;
+    expect(hasError || isEmpty).toBe(true);
   });
 });

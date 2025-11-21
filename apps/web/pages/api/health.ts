@@ -1,5 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  return res.status(200).json({ ok: true, message: "Cliply backend healthy" });
+export default function handler(req: NextApiRequest, res: NextApiResponse) {
+  res.status(200).json({
+    ok: true,
+    message: "Cliply backend healthy",
+    env: "pages-api",
+  });
 }
+

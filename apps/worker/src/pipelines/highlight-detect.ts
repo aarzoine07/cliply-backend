@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
 
-import type { Job, WorkerContext } from './types';
+import type { Job, WorkerContext } from './types.js';
+import { logEvent } from '../services/logging.js';
 
 const PIPELINE = 'HIGHLIGHT_DETECT';
 
@@ -27,6 +28,8 @@ interface HighlightCandidate {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  const start = Date.now();
+  logEvent(String(job.id), "highlight_detect_job:start");
   try {
     const payload = HIGHLIGHT_DETECT.parse(job.payload);
     const workspaceId = job.workspaceId;
@@ -102,7 +105,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       candidates: candidates.length,
       inserted: inserts.length,
     });
+    logEvent(String(job.id), "highlight_detect_job:success", { duration_ms: Date.now() - start });
   } catch (error) {
+    logEvent(String(job.id), "highlight_detect_job:failure", { error: (error as Error).message });
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },

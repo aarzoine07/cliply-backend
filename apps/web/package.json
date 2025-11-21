@@ -1,7 +1,6 @@
 {
   "name": "@cliply/web",
   "private": true,
-
   "scripts": {
     "dev": "next dev",
     "build": "next build --no-lint",
@@ -15,6 +14,8 @@
     "@cliply/shared": "workspace:*",
     "@sentry/nextjs": "^10.22.0",
     "@supabase/supabase-js": "^2.57.4",
+    "libsodium-wrappers": "^0.7.15",
+    "micro": "^10.0.1",
     "next": "14.2.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",

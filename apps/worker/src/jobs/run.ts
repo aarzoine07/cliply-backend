@@ -1,6 +1,6 @@
-import * as db from '../db';
-import { pipelineTranscribeStub } from '../pipelines/transcribe';
-import type { ClaimedJob } from './claim';
+import * as db from '../db.js';
+import { pipelineTranscribeStub } from '../pipelines/transcribe.js';
+import type { ClaimedJob } from './claim.js';
 
 type JobsTable = {
   update: (values: Record<string, unknown>) => { eq: (column: string, value: unknown) => unknown | Promise<unknown> };

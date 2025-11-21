@@ -6,17 +6,22 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+
   experimental: {
     forceSwcTransforms: true,
+    appDir: true,
   },
+
   transpilePackages: ["@cliply/shared"],
+
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
-      "@shared": path.resolve("./packages/shared/src"),
+      "@cliply/shared": path.resolve(__dirname, "../../packages/shared/src"),
     };
     return config;
   },
+
   env: {
     SENTRY_DSN: process.env.SENTRY_DSN,
   },
@@ -31,3 +36,4 @@ module.exports = withSentryConfig(nextConfig, {
   disableLogger: true,
   automaticVercelMonitors: true,
 });
+

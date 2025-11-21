@@ -5,14 +5,17 @@ import { join } from 'node:path';
 import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/shared/constants';
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 
-import type { Job, WorkerContext } from './types';
-import { getTranscriber } from '../services/transcriber';
+import type { Job, WorkerContext } from './types.js';
+import { getTranscriber } from '../services/transcriber/index.js';
+import { logEvent } from '../services/logging.js';
 
 const PIPELINE = 'TRANSCRIBE';
 const TRANSCRIPT_SRT = 'transcript.srt';
 const TRANSCRIPT_JSON = 'transcript.json';
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  const start = Date.now();
+  logEvent(String(job.id), "transcribe_job:start");
   try {
     const payload = TRANSCRIBE.parse(job.payload);
     const workspaceId = job.workspaceId;
@@ -57,7 +60,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       workspaceId,
       storagePath: sourceKey,
     });
+    logEvent(String(job.id), "transcribe_job:success", { duration_ms: Date.now() - start });
   } catch (error) {
+    logEvent(String(job.id), "transcribe_job:failure", { error: (error as Error).message });
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },

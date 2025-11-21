@@ -1,94 +1,97 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import Stripe from 'stripe';
-import { z } from 'zod';
+import type { NextApiRequest, NextApiResponse } from "next";
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
-import { requireUser } from '@/lib/auth';
-import { handler, ok, err } from '@/lib/http';
-import { logger } from '@/lib/logger';
-import { checkRateLimit } from '@/lib/rate-limit';
-import { STRIPE_PLAN_MAP } from '@cliply/shared/billing/stripePlanMap';
-import type { PlanName } from '@cliply/shared/types/auth';
-
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-
-if (!STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY is not configured');
-}
-
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
-
-const CheckoutRequestSchema = z.object({
-  priceId: z.string().min(1),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
-});
-
-export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
-  const started = Date.now();
-  logger.info('billing_checkout_start', { method: req.method ?? 'GET' });
-
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    res.status(405).json(err('method_not_allowed', 'Method not allowed'));
-    return;
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: { code: "METHOD_NOT_ALLOWED" } });
   }
 
-  const auth = requireUser(req);
-  const { userId, workspaceId } = auth;
+  const { priceId, success_url, cancel_url } = req.body || {};
+  const wsid = req.cookies["wsid"];
 
-  const rate = await checkRateLimit(userId, 'billing:checkout');
-  if (!rate.allowed) {
-    res.status(429).json(err('too_many_requests', 'Rate limited'));
-    return;
+  if (!wsid || !priceId) {
+    return res.status(400).json({
+      ok: false,
+      error: { code: "BAD_REQUEST", message: "wsid and priceId required" },
+    });
   }
 
-  // Validate request body
-  const validation = CheckoutRequestSchema.safeParse(req.body);
-  if (!validation.success) {
-    res.status(400).json(err('invalid_request', validation.error.message));
-    return;
+  const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!STRIPE_SECRET_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({
+      ok: false,
+      error: { code: "CONFIGURATION_ERROR", message: "Missing required environment variables" },
+    });
   }
 
-  const { priceId, successUrl, cancelUrl } = validation.data;
-
-  // Verify priceId is valid
-  if (!STRIPE_PLAN_MAP[priceId]) {
-    res.status(400).json(err('invalid_price', 'Invalid price ID'));
-    return;
-  }
+  const stripe = new Stripe(STRIPE_SECRET_KEY, {
+    apiVersion: "2023-10-16",
+  });  
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 
   try {
-    
-    // Create Stripe checkout session
-    // ✅ explicitly type the call against Stripe.Checkout.SessionCreateParams
-const params: Stripe.Checkout.SessionCreateParams = {
-  mode: "subscription",
-  payment_method_types: ["card"],
-  line_items: [
-    {
-      price: priceId,
-      quantity: 1,
-    },
-  ],
-  success_url: successUrl,
-  cancel_url: cancelUrl,
-};
+    // Ensure a Stripe customer exists for this workspace
+    const { data: existing, error: qErr } = await supabase
+      .from("billing_customers")
+      .select("stripe_customer_id, email")
+      .eq("workspace_id", wsid)
+      .maybeSingle();
 
-const session = await stripe.checkout.sessions.create(params);
+    if (qErr) {
+      console.error("Failed to query billing_customers:", qErr);
+      return res.status(500).json({ ok: false, error: { code: "DB_QUERY_FAILED" } });
+    }
 
-    logger.info('billing_checkout_success', {
-      userId,
-      workspaceId,
-      priceId,
-      sessionId: session.id,
-      durationMs: Date.now() - started,
-      remainingTokens: rate.remaining,
+    let customerId = existing?.stripe_customer_id;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        metadata: { workspace_id: wsid },
+      });
+      customerId = customer.id;
+
+      const { error: upErr } = await supabase
+        .from("billing_customers")
+        .upsert(
+          {
+            workspace_id: wsid,
+            stripe_customer_id: customerId,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "workspace_id" },
+        );
+
+      if (upErr) {
+        console.error("Failed to upsert billing_customers:", upErr);
+        return res.status(500).json({ ok: false, error: { code: "DB_UPSERT_FAILED" } });
+      }
+    }
+
+    const appUrl = process.env.APP_URL || "http://localhost:3000";
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: success_url || `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: cancel_url || `${appUrl}/billing/cancel`,
     });
 
-    res.status(200).json(ok({ checkoutUrl: session.url, sessionId: session.id }));
+    return res.status(200).json({ ok: true, data: { url: session.url } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create checkout session';
-    logger.error('billing_checkout_error', { userId, workspaceId, priceId, error: message });
-    res.status(500).json(err('checkout_error', message));
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Checkout session creation error:", message);
+    return res.status(500).json({
+      ok: false,
+      error: { code: "CHECKOUT_ERROR", message },
+    });
   }
-});
+}

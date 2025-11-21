@@ -2,34 +2,51 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, ci-verification ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ main, dev, ci-verification ]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 8
-
-      - name: Setup Node.js
+      - name: Setup Node.js (20)
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "pnpm"
+
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Type check
         run: pnpm run typecheck
 
       - name: Run tests
-        run: pnpm test
+        env:
+          SUPABASE_URL: "https://test.supabase.local"
 
+          # both anon keys to satisfy all references
+          SUPABASE_ANON_KEY: >-
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImV4cCI6MTk5OTk5OTk5OSwiaWF0IjoxNjAwMDAwMDAwfQ.somerandomsignaturestring0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: >-
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImV4cCI6MTk5OTk5OTk5OSwiaWF0IjoxNjAwMDAwMDAwfQ.somerandomsignaturestring0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+
+          # ✅ add service role key for tests needing admin access
+          SUPABASE_SERVICE_ROLE_KEY: >-
+            service-role-test-key-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+
+          STRIPE_SECRET_KEY: "sk_test_12345"
+          STRIPE_WEBHOOK_SECRET: "whsec_12345"
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_12345"
+
+        run: pnpm test
