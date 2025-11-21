@@ -1,6 +1,7 @@
 import { PUBLISH_YOUTUBE } from "@cliply/shared/schemas/jobs";
 import type { Job, WorkerContext } from "./types.js";
 import { YouTubeClient } from "../services/youtube/client.js";
+import { logEvent } from "../services/logging.js";
 
 const PIPELINE = "PUBLISH_YOUTUBE";
 
@@ -22,6 +23,8 @@ interface ScheduleRow {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  const start = Date.now();
+  logEvent(String(job.id), "publish_youtube_job:start");
   try {
     const payload = PUBLISH_YOUTUBE.parse(job.payload);
 
@@ -68,7 +71,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       videoId: response.videoId,
       workspaceId: job.workspaceId,
     });
+    logEvent(String(job.id), "publish_youtube_job:success", { duration_ms: Date.now() - start });
   } catch (error) {
+    logEvent(String(job.id), "publish_youtube_job:failure", { error: (error as Error).message });
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },

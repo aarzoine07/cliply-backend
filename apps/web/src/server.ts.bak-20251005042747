@@ -1,0 +1,55 @@
+﻿import express from "express";
+import type { Request, Response } from "express";
+import { Client } from "pg";
+
+const app = express();
+app.use(express.json());
+
+const PORT = Number(process.env.PORT || 3001);
+const START = Date.now();
+
+app.get("/api/health", async (_req: Request, res: Response) => {
+  const info: Record<string, any> = {
+    ok: true,
+    service: "api",
+    uptime_ms: Date.now() - START,
+    env: process.env.NODE_ENV || "development",
+  };
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    try {
+      const c = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+      await c.connect();
+      const r = await c.query("select current_database() as db");
+      await c.end();
+      info.db = "ok";
+      info.db_name = r.rows?.[0]?.db ?? null;
+    } catch (e: any) {
+      info.db = "error";
+      info.db_error = e?.message || "unknown";
+    }
+  } else {
+    info.db = "not_configured";
+  }
+
+  res.status(200).json(info);
+});
+
+app.get("/api/_routes", (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, routes: ["/api/health", "/api/_routes"] });
+});
+
+app.get("/", (_req: Request, res: Response) => {
+  res.status(200).send("Cliply API dev server running");
+});
+
+app.listen(PORT, () => {
+  console.log(JSON.stringify({
+    ts: new Date().toISOString(),
+    service: "api",
+    event: "server_started",
+    port: PORT,
+    env: process.env.NODE_ENV || "development",
+  }));
+});

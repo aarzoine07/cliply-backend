@@ -13,6 +13,7 @@ import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
 
 import { buildRenderCommand } from "../services/ffmpeg/build-commands.js";
 import { runFFmpeg } from "../services/ffmpeg/run.js";
+import { logEvent } from "../services/logging.js";
 import type { Job, WorkerContext } from "./types.js";
 
 const PIPELINE = "CLIP_RENDER";
@@ -34,6 +35,8 @@ interface ProjectRow {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  const start = Date.now();
+  logEvent(String(job.id), "render_clip_job:start");
   try {
     const payload = CLIP_RENDER.parse(job.payload);
 
@@ -106,7 +109,9 @@ await ensureFileExists(tempThumb);
       videoKey,
       thumbKey,
     });
+    logEvent(String(job.id), "render_clip_job:success", { duration_ms: Date.now() - start });
   } catch (error) {
+    logEvent(String(job.id), "render_clip_job:failure", { error: (error as Error).message });
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },

@@ -3,10 +3,10 @@
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "workspaces": [
-  "apps/*",
-  "packages/*"
-],
-    "scripts": {
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
     "preinstall": "pnpm -F @cliply/shared build",
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
@@ -23,7 +23,7 @@
     "db:apply:sql": "tsx scripts/db/apply-sql.ts",
     "dev:web": "tsx apps/web/src/server.ts"
   },
-    "devDependencies": {
+  "devDependencies": {
     "@eslint/js": "^9.36.0",
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
@@ -53,6 +53,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "dotenv": "^17.2.3",
+    "libsodium-wrappers": "^0.7.15",
     "zod": "^4.1.9"
   },
   "type": "module"
