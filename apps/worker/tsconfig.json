@@ -1,6 +1,27 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "baseUrl": ".",
+    "paths": {
+      "@cliply/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@cliply/shared/*": [
+        "../../packages/shared/*"
+      ]
+    },
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "downlevelIteration": true,
     "composite": true,
     "incremental": true,
     "declaration": true,

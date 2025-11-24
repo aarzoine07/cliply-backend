@@ -1,11 +1,23 @@
+/**
+ * Canonical TikTok OAuth callback route for Cliply.
+ * 
+ * This is the primary endpoint for handling TikTok OAuth callbacks.
+ * All new integrations should use this route.
+ * 
+ * Route: GET /api/auth/tiktok/connect/callback?code=<code>&state=<state>
+ * 
+ * Legacy routes (dev-only, disabled in production):
+ * - /api/auth/tiktok_legacy/callback (Pages Router)
+ * - /api/oauth/tiktok/callback (Pages Router)
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = 'force-dynamic';
+import { encryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
+import { logOAuthEvent } from "@cliply/shared/observability/logging";
+import { serverEnv, publicEnv } from "@/lib/env";
 
-function sealedBoxEncryptRef(plaintext: string): string {
-  return `sbx:${Buffer.from(plaintext).toString("base64url")}`;
-}
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,6 +28,9 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error("TikTok OAuth error:", error);
+      logOAuthEvent("tiktok", "error", {
+        error: new Error(`TikTok OAuth error: ${error}`),
+      });
       return NextResponse.redirect("/integrations?error=tiktok_auth_failed");
     }
 
@@ -40,9 +55,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid state parameter" }, { status: 400 });
     }
 
-    const clientKey = process.env.TIKTOK_CLIENT_KEY!;
-    const clientSecret = process.env.TIKTOK_CLIENT_SECRET!;
-    const redirectUri = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL!;
+    const clientKey = serverEnv.TIKTOK_CLIENT_ID;
+    const clientSecret = serverEnv.TIKTOK_CLIENT_SECRET;
+    const redirectUri = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
     if (!clientKey || !clientSecret || !redirectUri) {
       return NextResponse.json({ ok: false, error: "TikTok OAuth not configured" }, { status: 500 });
@@ -67,6 +82,11 @@ export async function GET(request: NextRequest) {
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error("TikTok token exchange failed:", tokenData);
+      logOAuthEvent("tiktok", "error", {
+        workspaceId: workspace_id,
+        userId: user_id,
+        error: new Error("Token exchange failed"),
+      });
       return NextResponse.redirect("/integrations?error=tiktok_token_failed");
     }
 
@@ -83,8 +103,8 @@ export async function GET(request: NextRequest) {
 
     // STORE IN SUPABASE
     const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      serverEnv.SUPABASE_URL,
+      serverEnv.SUPABASE_SERVICE_ROLE_KEY,
       { auth: { persistSession: false, autoRefreshToken: false } }
     );
 
@@ -97,8 +117,8 @@ export async function GET(request: NextRequest) {
         platform: "tiktok",
         provider: "tiktok",
         external_id: externalId,
-        access_token_encrypted_ref: sealedBoxEncryptRef(tokenData.access_token),
-        refresh_token_encrypted_ref: sealedBoxEncryptRef(tokenData.refresh_token),
+        access_token_encrypted_ref: encryptSecret(tokenData.access_token, { purpose: "tiktok_token" }),
+        refresh_token_encrypted_ref: encryptSecret(tokenData.refresh_token, { purpose: "tiktok_token" }),
         expires_at: expiresAt,
         scopes: tokenData.scope ? tokenData.scope.split(",") : ["user.info.basic", "video.upload"],
         updated_at: new Date().toISOString(),
@@ -118,10 +138,28 @@ export async function GET(request: NextRequest) {
       payload: { platform: "tiktok", external_id: externalId },
     });
 
+    // Get connected account ID for logging
+    const { data: account } = await supabase
+      .from("connected_accounts")
+      .select("id")
+      .eq("workspace_id", workspace_id)
+      .eq("platform", "tiktok")
+      .maybeSingle();
+
+    logOAuthEvent("tiktok", "success", {
+      workspaceId: workspace_id,
+      userId: user_id,
+      connectedAccountId: account?.id,
+      externalId,
+    });
+
     console.log("✅ TikTok connection stored successfully:", externalId);
     return NextResponse.redirect("/integrations?connected=tiktok");
   } catch (err) {
     console.error("TikTok OAuth callback error:", err);
+    logOAuthEvent("tiktok", "error", {
+      error: err,
+    });
     return NextResponse.redirect("/integrations?error=tiktok_unexpected");
   }
 }

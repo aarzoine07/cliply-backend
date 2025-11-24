@@ -10,7 +10,8 @@
     "@cliply/shared": "workspace:*",
     "@sentry/node": "^8.42.0",
     "@supabase/supabase-js": "^2.57.4",
-    "stripe": "^14.23.0"
+    "stripe": "^14.23.0",
+    "yt-dlp-exec": "^1.0.2"
   },
   "scripts": {
     "dev": "tsx watch src/worker.ts",
@@ -18,7 +19,9 @@
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "readyz": "tsx src/readyz.ts",
+    "smoke:tiktok": "tsx ./scripts/smoke.tiktok.publish.ts"
   },
   "devDependencies": {
     "dotenv-cli": "^10.0.0",

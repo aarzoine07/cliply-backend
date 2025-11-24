@@ -1,46 +1,62 @@
-import { z } from 'zod';
+/**
+ * Web app environment variable adapter.
+ * 
+ * This module provides type-safe access to environment variables for the Next.js app.
+ * - Server-side code (API routes, server components) should use `serverEnv` or `getServerEnv()`
+ * - Client-side code should use `publicEnv` (only NEXT_PUBLIC_* variables are exposed)
+ * 
+ * All environment variables are defined in packages/shared/src/env.ts (single source of truth).
+ */
+import { getEnv as getSharedEnv, type Env } from "@cliply/shared/env";
 
-const EnvSchema = z
-  .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-    SENTRY_DSN: z.string().url().optional(),
-    YOUTUBE_API_KEY: z.string().min(1).optional(),
-  })
-  .strict();
+/**
+ * Get server-side environment variables.
+ * Use this in API routes, server components, getServerSideProps, etc.
+ * Contains all backend env vars from the shared schema.
+ * 
+ * @returns Parsed and validated environment variables
+ */
+export function getServerEnv(): Env {
+  return getSharedEnv();
+}
 
-type ParsedEnv = z.infer<typeof EnvSchema>;
+/**
+ * Server-side environment variables (lazy accessor).
+ * Use this in API routes, server components, getServerSideProps, etc.
+ * Contains all backend env vars from the shared schema.
+ * 
+ * This is a convenience accessor that calls getServerEnv() internally.
+ */
+export const serverEnv: Env = new Proxy({} as Env, {
+  get(_target, prop) {
+    return getSharedEnv()[prop as keyof Env];
+  },
+});
 
-export type Env = ParsedEnv & {
-  SUPABASE_URL: string;
-};
+/**
+ * Client-side safe environment variables.
+ * Only NEXT_PUBLIC_* variables are exposed to the browser.
+ * 
+ * Client components should import and use this instead of accessing process.env directly.
+ */
+export const publicEnv = {
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  NEXT_PUBLIC_TIKTOK_REDIRECT_URL: process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL,
+  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+  NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+} as const;
 
-let cachedEnv: Env | null = null;
-
+/**
+ * Legacy getEnv() function for backward compatibility.
+ * @deprecated Use `getServerEnv()` or `serverEnv` instead.
+ */
 export function getEnv(): Env {
-  if (cachedEnv) return cachedEnv;
-
-  const raw: Record<keyof ParsedEnv, string | undefined> = {
-    NODE_ENV: process.env.NODE_ENV,
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    SENTRY_DSN: process.env.SENTRY_DSN,
-    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-  };
-
-  const parsed = EnvSchema.parse(raw);
-  cachedEnv = {
-    ...parsed,
-    SUPABASE_URL: parsed.NEXT_PUBLIC_SUPABASE_URL,
-  };
-
-  return cachedEnv;
+  return getServerEnv();
 }
 
-/** Test helper to clear cached env between test cases. */
-export function resetEnvForTesting(): void {
-  cachedEnv = null;
-}
+/**
+ * Test helper to clear cached env between test cases.
+ * Re-exports clearEnvCache from shared for convenience.
+ */
+export { clearEnvCache } from "@cliply/shared/env";

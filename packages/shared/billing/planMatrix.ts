@@ -29,6 +29,12 @@ export interface PlanLimits extends PlanFeature {
   storage_gb: number;
   /** Concurrent jobs allowed in the queue for this workspace. */
   concurrent_jobs: number;
+  /** Maximum source video minutes processed per month. */
+  source_minutes_per_month?: number;
+  /** Maximum clips generated per month. */
+  clips_per_month?: number;
+  /** Maximum projects created per month. */
+  projects_per_month?: number;
 }
 
 /** Aggregate plan configuration combining feature flags and limits. */
@@ -55,6 +61,9 @@ export const PLAN_MATRIX: PlanMatrix = {
       max_team_members: 1,
       storage_gb: 15,
       concurrent_jobs: 2,
+      source_minutes_per_month: 150, // 5 uploads/day * 30 days * ~1 min avg
+      clips_per_month: 450, // 5 uploads/day * 30 days * 3 clips/project
+      projects_per_month: 150, // 5 uploads/day * 30 days
     },
   },
   /** Pro — small teams scaling their content workflows. */
@@ -70,6 +79,9 @@ export const PLAN_MATRIX: PlanMatrix = {
       max_team_members: 5,
       storage_gb: 80,
       concurrent_jobs: 6,
+      source_minutes_per_month: 900, // 30 uploads/day * 30 days * ~1 min avg
+      clips_per_month: 10800, // 30 uploads/day * 30 days * 12 clips/project
+      projects_per_month: 900, // 30 uploads/day * 30 days
     },
   },
   /** Premium — agencies managing multiple clients with high volume demands. */
@@ -85,6 +97,9 @@ export const PLAN_MATRIX: PlanMatrix = {
       max_team_members: 15,
       storage_gb: 250,
       concurrent_jobs: 15,
+      source_minutes_per_month: 4500, // 150 uploads/day * 30 days * ~1 min avg
+      clips_per_month: 180000, // 150 uploads/day * 30 days * 40 clips/project
+      projects_per_month: 4500, // 150 uploads/day * 30 days
     },
   },
 } as const;

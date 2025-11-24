@@ -2,26 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { buildAuthContext } from "@cliply/shared/auth/context";
+import { decryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getSupabaseClient() {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { serverEnv } from "@/lib/env";
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("Supabase credentials are not configured for TikTok token proxy.");
-  }
+function getSupabaseClient() {
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = serverEnv;
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-}
-
-async function sealedBoxDecryptRef(ref: string): Promise<string> {
-  if (!ref.startsWith("sbx:")) throw new Error("Invalid sealed-box reference");
-  return Buffer.from(ref.slice(4), "base64url").toString("utf8");
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
@@ -80,7 +73,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       );
     }
 
-    const accessToken = await sealedBoxDecryptRef(access_token_encrypted_ref);
+    const accessToken = decryptSecret(access_token_encrypted_ref, { purpose: "tiktok_token" });
     const proxyPayload = {
       access_token: accessToken,
       expires_in: 60,

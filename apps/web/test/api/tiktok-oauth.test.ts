@@ -1,3 +1,13 @@
+/**
+ * Tests for TikTok OAuth flow.
+ * 
+ * NOTE: These tests reference legacy routes for backward compatibility.
+ * The canonical routes are:
+ * - GET /api/auth/tiktok/connect (App Router)
+ * - GET /api/auth/tiktok/connect/callback (App Router)
+ * 
+ * Legacy routes are fenced and return 410 in production.
+ */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextApiRequest, NextApiResponse } from "next";
 
@@ -6,7 +16,7 @@ describe("TikTok OAuth Flow", () => {
     vi.clearAllMocks();
   });
 
-  describe("/api/auth/tiktok (Initiate)", () => {
+  describe("/api/auth/tiktok (Initiate) - LEGACY", () => {
     it("should redirect to TikTok authorization URL with correct parameters", async () => {
       const mockReq = {
         query: { workspace_id: "550e8400-e29b-41d4-a716-446655440000" },
@@ -34,7 +44,7 @@ describe("TikTok OAuth Flow", () => {
     });
   });
 
-  describe("/api/auth/tiktok/callback", () => {
+  describe("/api/auth/tiktok/callback - LEGACY", () => {
     it("should exchange code for tokens and store encrypted", async () => {
       expect(true).toBe(true);
     });

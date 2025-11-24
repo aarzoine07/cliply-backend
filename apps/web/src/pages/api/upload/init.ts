@@ -4,13 +4,16 @@ import { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC, getExtension } from '@cliply/shared/
 import { UploadInitFileOut, UploadInitInput, UploadInitYtOut } from '@cliply/shared/schemas';
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { requireUser } from '@/lib/auth';
+import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
+
 import { HttpError } from '@/lib/errors';
 import { handler, ok, err } from '@/lib/http';
+import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getSignedUploadUrl } from '@/lib/storage';
 import { getAdminClient } from '@/lib/supabase';
+import { withPlanGate } from '@/lib/billing/withPlanGate';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -22,15 +25,25 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const auth = resolveAuth(req);
-  const { userId, workspaceId } = auth;
+  let auth;
+  try {
+    auth = await buildAuthContext(req);
+  } catch (error) {
+    handleAuthError(error, res);
+    return;
+  }
+
+  const userId = auth.userId || auth.user_id;
+  const workspaceId = auth.workspaceId || auth.workspace_id;
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));
     return;
   }
 
-  const rate = await checkRateLimit(userId, 'upload:init');
+  // Apply plan gating for uploads
+  return withPlanGate(auth, 'uploads_per_day', async (req, res) => {
+    const rate = await checkRateLimit(userId, 'upload:init');
   if (!rate.allowed) {
     res.status(429).json(err('too_many_requests', 'Rate limited'));
     return;
@@ -63,6 +76,37 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     const storagePath = `${BUCKET_VIDEOS}/${storageKey}`;
 
     try {
+      // Estimate minutes from file size (rough heuristic: ~1MB per minute for compressed video)
+      // This is conservative - actual duration will be recorded accurately in transcribe pipeline
+      const estimatedMinutes = Math.max(1, Math.ceil(input.size / (1024 * 1024))); // At least 1 minute
+
+      // Check usage limits before creating project
+      try {
+        await assertWithinUsage(workspaceId, 'projects', 1);
+        await assertWithinUsage(workspaceId, 'source_minutes', estimatedMinutes);
+      } catch (error) {
+        if (error instanceof UsageLimitExceededError) {
+          logger.warn('upload_init_usage_limit_exceeded', {
+            workspaceId,
+            metric: error.metric,
+            used: error.used,
+            limit: error.limit,
+          });
+          res.status(429).json({
+            ok: false,
+            error: {
+              code: 'usage_limit_exceeded',
+              message: error.message,
+              metric: error.metric,
+              used: error.used,
+              limit: error.limit,
+            },
+          });
+          return;
+        }
+        throw error;
+      }
+
       const signedUrl = await getSignedUploadUrl(storageKey, SIGNED_URL_TTL_SEC, BUCKET_VIDEOS);
 
       const title = deriveTitle(input.filename);
@@ -87,6 +131,13 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         res.status(500).json(err('internal_error', 'Failed to create project'));
         return;
       }
+
+      // Record project creation usage (idempotent - if project already exists, this won't double-count)
+      await recordUsage({
+        workspaceId,
+        metric: 'projects',
+        amount: 1,
+      });
 
       const payload = UploadInitFileOut.parse({
         uploadUrl: signedUrl,
@@ -115,6 +166,37 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   try {
+    // For YouTube, we don't know duration yet, so use conservative estimate
+    // Actual duration will be recorded in transcribe pipeline
+    const estimatedMinutes = 10; // Conservative default
+
+    // Check usage limits before creating project
+    try {
+      await assertWithinUsage(workspaceId, 'projects', 1);
+      await assertWithinUsage(workspaceId, 'source_minutes', estimatedMinutes);
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        logger.warn('upload_init_youtube_usage_limit_exceeded', {
+          workspaceId,
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+        });
+        res.status(429).json({
+          ok: false,
+          error: {
+            code: 'usage_limit_exceeded',
+            message: error.message,
+            metric: error.metric,
+            used: error.used,
+            limit: error.limit,
+          },
+        });
+        return;
+      }
+      throw error;
+    }
+
     const projectId = randomUUID();
     const { data: project, error: insertError } = await admin
       .from('projects')
@@ -138,12 +220,41 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       return;
     }
 
+    // Record project creation usage
+    await recordUsage({
+      workspaceId,
+      metric: 'projects',
+      amount: 1,
+    });
+
+    // Enqueue YouTube download job
+    const { error: jobError } = await admin.from('jobs').insert({
+      workspace_id: workspaceId,
+      kind: 'YOUTUBE_DOWNLOAD',
+      status: 'queued',
+      payload: {
+        projectId,
+        youtubeUrl: input.url,
+      },
+    });
+
+    if (jobError) {
+      logger.error('upload_init_youtube_job_enqueue_failed', {
+        workspaceId,
+        projectId,
+        message: jobError.message,
+      });
+      // Don't fail the request - the job can be manually enqueued later
+      // But log the error for monitoring
+    }
+
     const payload = UploadInitYtOut.parse({ projectId });
 
     logger.info('upload_init_success', {
       userId,
       workspaceId,
       source: 'youtube',
+      projectId,
       durationMs: Date.now() - started,
       remainingTokens: rate.remaining,
     });
@@ -155,45 +266,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       workspaceId,
     });
     res.status(500).json(err('internal_error', 'Failed to create project'));
-  }
+    }
+  })(req, res);
 });
 
-function resolveAuth(req: NextApiRequest) {
-  if (typeof requireUser === 'function') {
-    return requireUser(req);
-  }
-
-  const headers = req.headers ?? {};
-  const userId = takeHeader(headers['x-debug-user']);
-  if (!userId) {
-    throw new HttpError(401, 'missing user', 'missing_user');
-  }
-  const workspaceId = takeHeader(headers['x-debug-workspace']);
-
-  return {
-    userId,
-    workspaceId: workspaceId ?? undefined,
-  };
-}
-
-function takeHeader(value?: string | string[]): string | undefined {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const trimmed = entry?.trim();
-      if (trimmed) {
-        return trimmed;
-      }
-    }
-    return undefined;
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }
-
-  return undefined;
-}
 
 function deriveTitle(filename: string): string {
   const trimmed = filename.trim();

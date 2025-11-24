@@ -11,7 +11,7 @@ import { enqueueJob } from "@/lib/enqueueJob";
 
 const bodySchema = z.object({
   workspaceId: z.string().uuid(),
-  kind: z.enum(["TRANSCRIBE", "HIGHLIGHT_DETECT", "CLIP_RENDER", "PUBLISH_TIKTOK", "ANALYTICS_INGEST"]),
+  kind: z.enum(["TRANSCRIBE", "HIGHLIGHT_DETECT", "CLIP_RENDER", "PUBLISH_TIKTOK"]),
   payload: z.record(z.string(), z.any()),
   priority: z.number().int().min(1).max(9).optional(),
   runAt: z.string().datetime().optional(),

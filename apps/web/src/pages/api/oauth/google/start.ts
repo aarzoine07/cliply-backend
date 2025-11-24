@@ -1,31 +1,64 @@
-﻿import type { NextApiRequest, NextApiResponse } from 'next';
+﻿// C2: YouTube OAuth start endpoint
+import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { requireUser } from '@/lib/auth';
-import { HttpError } from '@/lib/errors';
-import { handler, ok } from '@/lib/http';
+import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { buildYouTubeAuthUrl } from '@/lib/accounts/youtubeOauthService';
+import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
-  const started = Date.now();
-  let userId: string | undefined;
-
-  try {
-    const auth = requireUser(req);
-    userId = auth.userId;
-    await checkRateLimit(auth.userId, 'oauth:google:start');
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 401) {
-      logger.info('oauth_google_start_anonymous');
-    } else if (error) {
-      throw error;
-    }
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    res.status(405).json(err('method_not_allowed', 'Method not allowed'));
+    return;
   }
 
-  logger.info('oauth_google_start', {
-    userId: userId ?? 'anonymous',
-    durationMs: Date.now() - started,
-  });
+  const started = Date.now();
 
-  res.status(200).json(ok({ url: 'https://accounts.google.com/o/oauth2/auth (stub)' }));
+  try {
+    const auth = await buildAuthContext(req);
+    const userId = auth.userId || auth.user_id;
+    const workspaceId = auth.workspaceId || auth.workspace_id;
+
+    if (!workspaceId) {
+      res.status(400).json(err('invalid_request', 'workspace required'));
+      return;
+    }
+
+    await checkRateLimit(userId, 'oauth:google:start');
+
+    const redirectUri = req.query.redirect_uri as string | undefined;
+    const authUrl = buildYouTubeAuthUrl({
+      workspaceId,
+      userId,
+      redirectUri,
+    });
+
+    logger.info('oauth_google_start', {
+      userId,
+      workspaceId,
+      durationMs: Date.now() - started,
+    });
+
+    res.status(200).json(ok({ url: authUrl }));
+  } catch (error) {
+    // Handle auth errors
+    if (error && typeof error === 'object' && 'code' in error && 'status' in error) {
+      handleAuthError(error, res);
+      return;
+    }
+
+    logger.error('oauth_google_start_failed', {
+      message: (error as Error)?.message ?? 'unknown',
+      durationMs: Date.now() - started,
+    });
+
+    if ((error as Error)?.message?.includes('not configured')) {
+      res.status(500).json(err('internal_error', 'YouTube OAuth not configured'));
+      return;
+    }
+
+    res.status(500).json(err('internal_error', 'Failed to start OAuth flow'));
+  }
 });

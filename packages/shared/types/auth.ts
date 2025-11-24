@@ -6,6 +6,10 @@ export interface AuthContext {
   user_id: string;
   workspace_id: string;
   plan: PlanName;
+  isAuthenticated: boolean;
+  // For backwards compatibility - these are always true when context is returned
+  userId?: string;
+  workspaceId?: string;
 }
 
 export enum AuthErrorCode {

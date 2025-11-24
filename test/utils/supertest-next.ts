@@ -25,7 +25,9 @@ export function supertestHandler(handler: ApiHandler, method: HttpMethod = 'post
     } catch (error) {
       if (!res.headersSent) {
         const message = (error as Error)?.message ?? 'internal_error';
-        res.status(500).json({ ok: false, code: 'internal_error', message });
+        const stack = (error as Error)?.stack;
+        console.error('Test handler error:', { message, stack, error });
+        res.status(500).json({ ok: false, code: 'internal_error', message, stack });
       }
     }
   });

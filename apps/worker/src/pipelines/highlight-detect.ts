@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
+import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 
 import type { Job, WorkerContext } from './types';
 
@@ -30,6 +31,28 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
   try {
     const payload = HIGHLIGHT_DETECT.parse(job.payload);
     const workspaceId = job.workspaceId;
+
+    // Check usage limits before processing highlights
+    // We check for at least maxClips remaining (conservative, actual count will be recorded after processing)
+    try {
+      await assertWithinUsage(workspaceId, 'clips', payload.maxClips);
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        ctx.logger.warn('highlight_detect_usage_limit_exceeded', {
+          pipeline: PIPELINE,
+          jobId: job.id,
+          workspaceId,
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+          requestedClips: payload.maxClips,
+        });
+        // Mark job as failed but don't crash - let the job system handle retries/backoff
+        throw error;
+      }
+      throw error;
+    }
+
     const transcriptKey = `${workspaceId}/${payload.projectId}/transcript.json`;
 
     const exists = await ctx.storage.exists(BUCKET_TRANSCRIPTS, transcriptKey);
@@ -90,7 +113,50 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
 
     if (inserts.length > 0) {
-      await ctx.supabase.from('clips').insert(inserts);
+      const { data: insertedClips, error: insertError } = await ctx.supabase
+        .from('clips')
+        .insert(inserts)
+        .select('id');
+
+      if (insertError) {
+        throw new Error(`Failed to insert clips: ${insertError.message}`);
+      }
+
+      // Record clips usage (idempotent - only count newly inserted clips)
+      await recordUsage({
+        workspaceId,
+        metric: 'clips',
+        amount: inserts.length,
+      });
+
+      // Automatically enqueue CLIP_RENDER jobs for all newly created clips
+      if (insertedClips && insertedClips.length > 0) {
+        const renderJobs = insertedClips.map((clip) => ({
+          workspace_id: workspaceId,
+          kind: 'CLIP_RENDER',
+          status: 'queued',
+          payload: { clipId: clip.id },
+        }));
+
+        const { error: jobError } = await ctx.supabase.from('jobs').insert(renderJobs);
+        if (jobError) {
+          ctx.logger.warn('highlight_detect_render_enqueue_failed', {
+            pipeline: PIPELINE,
+            projectId: payload.projectId,
+            workspaceId,
+            error: jobError.message,
+            clipCount: insertedClips.length,
+          });
+          // Don't fail the whole pipeline if render job enqueue fails - they can be manually triggered
+        } else {
+          ctx.logger.info('highlight_detect_render_enqueued', {
+            pipeline: PIPELINE,
+            projectId: payload.projectId,
+            workspaceId,
+            clipCount: insertedClips.length,
+          });
+        }
+      }
     }
 
     await ensureProjectStatus(ctx, payload.projectId, 'clips_proposed');

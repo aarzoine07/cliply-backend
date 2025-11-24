@@ -72,6 +72,9 @@ const params: Stripe.Checkout.SessionCreateParams = {
   ],
   success_url: successUrl,
   cancel_url: cancelUrl,
+  metadata: {
+    workspace_id: workspaceId,
+  },
 };
 
 const session = await stripe.checkout.sessions.create(params);

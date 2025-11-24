@@ -1,5 +1,6 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as usageTracker from '../../packages/shared/billing/usageTracker';
 import * as storage from '../../apps/web/src/lib/storage';
 import * as supabaseAdmin from '../../apps/web/src/lib/supabase';
 import uploadInit from '../../apps/web/src/pages/api/upload/init';
@@ -33,6 +34,8 @@ describe('POST /api/upload/init', () => {
     const admin = createAdminMock();
     mockAdminClient(admin);
     vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
+    vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
+    vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
 
     const res = await supertestHandler(toApiHandler(uploadInit))
       .post('/')
@@ -49,11 +52,23 @@ describe('POST /api/upload/init', () => {
     expect(res.body.uploadUrl).toBe('https://signed.example/upload');
     expect(res.body.storagePath).toMatch(/^videos\//);
     expect(res.body.projectId).toMatch(/[0-9a-f\-]{36}/i);
+
+    // Verify usage was checked and recorded
+    expect(usageTracker.assertWithinUsage).toHaveBeenCalled();
+    expect(usageTracker.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: '11111111-1111-1111-1111-111111111111',
+        metric: 'projects',
+        amount: 1,
+      }),
+    );
   });
 
-  it('youtube mode: returns project id', async () => {
+  it('youtube mode: returns project id and enqueues download job', async () => {
     const admin = createAdminMock();
     mockAdminClient(admin);
+    vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
+    vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
 
     const res = await supertestHandler(toApiHandler(uploadInit))
       .post('/')
@@ -66,6 +81,83 @@ describe('POST /api/upload/init', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.projectId).toMatch(/[0-9a-f\-]{36}/i);
+
+    // Verify that a YouTube download job was enqueued
+    const jobsInserted = admin.inserted.filter(
+      (item) => item.kind === 'YOUTUBE_DOWNLOAD',
+    );
+    expect(jobsInserted.length).toBe(1);
+    expect(jobsInserted[0]).toMatchObject({
+      kind: 'YOUTUBE_DOWNLOAD',
+      status: 'queued',
+      payload: {
+        projectId: res.body.projectId,
+        youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      },
+    });
+
+    // Verify usage was checked and recorded
+    expect(usageTracker.assertWithinUsage).toHaveBeenCalled();
+    expect(usageTracker.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: '11111111-1111-1111-1111-111111111111',
+        metric: 'projects',
+        amount: 1,
+      }),
+    );
+  });
+
+  it('file mode: returns 429 when usage limit exceeded', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+    vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
+    vi.spyOn(usageTracker, 'assertWithinUsage').mockRejectedValue(
+      new usageTracker.UsageLimitExceededError('source_minutes', 150, 150),
+    );
+
+    const res = await supertestHandler(toApiHandler(uploadInit))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        source: 'file',
+        filename: 'demo.mp4',
+        size: 1024 * 1024 * 10, // 10MB
+        mime: 'video/mp4',
+      });
+
+    expect(res.status).toBe(429);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('usage_limit_exceeded');
+    expect(res.body.error.metric).toBe('source_minutes');
+
+    // Verify no project was created
+    const projectsInserted = admin.inserted.filter((item) => item.id);
+    expect(projectsInserted.length).toBe(0);
+  });
+
+  it('youtube mode: returns 429 when usage limit exceeded', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+    vi.spyOn(usageTracker, 'assertWithinUsage').mockRejectedValue(
+      new usageTracker.UsageLimitExceededError('projects', 150, 150),
+    );
+
+    const res = await supertestHandler(toApiHandler(uploadInit))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        source: 'youtube',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      });
+
+    expect(res.status).toBe(429);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error.code).toBe('usage_limit_exceeded');
+    expect(res.body.error.metric).toBe('projects');
+
+    // Verify no project was created
+    const projectsInserted = admin.inserted.filter((item) => item.id);
+    expect(projectsInserted.length).toBe(0);
   });
 
   it('invalid payload -> 400', async () => {
@@ -98,6 +190,17 @@ function createAdminMock(): AdminMock {
               select: () => ({
                 maybeSingle: async () => ({ data: payload, error: null }),
               }),
+            };
+          },
+        };
+      }
+
+      if (table === 'jobs') {
+        return {
+          insert: (payload: Record<string, unknown>) => {
+            inserted.push(payload);
+            return {
+              error: null,
             };
           },
         };

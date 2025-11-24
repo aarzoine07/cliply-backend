@@ -4,6 +4,21 @@ import { createClient, type PostgrestSingleResponse, type SupabaseClient } from 
 import { getEnv } from "@cliply/shared/env";
 import { logger } from "@cliply/shared/logging/logger";
 import { captureError, initSentry } from "@cliply/shared/sentry";
+import { logJobStatus } from "@cliply/shared/observability/logging";
+
+import { run as runTranscribe } from "./pipelines/transcribe";
+import { run as runHighlightDetect } from "./pipelines/highlight-detect";
+import { run as runClipRender } from "./pipelines/clip-render";
+import { run as runThumbnail } from "./pipelines/thumbnail";
+import { run as runPublishYouTube } from "./pipelines/publish-youtube";
+import { run as runPublishTikTok } from "./pipelines/publish-tiktok";
+import { run as runYouTubeDownload } from "./pipelines/youtube-download";
+import type { Job, WorkerContext } from "./pipelines/types";
+import { createStorageAdapter } from "./services/storage";
+import { createQueueAdapter } from "./services/queue";
+import { createLoggerAdapter } from "./services/logger";
+import { createSentryAdapter } from "./services/sentry";
+import { verifyWorkerEnvironment } from "./lib/envCheck";
 
 const env = getEnv();
 
@@ -109,40 +124,98 @@ function createHandlerLogger(workerId: string): HandlerLogFn {
   };
 }
 
+/**
+ * Creates a WorkerContext for pipeline execution.
+ */
+function createWorkerContext(supabase: SupabaseClient): WorkerContext {
+  return {
+    supabase,
+    storage: createStorageAdapter(supabase),
+    logger: createLoggerAdapter(),
+    sentry: createSentryAdapter(),
+    queue: createQueueAdapter(supabase),
+  };
+}
+
+/**
+ * Converts a WorkerJobClaim to a Job<unknown> for pipeline consumption.
+ */
+function jobClaimToJob(claim: WorkerJobClaim): Job<unknown> {
+  return {
+    id: claim.id,
+    type: claim.kind,
+    workspaceId: claim.workspace_id,
+    payload: claim.payload,
+    attempts: claim.attempts,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Real pipeline handlers that execute actual pipeline code.
+ */
 const handlers: Record<string, Handler> = {
-  TRANSCRIBE: async ({ job, log }) => {
+  YOUTUBE_DOWNLOAD: async ({ job, supabase, log }) => {
+    log({ event: "handler_start", kind: "YOUTUBE_DOWNLOAD", job_id: job.id, workspace_id: job.workspace_id });
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runYouTubeDownload(pipelineJob, ctx);
+    const result = { ok: true, message: "youtube video downloaded" };
+    log({ event: "handler_done", kind: "YOUTUBE_DOWNLOAD", job_id: job.id, workspace_id: job.workspace_id }, result);
+    return { result };
+  },
+  TRANSCRIBE: async ({ job, supabase, log }) => {
     log({ event: "handler_start", kind: "TRANSCRIBE", job_id: job.id, workspace_id: job.workspace_id });
-    await sleep(1000);
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runTranscribe(pipelineJob, ctx);
     const result = { ok: true, message: "transcribed" };
     log({ event: "handler_done", kind: "TRANSCRIBE", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
-  HIGHLIGHT_DETECT: async ({ job, log }) => {
+  HIGHLIGHT_DETECT: async ({ job, supabase, log }) => {
     log({ event: "handler_start", kind: "HIGHLIGHT_DETECT", job_id: job.id, workspace_id: job.workspace_id });
-    await sleep(1000);
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runHighlightDetect(pipelineJob, ctx);
     const result = { ok: true, message: "highlights detected" };
     log({ event: "handler_done", kind: "HIGHLIGHT_DETECT", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
-  CLIP_RENDER: async ({ job, log }) => {
+  CLIP_RENDER: async ({ job, supabase, log }) => {
     log({ event: "handler_start", kind: "CLIP_RENDER", job_id: job.id, workspace_id: job.workspace_id });
-    await sleep(1000);
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runClipRender(pipelineJob, ctx);
     const result = { ok: true, message: "clip rendered" };
     log({ event: "handler_done", kind: "CLIP_RENDER", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
-  PUBLISH_TIKTOK: async ({ job, log }) => {
-    log({ event: "handler_start", kind: "PUBLISH_TIKTOK", job_id: job.id, workspace_id: job.workspace_id });
-    await sleep(1000);
-    const result = { ok: true, message: "tiktok published" };
-    log({ event: "handler_done", kind: "PUBLISH_TIKTOK", job_id: job.id, workspace_id: job.workspace_id }, result);
+  THUMBNAIL_GEN: async ({ job, supabase, log }) => {
+    log({ event: "handler_start", kind: "THUMBNAIL_GEN", job_id: job.id, workspace_id: job.workspace_id });
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runThumbnail(pipelineJob, ctx);
+    const result = { ok: true, message: "thumbnail generated" };
+    log({ event: "handler_done", kind: "THUMBNAIL_GEN", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
-  ANALYTICS_INGEST: async ({ job, log }) => {
-    log({ event: "handler_start", kind: "ANALYTICS_INGEST", job_id: job.id, workspace_id: job.workspace_id });
-    await sleep(1000);
-    const result = { ok: true, message: "analytics ingested" };
-    log({ event: "handler_done", kind: "ANALYTICS_INGEST", job_id: job.id, workspace_id: job.workspace_id }, result);
+  PUBLISH_YOUTUBE: async ({ job, supabase, log }) => {
+    log({ event: "handler_start", kind: "PUBLISH_YOUTUBE", job_id: job.id, workspace_id: job.workspace_id });
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runPublishYouTube(pipelineJob, ctx);
+    const result = { ok: true, message: "youtube published" };
+    log({ event: "handler_done", kind: "PUBLISH_YOUTUBE", job_id: job.id, workspace_id: job.workspace_id }, result);
+    return { result };
+  },
+  PUBLISH_TIKTOK: async ({ job, supabase, log }) => {
+    log({ event: "handler_start", kind: "PUBLISH_TIKTOK", job_id: job.id, workspace_id: job.workspace_id });
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runPublishTikTok(pipelineJob, ctx);
+    const result = { ok: true, message: "tiktok published" };
+    log({ event: "handler_done", kind: "PUBLISH_TIKTOK", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
 };
@@ -219,9 +292,39 @@ async function processJob(supabase: SupabaseClient, job: WorkerJobClaim): Promis
   void sendHeartbeat();
 
   try {
+    // Log job start
+    logJobStatus(
+      { jobId, workspaceId: job.workspace_id, kind },
+      "started",
+      { workerId: WORKER_ID },
+    );
+
     const handler = handlers[kind];
     if (!handler) {
-      throw new Error(`No handler registered for kind ${kind}`);
+      logger.warn(
+        "unknown_job_kind",
+        {
+          service: "worker",
+          worker_id: WORKER_ID,
+          job_id: jobId,
+          workspace_id: job.workspace_id,
+          kind,
+        },
+        { message: `No handler registered for job kind: ${kind}` },
+      );
+      // Mark job as failed with a clear error message
+      await supabase.rpc("worker_fail", {
+        p_job_id: jobId,
+        p_worker_id: WORKER_ID,
+        p_error: `Unknown job kind: ${kind}`,
+        p_backoff_seconds: 0,
+      });
+      logJobStatus(
+        { jobId, workspaceId: job.workspace_id, kind },
+        "failed",
+        { error: `Unknown job kind: ${kind}` },
+      );
+      return;
     }
 
     const { result } = await handler({
@@ -241,6 +344,13 @@ async function processJob(supabase: SupabaseClient, job: WorkerJobClaim): Promis
       throw finishError;
     }
 
+    // Log job completion
+    logJobStatus(
+      { jobId, workspaceId: job.workspace_id, kind },
+      "completed",
+      { elapsedMs: Date.now() - jobStart },
+    );
+
     logger.info(
       "job_done",
       { service: "worker", worker_id: WORKER_ID, job_id: jobId, workspace_id: job.workspace_id },
@@ -250,6 +360,14 @@ async function processJob(supabase: SupabaseClient, job: WorkerJobClaim): Promis
     const message = err instanceof Error ? err.message : String(err);
     const attempts = Number.isFinite(job.attempts) && job.attempts > 0 ? job.attempts : 1;
     const backoffSeconds = Math.min(2 ** (attempts - 1) * 10, 1800);
+
+    // Log job failure/retry
+    const status = attempts > 1 ? "retry" : "failed";
+    logJobStatus(
+      { jobId, workspaceId: job.workspace_id, kind },
+      status,
+      { attempts, backoffSeconds, error: message },
+    );
 
     handlerLog(
       {
@@ -372,6 +490,32 @@ function registerSignalHandlers(): void {
 }
 
 async function main(): Promise<void> {
+  // Verify worker environment before proceeding
+  const envStatus = await verifyWorkerEnvironment();
+
+  // Fail fast if critical environment variables are missing
+  if (!envStatus.ok) {
+    const missing = envStatus.missingEnv.join(", ");
+    throw new Error(
+      `Worker environment check failed: missing required environment variables: ${missing}`,
+    );
+  }
+
+  // Log warnings for missing binaries (but don't fail - let jobs fail if they need them)
+  if (!envStatus.ffmpegOk) {
+    logger.warn("worker_env_ffmpeg_missing", {
+      service: "worker",
+      message: "ffmpeg binary not found - rendering jobs will fail",
+    });
+  }
+
+  if (!envStatus.ytDlpOk) {
+    logger.warn("worker_env_ytdlp_missing", {
+      service: "worker",
+      message: "yt-dlp binary not found - YouTube download jobs will fail",
+    });
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -384,6 +528,8 @@ async function main(): Promise<void> {
       heartbeat_ms: HEARTBEAT_INTERVAL_MS,
       reclaim_ms: RECLAIM_INTERVAL_MS,
       stale_seconds: STALE_SECONDS,
+      ffmpegOk: envStatus.ffmpegOk,
+      ytDlpOk: envStatus.ytDlpOk,
     },
   );
 

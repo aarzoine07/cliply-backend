@@ -3,10 +3,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
 import type { PlanName } from "@cliply/shared/types/auth";
+import { env } from "../env";
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = env;
 
 if (!STRIPE_SECRET_KEY) {
   throw new Error("STRIPE_SECRET_KEY is not configured");

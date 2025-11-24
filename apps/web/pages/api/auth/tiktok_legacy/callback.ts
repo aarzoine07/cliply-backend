@@ -1,11 +1,23 @@
+/**
+ * LEGACY / DEV-ONLY ROUTE:
+ * This endpoint is retained only for local/manual testing and is disabled in production.
+ * 
+ * Canonical TikTok OAuth callback route:
+ * - App Router: /api/auth/tiktok/connect/callback (apps/web/src/app/api/auth/tiktok/connect/callback/route.ts)
+ * 
+ * All new integrations should use the canonical App Router flow.
+ */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 
-function sealedBoxEncryptRef(plaintext: string): string {
-  return `sbx:${Buffer.from(plaintext).toString("base64url")}`;
-}
+import { encryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
+import { serverEnv, publicEnv } from "@/lib/env";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Fence: Disable in production
+  if (process.env.NODE_ENV === "production") {
+    return res.status(410).json({ error: "legacy_route_removed", message: "This legacy route is no longer available in production. Use /api/auth/tiktok/connect/callback instead." });
+  }
   try {
     const { code, state, error } = req.query;
 
@@ -35,9 +47,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ ok: false, error: "Invalid state parameter" });
     }
 
-    const clientKey = process.env.TIKTOK_CLIENT_KEY!;
-    const clientSecret = process.env.TIKTOK_CLIENT_SECRET!;
-    const redirectUri = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL!;
+    const clientKey = serverEnv.TIKTOK_CLIENT_ID;
+    const clientSecret = serverEnv.TIKTOK_CLIENT_SECRET;
+    const redirectUri = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
     if (!clientKey || !clientSecret || !redirectUri) {
       return res.status(500).json({ ok: false, error: "TikTok OAuth not configured" });
@@ -82,8 +94,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // --- DATABASE INSERT ---
     const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      serverEnv.SUPABASE_URL,
+      serverEnv.SUPABASE_SERVICE_ROLE_KEY,
       { auth: { persistSession: false, autoRefreshToken: false } }
     );
 
@@ -96,8 +108,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         platform: "tiktok",
         provider: "tiktok",
         external_id: externalId,
-        access_token_encrypted_ref: sealedBoxEncryptRef(tokenData.access_token),
-        refresh_token_encrypted_ref: sealedBoxEncryptRef(tokenData.refresh_token),
+        access_token_encrypted_ref: encryptSecret(tokenData.access_token, { purpose: "tiktok_token" }),
+        refresh_token_encrypted_ref: encryptSecret(tokenData.refresh_token, { purpose: "tiktok_token" }),
         expires_at: expiresAt,
         scopes: tokenData.scope ? tokenData.scope.split(",") : ["user.info.basic", "video.upload"],
         updated_at: new Date().toISOString(),

@@ -1,5 +1,20 @@
+/**
+ * Canonical TikTok OAuth connect route for Cliply.
+ * 
+ * This is the primary endpoint for initiating TikTok OAuth flows.
+ * All new integrations should use this route.
+ * 
+ * Route: GET /api/auth/tiktok/connect?workspace_id=<uuid>
+ * 
+ * Legacy routes (dev-only, disabled in production):
+ * - /api/auth/tiktok_legacy (Pages Router)
+ * - /api/oauth/tiktok/start (Pages Router)
+ */
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+
+import { logOAuthEvent } from "@cliply/shared/observability/logging";
+import { serverEnv, publicEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,8 +38,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
 
     const TIKTOK_AUTH_BASE = "https://www.tiktok.com/v2/auth/authorize/";
-    const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY!;
-    const TIKTOK_REDIRECT_URI = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL!;
+    const TIKTOK_CLIENT_KEY = serverEnv.TIKTOK_CLIENT_ID;
+    const TIKTOK_REDIRECT_URI = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
     if (!TIKTOK_CLIENT_KEY || !TIKTOK_REDIRECT_URI) {
       return NextResponse.json(
@@ -38,6 +53,9 @@ export async function GET(request: Request): Promise<NextResponse> {
         { status: 500 },
       );
     }
+
+    // Log OAuth start
+    logOAuthEvent("tiktok", "start", { workspaceId, userId: "bypass" });
 
     // --- BYPASS MODE ---
     if (TEST_BYPASS_AUTH) {
@@ -75,6 +93,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   } catch (err) {
     console.error("TikTok OAuth connect error:", err);
     const message = err instanceof Error ? err.message : "Unexpected error";
+    logOAuthEvent("tiktok", "error", {
+      workspaceId: undefined,
+      error: err,
+    });
     return NextResponse.json(
       { ok: false, error: { code: "OAUTH_CONNECT_ERROR", message } },
       { status: 500 },

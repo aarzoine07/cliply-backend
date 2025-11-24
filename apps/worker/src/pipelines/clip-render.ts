@@ -83,6 +83,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     });
 
 await runFFmpeg(render.args, ctx.logger);
+
+// Verify output files were created
 await ensureFileExists(tempVideo);
 await ensureFileExists(tempThumb);
 
@@ -97,6 +99,9 @@ await ensureFileExists(tempThumb);
         thumb_path: `${BUCKET_THUMBS}/${thumbKey}`,
       })
       .eq("id", clipId);
+
+    // Check if all clips for this project are now ready, and update project status accordingly
+    await checkAndUpdateProjectStatus(ctx, projectId, workspaceId);
 
     ctx.logger.info("pipeline_completed", {
       pipeline: PIPELINE,
@@ -173,10 +178,96 @@ async function uploadIfMissing(
 export function pipelineClipRenderStub(): "render" {
   return "render";
 }
+
 async function ensureFileExists(path: string): Promise<void> {
   try {
     await fs.access(path);
+    // File exists, nothing to do
   } catch {
-    await fs.writeFile(path, '', 'utf8');
+    // File doesn't exist - this is an error, not something we should fix by creating empty file
+    throw new Error(`Expected file does not exist: ${path}`);
+  }
+}
+
+async function checkAndUpdateProjectStatus(
+  ctx: WorkerContext,
+  projectId: string,
+  workspaceId: string,
+): Promise<void> {
+  // Fetch all clips for this project
+  const { data: clips, error: clipsError } = await ctx.supabase
+    .from("clips")
+    .select("id,status")
+    .eq("project_id", projectId)
+    .eq("workspace_id", workspaceId);
+
+  if (clipsError) {
+    ctx.logger.warn("clip_render_status_check_failed", {
+      pipeline: PIPELINE,
+      projectId,
+      workspaceId,
+      error: clipsError.message,
+    });
+    return;
+  }
+
+  if (!clips || clips.length === 0) {
+    // No clips yet, don't update project status
+    return;
+  }
+
+  // Check if all clips are ready
+  const allReady = clips.every((clip) => clip.status === "ready");
+  const anyFailed = clips.some((clip) => clip.status === "failed");
+
+  if (allReady) {
+    // All clips are ready - update project status to 'ready'
+    const { error: updateError } = await ctx.supabase
+      .from("projects")
+      .update({ status: "ready" })
+      .eq("id", projectId)
+      .eq("workspace_id", workspaceId);
+
+    if (updateError) {
+      ctx.logger.warn("clip_render_project_status_update_failed", {
+        pipeline: PIPELINE,
+        projectId,
+        workspaceId,
+        error: updateError.message,
+      });
+    } else {
+      ctx.logger.info("clip_render_project_ready", {
+        pipeline: PIPELINE,
+        projectId,
+        workspaceId,
+        totalClips: clips.length,
+      });
+    }
+  } else if (anyFailed && clips.every((clip) => clip.status === "ready" || clip.status === "failed")) {
+    // All clips are either ready or failed - mark project as ready (with some failed clips)
+    // This allows the UI to show the project as ready even if some clips failed
+    const { error: updateError } = await ctx.supabase
+      .from("projects")
+      .update({ status: "ready" })
+      .eq("id", projectId)
+      .eq("workspace_id", workspaceId);
+
+    if (updateError) {
+      ctx.logger.warn("clip_render_project_status_update_failed", {
+        pipeline: PIPELINE,
+        projectId,
+        workspaceId,
+        error: updateError.message,
+      });
+    } else {
+      ctx.logger.info("clip_render_project_ready_with_failures", {
+        pipeline: PIPELINE,
+        projectId,
+        workspaceId,
+        totalClips: clips.length,
+        readyClips: clips.filter((c) => c.status === "ready").length,
+        failedClips: clips.filter((c) => c.status === "failed").length,
+      });
+    }
   }
 }

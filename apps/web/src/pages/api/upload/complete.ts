@@ -1,11 +1,12 @@
 ﻿import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 
-import { requireUser } from '@/lib/auth';
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getAdminClient } from '@/lib/supabase';
+import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { withPlanGate } from '@/lib/billing/withPlanGate';
 
 const CompleteBody = z.object({ projectId: z.string().uuid() }).strict();
 
@@ -19,49 +20,61 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const auth = requireUser(req);
-  const { userId, workspaceId } = auth;
-
-  if (!workspaceId) {
-    res.status(400).json(err('invalid_request', 'workspace required'));
+  let auth;
+  try {
+    auth = await buildAuthContext(req);
+  } catch (error) {
+    handleAuthError(error, res);
     return;
   }
 
-  const rate = await checkRateLimit(userId, 'upload:complete');
-  if (!rate.allowed) {
-    res.status(429).json(err('too_many_requests', 'Rate limited'));
-    return;
-  }
+  const userId = auth.userId || auth.user_id;
+  const workspaceId = auth.workspaceId || auth.workspace_id;
 
-  const parsed = CompleteBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
-    return;
-  }
+  // Apply plan gating for job enqueuing (using concurrent_jobs as proxy)
+  return withPlanGate(auth, 'concurrent_jobs', async (req, res) => {
 
-  const admin = getAdminClient();
-  const { error } = await admin.from('jobs').insert({
-    workspace_id: workspaceId,
-    kind: 'TRANSCRIBE',
-    status: 'queued',
-    payload: { projectId: parsed.data.projectId },
-  });
+    if (!workspaceId) {
+      res.status(400).json(err('invalid_request', 'workspace required'));
+      return;
+    }
 
-  if (error) {
-    logger.error('upload_complete_enqueue_failed', {
-      workspaceId,
-      message: error.message,
+    const rate = await checkRateLimit(userId, 'upload:complete');
+    if (!rate.allowed) {
+      res.status(429).json(err('too_many_requests', 'Rate limited'));
+      return;
+    }
+
+    const parsed = CompleteBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+      return;
+    }
+
+    const admin = getAdminClient();
+    const { error } = await admin.from('jobs').insert({
+      workspace_id: workspaceId,
+      kind: 'TRANSCRIBE',
+      status: 'queued',
+      payload: { projectId: parsed.data.projectId },
     });
-    res.status(500).json(err('internal_error', 'Failed to enqueue transcript job'));
-    return;
-  }
 
-  logger.info('upload_complete_success', {
-    userId,
-    workspaceId,
-    durationMs: Date.now() - started,
-    remainingTokens: rate.remaining,
-  });
+    if (error) {
+      logger.error('upload_complete_enqueue_failed', {
+        workspaceId,
+        message: error.message,
+      });
+      res.status(500).json(err('internal_error', 'Failed to enqueue transcript job'));
+      return;
+    }
 
-  res.status(200).json(ok());
+    logger.info('upload_complete_success', {
+      userId,
+      workspaceId,
+      durationMs: Date.now() - started,
+      remainingTokens: rate.remaining,
+    });
+
+    res.status(200).json(ok());
+  })(req, res);
 });

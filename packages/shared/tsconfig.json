@@ -2,19 +2,41 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",
-    "moduleResolution": "Bundler",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "baseUrl": ".", 
- 
+    "downlevelIteration": true,
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": {
+      "@cliply/shared": ["./src/index.ts"],
+      "@cliply/shared/*": ["./*"]
+    }
   },
   "include": [
     "src/**/*.ts",
-    "types/**/*.ts"
+    "types/**/*.ts",
+    "billing/**/*.ts",
+    "logging/**/*.ts",
+    "auth/**/*.ts",
+    "lib/**/*.ts",
+    "logger.ts",
+    "sentry.ts",
+    "env.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test"
   ]
 }

@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { encryptSecret, decryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
+import { logOAuthEvent } from "@cliply/shared/observability/logging";
+import { env } from "../env";
+
+const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TIKTOK_TOKEN_URL, TIKTOK_CLIENT_ID, TIKTOK_CLIENT_SECRET } = env;
 
 if (!SUPABASE_URL) {
   throw new Error("SUPABASE_URL is not configured");
@@ -17,22 +20,12 @@ const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROL
   },
 });
 
-const TOKEN_URL =
-  process.env.TIKTOK_TOKEN_URL ?? "https://open.tiktokapis.com/v2/oauth/token/";
-const CLIENT_ID = process.env.TIKTOK_CLIENT_ID;
-const CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
+const TOKEN_URL = TIKTOK_TOKEN_URL ?? "https://open.tiktokapis.com/v2/oauth/token/";
+const CLIENT_ID = TIKTOK_CLIENT_ID;
+const CLIENT_SECRET = TIKTOK_CLIENT_SECRET;
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
   throw new Error("TikTok client credentials are not configured");
-}
-
-async function sealedBoxDecryptRef(ref: string): Promise<string> {
-  if (!ref.startsWith("sbx:")) throw new Error("Invalid sealed-box reference");
-  return Buffer.from(ref.slice(4), "base64url").toString("utf8");
-}
-
-async function sealedBoxEncryptRef(plaintext: string): Promise<string> {
-  return `sbx:${Buffer.from(plaintext).toString("base64url")}`;
 }
 
 type ConnectedAccountRow = {
@@ -68,7 +61,7 @@ export async function refreshTikTokTokensJob(): Promise<void> {
 
   for (const account of typedAccounts) {
     try {
-      const refreshToken = await sealedBoxDecryptRef(account.refresh_token_encrypted_ref);
+      const refreshToken = decryptSecret(account.refresh_token_encrypted_ref, { purpose: "tiktok_token" });
 
       const form = new URLSearchParams({
         client_key: CLIENT_ID!,
@@ -100,8 +93,8 @@ export async function refreshTikTokTokensJob(): Promise<void> {
         continue;
       }
 
-      const accessRef = await sealedBoxEncryptRef(payload.access_token);
-      const refreshRef = await sealedBoxEncryptRef(payload.refresh_token);
+      const accessRef = encryptSecret(payload.access_token, { purpose: "tiktok_token" });
+      const refreshRef = encryptSecret(payload.refresh_token, { purpose: "tiktok_token" });
       const expiresAtIso = new Date(Date.now() + payload.expires_in * 1000).toISOString();
 
       const { error: updateError } = await supabase
@@ -130,9 +123,17 @@ export async function refreshTikTokTokensJob(): Promise<void> {
         payload: { expires_at: expiresAtIso },
       });
 
+      logOAuthEvent("tiktok", "success", {
+        workspaceId: account.workspace_id,
+      });
+
       console.log(`✅ Refreshed TikTok tokens for workspace ${account.workspace_id}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      logOAuthEvent("tiktok", "error", {
+        workspaceId: account.workspace_id,
+        error: err,
+      });
       console.error(`💥 Refresh failed for workspace ${account.workspace_id}:`, message);
     }
   }

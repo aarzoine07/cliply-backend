@@ -1,6 +1,17 @@
+/**
+ * LEGACY / DEV-ONLY ROUTE:
+ * This endpoint is retained only for local/manual testing and is disabled in production.
+ * 
+ * Canonical TikTok OAuth connect route:
+ * - App Router: /api/auth/tiktok/connect (apps/web/src/app/api/auth/tiktok/connect/route.ts)
+ * 
+ * All new integrations should use the canonical App Router flow.
+ */
 import crypto from "crypto";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
+
+import { serverEnv, publicEnv } from "@/lib/env";
 
 function extractAccessToken(req: NextApiRequest): string | null {
   const authHeader = req.headers.authorization;
@@ -31,6 +42,11 @@ function extractAccessToken(req: NextApiRequest): string | null {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Fence: Disable in production
+  if (process.env.NODE_ENV === "production") {
+    return res.status(410).json({ error: "legacy_route_removed", message: "This legacy route is no longer available in production. Use /api/auth/tiktok/connect instead." });
+  }
+
   try {
     // TEMP: bypass auth for local OAuth testing
     const TEST_BYPASS_AUTH = true;
@@ -46,8 +62,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (TEST_BYPASS_AUTH) {
       const userId = "a0d97448-74e0-4b24-845e-b4de43749a3c";
 
-      const clientKey = process.env.TIKTOK_CLIENT_KEY;
-      const redirectUri = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
+      const clientKey = serverEnv.TIKTOK_CLIENT_ID;
+      const redirectUri = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
       if (!clientKey || !redirectUri) {
         return res.status(500).json({ ok: false, error: "TikTok OAuth not configured" });
@@ -85,8 +101,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      serverEnv.SUPABASE_URL,
+      serverEnv.SUPABASE_SERVICE_ROLE_KEY,
       {
         auth: { persistSession: false, autoRefreshToken: false },
       }
@@ -110,8 +126,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(403).json({ ok: false, error: "Access denied to workspace" });
     }
 
-    const clientKey = process.env.TIKTOK_CLIENT_KEY;
-    const redirectUri = process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
+    const clientKey = serverEnv.TIKTOK_CLIENT_ID;
+    const redirectUri = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
     if (!clientKey || !redirectUri) {
       return res.status(500).json({ ok: false, error: "TikTok OAuth not configured" });

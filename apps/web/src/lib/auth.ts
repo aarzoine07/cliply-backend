@@ -79,7 +79,16 @@ export type AuthContext = {
   supabase: SupabaseClient;
 };
 
+/**
+ * @deprecated Use `buildAuthContext` from `@/lib/auth/context` instead.
+ * This function only supports debug headers and will be removed in a future version.
+ */
 export function requireUser(req?: { headers?: HeadersInput }): AuthContext {
+  // In production, block debug headers
+  if (process.env.NODE_ENV === 'production') {
+    throw new HttpError(401, 'Debug headers are not allowed in production', 'production_only');
+  }
+
   const normalized = normalizeHeaders(req?.headers);
 
   const userHeader = normalized['x-debug-user'];

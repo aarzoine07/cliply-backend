@@ -1,9 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { requireUser } from '@/lib/auth';
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { getAdminClient } from '@/lib/supabase';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -15,8 +16,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const auth = requireUser(req);
-  const { userId, workspaceId, supabase } = auth;
+  let auth;
+  try {
+    auth = await buildAuthContext(req);
+  } catch (error) {
+    handleAuthError(error, res);
+    return;
+  }
+
+  const userId = auth.userId || auth.user_id;
+  const workspaceId = auth.workspaceId || auth.workspace_id;
+  const supabase = getAdminClient();
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));

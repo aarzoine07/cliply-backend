@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/shared/constants';
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
+import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
+import { logPipelineStep } from '@cliply/shared/observability/logging';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
@@ -16,14 +18,59 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
   try {
     const payload = TRANSCRIBE.parse(job.payload);
     const workspaceId = job.workspaceId;
+
+    // Check usage limits before heavy transcription work
+    // We check for at least 1 minute remaining (conservative, actual duration will be recorded after transcription)
+    try {
+      await assertWithinUsage(workspaceId, 'source_minutes', 1);
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        ctx.logger.warn('transcribe_usage_limit_exceeded', {
+          pipeline: PIPELINE,
+          jobId: job.id,
+          workspaceId,
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+        });
+        // Mark job as failed but don't crash - let the job system handle retries/backoff
+        throw error;
+      }
+      throw error;
+    }
+
     const sourceKey = await resolveSourceKey(ctx, workspaceId, payload.projectId, payload.sourceExt);
+
+    logPipelineStep(
+      { jobId: job.id, workspaceId, clipId: payload.projectId },
+      'transcribe',
+      'start',
+      { sourceKey },
+    );
 
     const tempDir = await fs.mkdtemp(join(tmpdir(), 'cliply-transcribe-'));
     const localSource = join(tempDir, 'source');
     const downloadedPath = await ctx.storage.download(BUCKET_VIDEOS, sourceKey, localSource);
 
     const transcriber = getTranscriber();
-    const result = await transcriber.transcribe(downloadedPath);
+    let result;
+    try {
+      result = await transcriber.transcribe(downloadedPath);
+      logPipelineStep(
+        { jobId: job.id, workspaceId, clipId: payload.projectId },
+        'transcribe',
+        'success',
+        { durationSec: result.durationSec },
+      );
+    } catch (error) {
+      logPipelineStep(
+        { jobId: job.id, workspaceId, clipId: payload.projectId },
+        'transcribe',
+        'error',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      throw error;
+    }
 
     await Promise.all([
       ensureTranscriptUploaded(ctx, workspaceId, payload.projectId, TRANSCRIPT_SRT, result.srt, 'text/plain', tempDir),
@@ -42,6 +89,16 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const alreadyTranscribed = project?.status === 'transcribed' || project?.status === 'clips_proposed';
 
     if (!alreadyTranscribed) {
+      // Record actual source minutes usage (idempotent - only record once per project)
+      if (result.durationSec !== undefined && result.durationSec > 0) {
+        const minutes = Math.ceil(result.durationSec / 60);
+        await recordUsage({
+          workspaceId,
+          metric: 'source_minutes',
+          amount: minutes,
+        });
+      }
+
       await ctx.supabase.from('projects').update({ status: 'transcribed' }).eq('id', payload.projectId);
       await ctx.queue.enqueue({
         type: 'HIGHLIGHT_DETECT',

@@ -127,8 +127,33 @@ export const PublishYouTubeInput = z
     accountId: z.string().min(1).optional(),
     titleOverride: z.string().max(120).optional(),
     descriptionOverride: z.string().max(5000).optional(),
+    // Viral experiment fields (optional for V1)
+    experimentId: z.string().uuid().optional(),
+    variantId: z.string().uuid().optional(),
+    connectedAccountIds: z.array(z.string().uuid()).optional(), // For multi-account posting
   })
   .strict();
+
+/** ---------- Publish: TikTok ---------- */
+
+export const PublishTikTokInput = z
+  .object({
+    clipId: z.string().uuid(),
+    connectedAccountId: z.string().uuid().optional(), // Single account (backward compatibility)
+    connectedAccountIds: z.array(z.string().uuid()).optional(), // Multi-account support
+    caption: z.string().max(2200).optional(),
+    privacyLevel: z.enum(['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIEND', 'SELF_ONLY']).optional(),
+    // Optional viral experiment fields
+    experimentId: z.string().uuid().optional(),
+    variantId: z.string().uuid().optional(),
+  })
+  .strict()
+  .refine(
+    (data) => data.connectedAccountId || (data.connectedAccountIds && data.connectedAccountIds.length > 0),
+    {
+      message: 'Either connectedAccountId or connectedAccountIds must be provided',
+    },
+  );
 
 /** ---------- Schedules: cancel ---------- */
 
@@ -161,3 +186,5 @@ export const ProductAttachInput = z
 
 
 export * from './schemas/jobs';
+export * from './schemas/dropshipping';
+export * from './schemas/dropshippingCreative';

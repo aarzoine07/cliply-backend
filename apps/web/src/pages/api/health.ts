@@ -1,5 +1,5 @@
 ﻿import type { NextApiRequest, NextApiResponse } from "next";
-import { getEnv } from "../../../../../packages/shared/env";
+import { getEnv } from "@cliply/shared/env";
 import { logJSON } from "../../../../../packages/shared/logger";
 import { pgCheck } from "../../lib/supabase";
 

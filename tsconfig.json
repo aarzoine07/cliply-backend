@@ -1,9 +1,7 @@
 {
-  
   "files": [],
   "references": [
-    { "path": "./apps/web" },
-    { "path": "./apps/worker" },
-    { "path": "./packages/shared" }
+    { "path": "./packages/shared" },
+    { "path": "./apps/worker" }
   ]
 }

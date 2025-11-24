@@ -2,9 +2,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { RATE_LIMIT_CONFIG } from "@cliply/shared/billing/rateLimitConfig";
 import type { PlanName } from "@cliply/shared/types/auth";
+import { env } from "../env";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = env;
 
 if (!SUPABASE_URL) {
   throw new Error("SUPABASE_URL is not configured");

@@ -20,8 +20,12 @@ export {
 export * from "../billing/checkRateLimit";
 export * from "../billing/planGate";
 export * from "../billing/planMatrix";
+export * from "../billing/planResolution";
 export * from "../billing/rateLimitConfig";
 export * from "../billing/stripePlanMap";
+export * from "../billing/usageTracker";
+export * from "./readiness/backendReadiness";
+export * from "./observability/logging";
 export * from "../logging/auditLogger";
 export * from "../logging/redactSensitive";
 export * from "../types/auth";

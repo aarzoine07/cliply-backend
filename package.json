@@ -8,6 +8,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "test": "vitest run --reporter=verbose",
+    "test:coverage": "vitest run --coverage",
+    "backend:readyz": "tsx scripts/backend.readiness.ts",
     "format": "prettier . --check",
     "format:write": "prettier . --write",
     "devcheck": "bash scripts/dev-check.sh",

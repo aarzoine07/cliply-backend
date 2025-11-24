@@ -114,8 +114,10 @@ async function fetchClip(ctx: WorkerContext, clipId: string): Promise<ClipRow | 
 async function ensureFileExists(path: string): Promise<void> {
   try {
     await fs.access(path);
+    // File exists, nothing to do
   } catch {
-    await fs.writeFile(path, "", "utf8");
+    // File doesn't exist - this is an error, not something we should fix by creating empty file
+    throw new Error(`Expected file does not exist: ${path}`);
   }
 }
 

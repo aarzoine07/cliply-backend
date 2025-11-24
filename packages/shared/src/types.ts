@@ -8,8 +8,7 @@ export type JobKind =
   | 'HIGHLIGHT_DETECT'
   | 'CLIP_RENDER'
   | 'THUMBNAIL_GEN'
-  | 'PUBLISH_YOUTUBE'
-  | 'ANALYTICS_INGEST';
+  | 'PUBLISH_YOUTUBE';
 
 export type ProjectStatus = 'queued' | 'processing' | 'ready' | 'error';
 

@@ -14,8 +14,7 @@ export type JobKind =
   | "TRANSCRIBE"
   | "HIGHLIGHT_DETECT"
   | "CLIP_RENDER"
-  | "PUBLISH_TIKTOK"
-  | "ANALYTICS_INGEST";
+  | "PUBLISH_TIKTOK";
 
 export type JobState = "queued" | "running" | "done" | "error";
 
