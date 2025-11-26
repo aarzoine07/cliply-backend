@@ -210,7 +210,7 @@ function checkStripe(): {
       if (env.STRIPE_SECRET_KEY.startsWith("sk_")) {
         // Try to instantiate Stripe client (no network call)
         new Stripe(env.STRIPE_SECRET_KEY, {
-          apiVersion: "2023-10-16",
+          apiVersion: "2025-10-29.clover",
         });
         keyValid = true;
       }

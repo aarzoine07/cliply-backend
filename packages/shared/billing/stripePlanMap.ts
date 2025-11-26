@@ -1,4 +1,4 @@
-import type { PlanName } from "@cliply/shared/types/auth";
+import type { PlanName } from "../types/auth";
 
 export type DowngradeBehavior = "grace_period" | "immediate";
 export type UpgradeBehavior = "immediate" | "prorate";

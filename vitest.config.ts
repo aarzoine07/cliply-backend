@@ -16,7 +16,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
-    setupFiles: [resolve(__dirname, "./packages/shared/test/setup.ts")],
+    setupFiles: [resolve(__dirname, "packages/shared/test/setup.ts")],
     env: {
       DOTENV_CONFIG_PATH: resolve(__dirname, "./.env.test"),
     },

@@ -2,55 +2,74 @@
   "name": "@cliply/shared",
   "private": true,
   "version": "0.0.1",
-  "type": "module",
+
+  "main": "dist/src/index.js",
+  "module": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+
   "exports": {
-    ".": "./src/index.ts",
-    "./auth/context": "./auth/context.ts",
-    "./types/auth": "./types/auth.ts",
-    "./lib/stripe": "./lib/stripe.ts",
-    "./types/billing": "./types/billing.ts",
-    "./types/rateLimit": "./types/rateLimit.ts",
-    "./billing/planMatrix": "./billing/planMatrix.ts",
-    "./billing/planGate": "./billing/planGate.ts",
-    "./billing/planResolution": "./billing/planResolution.ts",
-    "./billing/stripePlanMap": "./billing/stripePlanMap.ts",
-    "./billing/checkRateLimit": "./billing/checkRateLimit.ts",
-    "./billing/rateLimitConfig": "./billing/rateLimitConfig.ts",
-    "./schemas": "./src/schemas.ts",
-    "./schemas/jobs": "./src/schemas/jobs.ts",
-    "./schemas/upload": "./src/schemas/upload.ts",
-    "./schemas/viral": "./src/schemas/viral.ts",
-    "./schemas/accounts": "./src/schemas/accounts.ts",
-    "./schemas/dropshipping": "./src/schemas/dropshipping.ts",
-    "./schemas/dropshippingCreative": "./src/schemas/dropshippingCreative.ts",
-    "./constants": "./src/constants.ts",
-    "./logging": "./src/logging.ts",
-    "./logging/redactSensitive": "./logging/redactSensitive.ts",
-    "./logging/logger": "./logging/logger.ts",
-    "./logging/auditLogger": "./logging/auditLogger.ts",
-    "./logger": "./logger.ts",
-    "./sentry": "./sentry.ts",
-    "./test/setup": "./test/setup.ts",
-    "./test/loadEnv": "./test/loadEnv.ts",
-    "./env": "./src/env.ts",
-    "./observability/logging": "./src/observability/logging.ts",
-    "./services/youtubeAuth": "./src/services/youtubeAuth.ts",
-    "./services/tiktokAuth": "./src/services/tiktokAuth.ts",
-    "./crypto/encryptedSecretEnvelope": "./src/crypto/encryptedSecretEnvelope.ts",
-    "./health/readyChecks": "./src/health/readyChecks.ts"
+    ".": {
+      "import": "./dist/src/index.js",
+      "require": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+    },
+    "./env": {
+      "import": "./dist/env.js",
+      "require": "./dist/env.js",
+      "types": "./dist/env.d.ts"
+    },
+    "./auth/*": {
+      "import": "./dist/src/auth/*.js",
+      "require": "./dist/src/auth/*.js",
+      "types": "./dist/src/auth/*.d.ts"
+    },
+    "./observability/*": {
+      "import": "./dist/src/observability/*.js",
+      "require": "./dist/src/observability/*.js",
+      "types": "./dist/src/observability/*.d.ts"
+    },
+    "./crypto/*": {
+      "import": "./dist/src/crypto/*.js",
+      "require": "./dist/src/crypto/*.js",
+      "types": "./dist/src/crypto/*.d.ts"
+    },
+    "./logging/*": {
+      "import": "./dist/logging/*.js",
+      "require": "./dist/logging/*.js",
+      "types": "./dist/logging/*.d.ts"
+    },
+    "./lib/*": {
+      "import": "./dist/lib/*.js",
+      "require": "./dist/lib/*.js",
+      "types": "./dist/lib/*.d.ts"
+    },
+    "./billing/*": {
+      "import": "./dist/billing/*.js",
+      "require": "./dist/billing/*.js",
+      "types": "./dist/billing/*.d.ts"
+    },
+    "./types/*": {
+      "import": "./dist/types/*.js",
+      "require": "./dist/types/*.js",
+      "types": "./dist/types/*.d.ts"
+    }
   },
-  "main": "./src/index.ts",
+
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts"
   },
+
   "dependencies": {
     "@sentry/node": "^8.42.0",
     "dotenv": "^17.2.3"
   },
+
   "devDependencies": {
     "@types/node": "^24.5.2",
     "stripe": "^19.2.0"
   }
 }
+
+

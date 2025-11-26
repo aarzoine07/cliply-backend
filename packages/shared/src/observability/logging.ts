@@ -7,7 +7,7 @@
  * Safety: Never logs secrets (tokens, keys, etc.) - only safe identifiers.
  */
 
-import { logger } from "../../logging/logger";
+import { logger } from "../../logging/logger.js";
 
 // Try to import Sentry, but handle gracefully if not available
 let Sentry: typeof import("@sentry/node") | null = null;
@@ -159,7 +159,7 @@ export function logStripeEvent(eventType: string, ctx: StripeEventContext): void
     ...(ctx.stripeCustomerId && { stripeCustomerId: ctx.stripeCustomerId }),
     ...(ctx.stripeSubscriptionId && { stripeSubscriptionId: ctx.stripeSubscriptionId }),
     ...(ctx.stripeEventId && { stripeEventId: ctx.stripeEventId }),
-    ...(ctx.error && { error: safeErrorMessage(ctx.error) }),
+    ...(ctx.error ? { error: safeErrorMessage(ctx.error) } : {}),
   };
 
   const event = `stripe_${eventType}`;
@@ -198,7 +198,7 @@ export function logOAuthEvent(provider: OAuthProvider, phase: OAuthPhase, ctx: O
     ...(ctx.userId && { userId: ctx.userId }),
     ...(ctx.connectedAccountId && { connectedAccountId: ctx.connectedAccountId }),
     ...(ctx.externalId && { externalId: ctx.externalId }),
-    ...(ctx.error && { error: safeErrorMessage(ctx.error) }),
+    ...(ctx.error ? { error: safeErrorMessage(ctx.error) } : {}),
   };
 
   const event = `oauth_${provider}_${phase}`;

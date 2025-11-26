@@ -1,7 +1,27 @@
 {
   "files": [],
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    "baseUrl": ".",
+
+    "paths": {
+      "@cliply/shared": ["packages/shared/dist/index.js"],
+      "@cliply/shared/*": ["packages/shared/dist/*"],
+      "@cliply/generated/*": ["supabase/*"]
+    }
+  },
   "references": [
     { "path": "./packages/shared" },
     { "path": "./apps/worker" }
   ]
 }
+

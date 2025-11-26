@@ -1,9 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { AuthContext, AuthErrorCode, PlanName } from "../types/auth";
+import { AuthContext, AuthErrorCode, PlanName } from "../../types/auth.js";
 import { getEnv } from "../env";
 
-export type { AuthContext } from "../types/auth";
+export type { AuthContext } from "../../types/auth";
 
 interface AuthError extends Error {
   code: AuthErrorCode;
@@ -111,11 +111,9 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
   const env = getEnv();
   const isProduction = env.NODE_ENV === "production";
 
-  // Check for debug headers (only allowed in non-production)
   const debugUserId = req.headers.get("x-debug-user")?.trim() || null;
   const debugWorkspaceId = req.headers.get("x-debug-workspace")?.trim() || null;
 
-  // Block debug headers in production
   if (isProduction && (debugUserId || debugWorkspaceId)) {
     throwAuthError(
       AuthErrorCode.UNAUTHORIZED,
@@ -128,27 +126,21 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
   let workspaceId: string;
 
   if (!isProduction && debugUserId) {
-    // Debug mode: use debug headers directly (dev/test only)
     userId = validateUuid(debugUserId, "x-debug-user");
-    // Use debug workspace if provided, otherwise try X-Workspace-ID header
+
     if (debugWorkspaceId) {
       workspaceId = validateUuid(debugWorkspaceId, "x-debug-workspace");
     } else {
       workspaceId = ensureWorkspaceId(req);
     }
   } else {
-    // Production mode: require proper Supabase authentication
-
-    // 1. Parse Supabase session token from Authorization header or cookies.
     const accessToken = extractAccessToken(req);
     if (!accessToken) {
       throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session is missing or invalid", 401);
     }
 
-    // 2. Create an admin Supabase client using the service role key.
     const supabase = loadSupabaseClient();
 
-    // 3. Fetch the authenticated user associated with the access token.
     const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
     if (userError || !userData?.user?.id) {
       throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session could not be verified", 401);
@@ -156,10 +148,8 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
 
     userId = userData.user.id;
 
-    // 4. Validate the X-Workspace-ID header to identify the target workspace.
     workspaceId = ensureWorkspaceId(req);
 
-    // 5. Confirm the user is a member of the requested workspace (RLS compatibility).
     const { data: membership, error: membershipError } = await supabase
       .from("workspace_members")
       .select("workspace_id")
@@ -184,20 +174,21 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     }
   }
 
-  // 6. Retrieve the current plan for the workspace using centralized plan resolution.
   const supabase = loadSupabaseClient();
-  const { resolveWorkspacePlan } = await import("@cliply/shared/billing/planResolution");
+
+  // IMPORTANT FIX: correct dynamic path resolution
+  const { resolveWorkspacePlan } = await import("../../billing/planResolution.js");
+
   const resolvedPlan = await resolveWorkspacePlan(workspaceId, { supabase });
   const plan = resolvedPlan.planId;
 
-  // 7. Return the normalized auth context for downstream handlers.
   return {
     user_id: userId,
     workspace_id: workspaceId,
     plan,
     isAuthenticated: true,
-    // Backwards compatibility: provide camelCase aliases
     userId,
     workspaceId,
   };
 }
+

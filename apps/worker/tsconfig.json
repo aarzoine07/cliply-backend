@@ -6,14 +6,25 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "baseUrl": ".",
+
     "paths": {
       "@cliply/shared": [
         "../../packages/shared/src/index.ts"
       ],
+      "@cliply/shared/billing/*": [
+        "../../packages/shared/billing/*"
+      ],
+      "@cliply/shared/types/*": [
+        "../../packages/shared/types/*"
+      ],
+      "@cliply/shared/logging/*": [
+        "../../packages/shared/logging/*"
+      ],
       "@cliply/shared/*": [
-        "../../packages/shared/*"
+        "../../packages/shared/src/*"
       ]
     },
+
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
@@ -42,3 +53,4 @@
     }
   ]
 }
+

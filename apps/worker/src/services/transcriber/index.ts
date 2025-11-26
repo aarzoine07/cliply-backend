@@ -62,7 +62,8 @@ function buildSegments(): StubSegment[] {
 }
 
 export function getTranscriber(): Transcriber {
-  if (env.DEEPGRAM_API_KEY) {
+  // In tests, Deepgram should be disabled unless explicitly set
+  if (process.env.DEEPGRAM_API_KEY) {
     throw new Error('Deepgram disabled in tests');
   }
 
@@ -70,3 +71,4 @@ export function getTranscriber(): Transcriber {
 }
 
 export { StubTranscriber };
+

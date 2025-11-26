@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 
 import { getEnv } from "@cliply/shared/env";
 import { logger } from "@cliply/shared/logging/logger";
+import { JOB_KINDS, type JobKind } from "@cliply/shared/job-kinds";
 
 import { captureException } from "@/lib/sentry";
 
@@ -11,7 +12,7 @@ import { enqueueJob } from "@/lib/enqueueJob";
 
 const bodySchema = z.object({
   workspaceId: z.string().uuid(),
-  kind: z.enum(["TRANSCRIBE", "HIGHLIGHT_DETECT", "CLIP_RENDER", "PUBLISH_TIKTOK"]),
+  kind: z.enum(JOB_KINDS as unknown as [JobKind, ...JobKind[]]),
   payload: z.record(z.string(), z.any()),
   priority: z.number().int().min(1).max(9).optional(),
   runAt: z.string().datetime().optional(),

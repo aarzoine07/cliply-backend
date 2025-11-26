@@ -1,24 +1,18 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "target": "es2015",
+    "target": "ES2022",
     "baseUrl": ".",
-    "paths": {
-      "@cliply/shared": [
-        "../../packages/shared/src/index.ts"
-      ],
-      "@cliply/shared/*": [
-        "../../packages/shared/*"
-      ],
-      "@/*": [
-        "src/*"
-      ]
-    },
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
+
+  "paths": {
+  "@/*": ["src/*"],
+
+  // Shared package (use built dist output)
+  "@cliply/shared": ["../../packages/shared/dist/src/index.d.ts"],
+  "@cliply/shared/*": ["../../packages/shared/dist/src/*"]
+},
+
+    "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": false,
@@ -42,7 +36,8 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    ".next/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -50,3 +45,4 @@
     "**/.next/**"
   ]
 }
+

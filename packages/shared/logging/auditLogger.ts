@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { redactSensitive } from "@cliply/shared/logging/redactSensitive";
-import { logger } from "@cliply/shared/logging/logger";
+import { redactSensitive } from "./redactSensitive";
+import { logger } from "./logger";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;

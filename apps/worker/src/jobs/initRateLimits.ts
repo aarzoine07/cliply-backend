@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { RATE_LIMIT_CONFIG } from "@cliply/shared/billing/rateLimitConfig";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { env } from "../env";
+import type { Database } from "@cliply/shared/types/supabase";   // ✅ ADDED
 
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = env;
 
@@ -20,10 +21,14 @@ const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROL
   },
 });
 
-type SubscriptionRow = {
-  workspace_id: string;
-  plan_name: PlanName | null;
-};
+// ❌ Removed handwritten type
+// type SubscriptionRow = {
+//   workspace_id: string;
+//   plan_name: PlanName | null;
+// };
+
+// ✅ Replaced with real Supabase type
+type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 
 /**
  * Seeds or refreshes rate-limit rows for all active workspaces.
@@ -100,3 +105,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
+

@@ -1,6 +1,6 @@
 import util from "util";
 
-import { getEnv } from "@cliply/shared/env";
+import { getEnv } from "../src/env";
 
 const SECRET_PATTERNS = [/key/i, /token/i, /secret/i, /password/i, /authorization/i, /bearer/i];
 

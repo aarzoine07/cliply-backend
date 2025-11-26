@@ -3,12 +3,7 @@
 export type UUID = string; // validate via schema guards when needed
 export type ISODateString = string; // e.g., 2025-01-01T12:00:00Z
 
-export type JobKind =
-  | 'TRANSCRIBE'
-  | 'HIGHLIGHT_DETECT'
-  | 'CLIP_RENDER'
-  | 'THUMBNAIL_GEN'
-  | 'PUBLISH_YOUTUBE';
+// NOTE: JobKind union is defined in packages/shared/job-kinds.ts — always import from there.
 
 export type ProjectStatus = 'queued' | 'processing' | 'ready' | 'error';
 
