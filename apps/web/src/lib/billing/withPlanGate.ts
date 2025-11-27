@@ -46,8 +46,14 @@ export function withPlanGate(
     // 1. Ensure auth context and plan are available before gating features.
     const plan = auth.plan;
     if (!plan) {
-      const payload = authErrorResponse(BILLING_PLAN_REQUIRED, "No active plan found.", 403);
-      res.status(payload.status).json(err(payload.error.code, payload.error.message));
+      const payload = authErrorResponse(
+        AuthErrorCode.FORBIDDEN,
+        "No active plan found.",
+        403
+      );
+      res
+        .status(payload.status)
+        .json(err(payload.error.code, payload.error.message));
       return;
     }
 
@@ -55,12 +61,19 @@ export function withPlanGate(
       // 2. Check capability availability without mutating state.
       const gate = checkPlanAccess(plan, feature);
       if (!gate.active) {
-        const code = gate.reason === "limit" ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
-        const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
+        const status = gate.reason === "limit" ? 429 : 403;
         const message =
           gate.message ?? `${String(feature)} not available on current plan.`;
-        const payload = authErrorResponse(code, message, status);
-        res.status(payload.status).json(err(payload.error.code, payload.error.message));
+
+        const payload = authErrorResponse(
+          AuthErrorCode.FORBIDDEN,
+          message,
+          status
+        );
+
+        res
+          .status(payload.status)
+          .json(err(payload.error.code, payload.error.message));
         return;
       }
 
@@ -70,14 +83,21 @@ export function withPlanGate(
       // 4. Delegate to the downstream handler when gating succeeds.
       await handler(req, res);
     } catch (error) {
-      // 5. Normalize unexpected failures into a billing internal error response.
+      // 5. Normalize unexpected failures into an internal error response.
       const message =
         error instanceof Error
           ? error.message
           : "Plan gate failed unexpectedly.";
-      const payload = authErrorResponse(AuthErrorCode.INTERNAL_ERROR, message, 500);
-      res.status(payload.status).json(err(payload.error.code, payload.error.message));
+      const payload = authErrorResponse(
+        AuthErrorCode.INTERNAL_ERROR,
+        message,
+        500
+      );
+      res
+        .status(payload.status)
+        .json(err(payload.error.code, payload.error.message));
     }
   };
 }
+
 

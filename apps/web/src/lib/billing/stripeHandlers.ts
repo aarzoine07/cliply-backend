@@ -2,14 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
 import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
+import type { BillingStatus } from "@cliply/shared/billing/status";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { logStripeEvent } from "@cliply/shared/observability/logging";
 import * as workspacePlanService from "./workspacePlanService";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-type SupportedSubscriptionStatus = "active" | "trialing" | "canceled" | "incomplete" | "past_due";
 
 /**
  * Extracts workspace_id from Stripe metadata, supporting multiple key formats.
@@ -29,7 +28,7 @@ function extractWorkspaceId(metadata: Stripe.Metadata | null | undefined): strin
 /**
  * Maps Stripe subscription status to our internal status enum.
  */
-function mapSubscriptionStatus(status: Stripe.Subscription.Status): SupportedSubscriptionStatus {
+function mapSubscriptionStatus(status: Stripe.Subscription.Status): BillingStatus {
   switch (status) {
     case "active":
       return "active";
@@ -169,6 +168,67 @@ export async function upsertBillingFromCheckout(
 }
 
 /**
+ * Closes the current open usage period for a workspace.
+ */
+async function closeCurrentUsagePeriod(
+  workspaceId: string,
+  supabase: SupabaseClient,
+): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("workspace_usage")
+      .update({ period_end: now, updated_at: now })
+      .eq("workspace_id", workspaceId)
+      .is("period_end", null);
+
+    if (error) {
+      console.error(`Failed to close usage period for workspace ${workspaceId}:`, error.message);
+    }
+  } catch (error) {
+    console.error(`Error closing usage period for workspace ${workspaceId}:`, error);
+  }
+}
+
+/**
+ * Opens a new usage period for a workspace starting at the current period start.
+ */
+async function openNewUsagePeriod(
+  workspaceId: string,
+  periodStart: Date,
+  supabase: SupabaseClient,
+): Promise<void> {
+  try {
+    const periodStartIso = periodStart.toISOString();
+    // Check if period already exists
+    const { data: existing } = await supabase
+      .from("workspace_usage")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("period_start", periodStartIso)
+      .maybeSingle();
+
+    if (!existing) {
+      const { error } = await supabase.from("workspace_usage").insert({
+        workspace_id: workspaceId,
+        period_start: periodStartIso,
+        period_end: null,
+        clips_count: 0,
+        source_minutes: 0,
+        projects_count: 0,
+        updated_at: new Date().toISOString(),
+      });
+
+      if (error) {
+        console.error(`Failed to open usage period for workspace ${workspaceId}:`, error.message);
+      }
+    }
+  } catch (error) {
+    console.error(`Error opening usage period for workspace ${workspaceId}:`, error);
+  }
+}
+
+/**
  * Handles customer.subscription.created, updated, and deleted events.
  */
 export async function handleSubscriptionEvent(
@@ -176,7 +236,7 @@ export async function handleSubscriptionEvent(
   eventType: string,
   supabase: SupabaseClient,
   logAudit?: (workspaceId: string, eventType: string, eventId: string, payload: Record<string, unknown>) => Promise<void>,
-): Promise<string> {
+): Promise<string | null> {
   const customerId =
     typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
 
@@ -186,31 +246,65 @@ export async function handleSubscriptionEvent(
     stripeEventId: subscription.id,
   });
 
-  let workspaceId: string;
+  let workspaceId: string | null = null;
   try {
     workspaceId = await resolveWorkspaceIdFromSubscription(subscription, supabase);
 
     if (eventType === "customer.subscription.deleted") {
-      await deleteSubscriptionRecord(subscription, workspaceId, supabase);
-      if (logAudit) {
-        await logAudit(workspaceId, eventType, subscription.id, {
-          stripe_subscription_id: subscription.id,
-          stripe_customer_id: customerId ?? null,
-        });
+      // Close current usage period
+      if (workspaceId) {
+        await closeCurrentUsagePeriod(workspaceId, supabase);
+      }
+      await deleteSubscriptionRecord(subscription, workspaceId!, supabase);
+      if (logAudit && workspaceId) {
+        try {
+          await logAudit(workspaceId, eventType, subscription.id, {
+            stripe_subscription_id: subscription.id,
+            stripe_customer_id: customerId ?? null,
+          });
+        } catch (auditError) {
+          console.error("Failed to log audit event:", auditError);
+        }
       }
     } else {
-      await upsertSubscriptionRecord(subscription, workspaceId, supabase, eventType);
-      if (logAudit) {
-        const price = subscription.items.data[0]?.price;
-        const plan = (getPlanFromPriceId(price?.id ?? "") ?? "basic") as PlanName;
-        const status = mapSubscriptionStatus(subscription.status);
-        await logAudit(workspaceId, eventType, subscription.id, {
-          stripe_subscription_id: subscription.id,
-          stripe_customer_id: customerId ?? null,
-          plan,
-          status,
-          latest_invoice: subscription.latest_invoice ?? null,
-        });
+      // created or updated
+      const status = mapSubscriptionStatus(subscription.status);
+      await upsertSubscriptionRecord(subscription, workspaceId!, supabase, eventType);
+
+      // Manage usage periods
+      if (workspaceId) {
+        if (eventType === "customer.subscription.created") {
+          // Open new period starting at current_period_start
+          const periodStart = subscription.current_period_start
+            ? new Date(subscription.current_period_start * 1000)
+            : new Date();
+          const periodStartMonth = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), 1, 0, 0, 0, 0));
+          await openNewUsagePeriod(workspaceId, periodStartMonth, supabase);
+        } else if (eventType === "customer.subscription.updated") {
+          // Check if period changed - if current_period_start is different, close old and open new
+          // For simplicity, we'll ensure a period exists for the current period
+          const periodStart = subscription.current_period_start
+            ? new Date(subscription.current_period_start * 1000)
+            : new Date();
+          const periodStartMonth = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), 1, 0, 0, 0, 0));
+          await openNewUsagePeriod(workspaceId, periodStartMonth, supabase);
+        }
+      }
+
+      if (logAudit && workspaceId) {
+        try {
+          const price = subscription.items.data[0]?.price;
+          const plan = (getPlanFromPriceId(price?.id ?? "") ?? "basic") as PlanName;
+          await logAudit(workspaceId, eventType, subscription.id, {
+            stripe_subscription_id: subscription.id,
+            stripe_customer_id: customerId ?? null,
+            plan,
+            status,
+            latest_invoice: subscription.latest_invoice ?? null,
+          });
+        } catch (auditError) {
+          console.error("Failed to log audit event:", auditError);
+        }
       }
     }
 
@@ -224,12 +318,15 @@ export async function handleSubscriptionEvent(
     return workspaceId;
   } catch (error) {
     logStripeEvent(eventType, {
+      workspaceId,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscription.id,
       stripeEventId: subscription.id,
       error,
     });
-    throw error;
+    // Never throw - return null instead
+    console.error(`Error handling subscription event ${eventType}:`, error);
+    return null;
   }
 }
 
@@ -244,7 +341,8 @@ async function upsertSubscriptionRecord(
 ): Promise<void> {
   const price = sub.items.data[0]?.price;
   if (!price?.id) {
-    throw new Error(`Subscription ${sub.id} does not contain a valid price item`);
+    console.error(`Subscription ${sub.id} does not contain a valid price item`);
+    return;
   }
 
   const plan = (getPlanFromPriceId(price.id) ?? "basic") as PlanName;
@@ -271,7 +369,8 @@ async function upsertSubscriptionRecord(
   );
 
   if (error) {
-    throw new Error(`Failed to upsert subscription ${sub.id}: ${error.message}`);
+    console.error(`Failed to upsert subscription ${sub.id}:`, error.message);
+    return;
   }
 
   // Update workspace plan and billing status
@@ -301,7 +400,8 @@ async function deleteSubscriptionRecord(
     .eq("stripe_subscription_id", sub.id);
 
   if (error) {
-    throw new Error(`Failed to delete subscription ${sub.id}: ${error.message}`);
+    console.error(`Failed to delete subscription ${sub.id}:`, error.message);
+    return;
   }
 
   // Reset workspace plan to basic when subscription is deleted
@@ -329,12 +429,13 @@ export async function handleInvoiceEvent(
   invoice: Stripe.Invoice,
   eventType: string,
   supabase: SupabaseClient,
-): Promise<string> {
+): Promise<string | null> {
   // Resolve workspace from subscription
   const subscriptionId =
     typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
   if (!subscriptionId) {
-    throw new Error(`Invoice ${invoice.id} does not include a subscription reference`);
+    console.error(`Invoice ${invoice.id} does not include a subscription reference`);
+    return null;
   }
 
   const { data, error } = await supabase
@@ -344,10 +445,12 @@ export async function handleInvoiceEvent(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to resolve workspace for invoice ${invoice.id}: ${error.message}`);
+    console.error(`Failed to resolve workspace for invoice ${invoice.id}:`, error.message);
+    return null;
   }
   if (!data?.workspace_id) {
-    throw new Error(`Workspace ID not found for invoice ${invoice.id}`);
+    console.error(`Workspace ID not found for invoice ${invoice.id}`);
+    return null;
   }
 
   const workspaceId = data.workspace_id;
@@ -363,9 +466,11 @@ export async function handleInvoiceEvent(
       .eq("stripe_subscription_id", subscriptionId);
 
     if (updateError) {
-      throw new Error(
-        `Failed to update subscription status for invoice ${invoice.id}: ${updateError.message}`,
+      console.error(
+        `Failed to update subscription status for invoice ${invoice.id}:`,
+        updateError.message,
       );
+      return workspaceId; // Return workspaceId even if update failed
     }
   } else if (eventType === "invoice.payment_succeeded") {
     const { error: updateError } = await supabase
@@ -377,9 +482,11 @@ export async function handleInvoiceEvent(
       .eq("stripe_subscription_id", subscriptionId);
 
     if (updateError) {
-      throw new Error(
-        `Failed to update subscription status for invoice ${invoice.id}: ${updateError.message}`,
+      console.error(
+        `Failed to update subscription status for invoice ${invoice.id}:`,
+        updateError.message,
       );
+      return workspaceId; // Return workspaceId even if update failed
     }
   }
 

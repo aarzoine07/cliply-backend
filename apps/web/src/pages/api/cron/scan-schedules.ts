@@ -6,43 +6,54 @@ import { scanSchedules } from "@/lib/cron/scanSchedules";
 import { serverEnv } from "@/lib/env";
 
 function isAuthorizedCronRequest(req: NextApiRequest): boolean {
-  // Vercel Cron Jobs send Authorization: Bearer <CRON_SECRET>
+  // Get secrets from environment
   const cronSecret = serverEnv.CRON_SECRET;
-  if (cronSecret) {
-    const headerValue = Array.isArray(req.headers.authorization)
+  const bypassSecret = serverEnv.VERCEL_AUTOMATION_BYPASS_SECRET;
+
+  // Extract provided secret from header, query param, or Bearer token
+  let providedSecret: string | null = null;
+
+  // Check X-CRON-SECRET header
+  const headerSecret = Array.isArray(req.headers["x-cron-secret"])
+    ? req.headers["x-cron-secret"][0]
+    : req.headers["x-cron-secret"];
+  if (headerSecret) {
+    providedSecret = headerSecret;
+  }
+
+  // Check query parameter
+  if (!providedSecret && req.query?.secret) {
+    const querySecret = Array.isArray(req.query.secret) ? req.query.secret[0] : req.query.secret;
+    if (querySecret && typeof querySecret === "string") {
+      providedSecret = querySecret;
+    }
+  }
+
+  // Check Bearer token in Authorization header
+  if (!providedSecret) {
+    const authHeader = Array.isArray(req.headers.authorization)
       ? req.headers.authorization[0]
       : req.headers.authorization;
-    if (headerValue) {
-      const [scheme, token] = headerValue.split(/\s+/, 2);
-      if (scheme?.toLowerCase() === "bearer" && token === cronSecret) {
-        return true;
+    if (authHeader) {
+      const [scheme, token] = authHeader.split(/\s+/, 2);
+      if (scheme?.toLowerCase() === "bearer" && token) {
+        providedSecret = token;
       }
     }
   }
 
-  // Alternative: Check X-CRON-SECRET header if provided
-  const cronSecretHeader = serverEnv.CRON_SECRET;
-  if (cronSecretHeader) {
-    const headerValue = Array.isArray(req.headers["x-cron-secret"])
-      ? req.headers["x-cron-secret"][0]
-      : req.headers["x-cron-secret"];
-    if (headerValue && headerValue === cronSecretHeader) {
-      return true;
-    }
+  if (!providedSecret) {
+    return false;
   }
 
-  // Fallback: Service role key for testing (optional)
-  const serviceRoleKey = serverEnv.SUPABASE_SERVICE_ROLE_KEY;
-  if (serviceRoleKey) {
-    const headerValue = Array.isArray(req.headers.authorization)
-      ? req.headers.authorization[0]
-      : req.headers.authorization;
-    if (headerValue) {
-      const [scheme, token] = headerValue.split(/\s+/, 2);
-      if (scheme?.toLowerCase() === "bearer" && token === serviceRoleKey) {
-        return true;
-      }
-    }
+  // Check against CRON_SECRET
+  if (cronSecret && providedSecret === cronSecret) {
+    return true;
+  }
+
+  // Check against VERCEL_AUTOMATION_BYPASS_SECRET
+  if (bypassSecret && providedSecret === bypassSecret) {
+    return true;
   }
 
   return false;
@@ -102,3 +113,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
+

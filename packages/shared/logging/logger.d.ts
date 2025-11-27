@@ -37,4 +37,3 @@ export declare const logger: {
 export declare function pretty(value: unknown): string;
 export declare function onLog(observer: LogObserver): () => void;
 export type { LogObserverPayload };
-//# sourceMappingURL=logger.d.ts.map

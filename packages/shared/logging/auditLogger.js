@@ -1,9 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.logAuditEvent = logAuditEvent;
-const supabase_js_1 = require("@supabase/supabase-js");
-const redactSensitive_1 = require("./redactSensitive");
-const logger_1 = require("./logger");
+import { createClient } from "@supabase/supabase-js";
+import { redactSensitive } from "./redactSensitive";
+import { logger } from "./logger";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL) {
@@ -12,12 +9,12 @@ if (!SUPABASE_URL) {
 if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured for audit logging.");
 }
-const supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
 });
-async function logAuditEvent(input) {
+export async function logAuditEvent(input) {
     try {
-        const redactedPayload = input.payload ? (0, redactSensitive_1.redactSensitive)(input.payload) : null;
+        const redactedPayload = input.payload ? redactSensitive(input.payload) : null;
         const { error } = await supabase.from("events_audit").insert({
             workspace_id: input.workspace_id,
             actor_id: input.actor_id,
@@ -27,15 +24,15 @@ async function logAuditEvent(input) {
             created_at: new Date().toISOString(),
         });
         if (error) {
-            logger_1.logger.error("Failed to insert audit event", { workspace_id: input.workspace_id, event_type: input.event_type }, { error });
+            logger.error("Failed to insert audit event", { workspace_id: input.workspace_id, event_type: input.event_type }, { error });
             return { ok: false, error: { code: "COMPLIANCE_INSERT_FAILED", message: error.message } };
         }
-        logger_1.logger.info("Audit event recorded", { workspace_id: input.workspace_id, event_type: input.event_type }, redactedPayload ?? undefined);
+        logger.info("Audit event recorded", { workspace_id: input.workspace_id, event_type: input.event_type }, redactedPayload ?? undefined);
         return { ok: true };
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        logger_1.logger.error("Unexpected audit logger failure", { workspace_id: input.workspace_id, event_type: input.event_type }, { error: message });
+        logger.error("Unexpected audit logger failure", { workspace_id: input.workspace_id, event_type: input.event_type }, { error: message });
         return { ok: false, error: { code: "COMPLIANCE_INTERNAL_ERROR", message } };
     }
 }
@@ -49,4 +46,3 @@ async function logAuditEvent(input) {
  *   payload: { title, duration },
  * });
  */
-//# sourceMappingURL=auditLogger.js.map

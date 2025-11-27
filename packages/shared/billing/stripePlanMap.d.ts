@@ -20,4 +20,3 @@ export declare function getPlanFromPriceId(price_id: string): PlanName | null;
  * Fetch configured trial days for a given Cliply plan.
  */
 export declare function getTrialDaysForPlan(plan: PlanName): number;
-//# sourceMappingURL=stripePlanMap.d.ts.map

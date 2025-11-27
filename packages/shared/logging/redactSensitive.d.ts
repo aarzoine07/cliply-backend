@@ -13,4 +13,3 @@ export declare function redactSensitive<T>(input: T): T;
  * console.log(redactSensitive({ access_token: 'abc', user: { password: '123' } }));
  * → { access_token: "[REDACTED]", user: { password: "[REDACTED]" } }
  */
-//# sourceMappingURL=redactSensitive.d.ts.map

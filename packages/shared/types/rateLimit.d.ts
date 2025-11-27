@@ -37,4 +37,3 @@ export declare function rateLimitErrorResponse(err: RateLimitError): {
         message: string;
     };
 };
-//# sourceMappingURL=rateLimit.d.ts.map

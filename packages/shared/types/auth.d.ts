@@ -32,4 +32,3 @@ export declare function authErrorResponse(code: AuthErrorCode, message: string, 
     };
     status: number;
 };
-//# sourceMappingURL=auth.d.ts.map

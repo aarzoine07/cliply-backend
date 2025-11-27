@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
+import type { ClipStatus } from '@cliply/shared';
 
 import type { Job, WorkerContext } from './types';
 
@@ -108,7 +109,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
           end_s: Number(candidate.end.toFixed(3)),
           title: candidate.title,
           confidence: Number(candidate.confidence.toFixed(3)),
-          status: 'proposed',
+          status: 'proposed' as ClipStatus,
         };
       });
 
@@ -282,6 +283,8 @@ async function fetchExistingClips(
 }
 
 async function ensureProjectStatus(ctx: WorkerContext, projectId: string, status: string): Promise<void> {
+  // TODO: Legacy function - 'clips_proposed' is not in the lifecycle but may exist in DB
+  // This function is kept for backward compatibility but should be refactored to use ProjectStatus
   const response = await ctx.supabase.from('projects').select('id,status').eq('id', projectId);
   const rows = response.data as Array<{ id: string; status?: string }> | null;
   const current = rows?.[0]?.status;

@@ -1,12 +1,10 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
+import type { NextApiRequest, NextApiResponse } from "next";
 
-import { UpdateProductInput } from '@cliply/shared/schemas/dropshipping';
-
-import { handler, ok, err } from '@/lib/http';
-import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
-import { logger } from '@/lib/logger';
-import { getAdminClient } from '@/lib/supabase';
-import * as productService from '@/lib/dropshipping/productService';
+import { handler, ok, err } from "@/lib/http";
+import { logger } from "@/lib/logger";
+import { getAdminClient } from "@/lib/supabase";
+import * as productService from "@/lib/dropshipping/productService";
+import { buildAuthContext, handleAuthError } from "@/lib/auth/context";
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   let auth;
@@ -18,96 +16,155 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const workspaceId = auth.workspaceId || auth.workspace_id;
-
   if (!workspaceId) {
-    res.status(400).json(err('invalid_request', 'workspace required'));
-    return;
-  }
-
-  const productId = req.query.id as string;
-  if (!productId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId)) {
-    res.status(400).json(err('invalid_request', 'Invalid product ID'));
+    res.status(400).json(err("invalid_request", "workspace required"));
     return;
   }
 
   const supabase = getAdminClient();
+  const { id } = req.query;
 
-  if (req.method === 'GET') {
-    try {
-      const product = await productService.getProductById(workspaceId, productId, { supabase });
-
-      if (!product) {
-        res.status(404).json(err('not_found', 'Product not found'));
-        return;
-      }
-
-      logger.info('product_retrieved', {
-        workspaceId,
-        productId,
-      });
-
-      res.status(200).json(ok(product));
-    } catch (error) {
-      logger.error('product_get_failed', {
-        workspaceId,
-        productId,
-        message: (error as Error)?.message ?? 'unknown',
-      });
-      res.status(500).json(err('internal_error', 'Failed to get product'));
-    }
+  if (typeof id !== "string") {
+    res.status(400).json(err("invalid_request", "Invalid product id"));
     return;
   }
 
-  if (req.method === 'PATCH') {
+  //
+  // GET — read a single product by filtering listProductsForWorkspace
+  //
+  if (req.method === "GET") {
+    try {
+      const products = await productService.listProductsForWorkspace(
+        workspaceId,
+        { supabase }
+      );
+
+      const product = products.find((p) => p.id === id);
+
+      if (!product) {
+        res.status(404).json(err("not_found", "Product not found"));
+        return;
+      }
+
+      logger.info("product_read", {
+        workspaceId,
+        productId: id,
+      });
+
+      res.status(200).json(ok(product));
+      return;
+    } catch (error) {
+      logger.error("product_read_failed", {
+        workspaceId,
+        productId: id,
+        message: (error as any)?.message ?? "unknown",
+      });
+
+      res
+        .status(500)
+        .json(err("internal_error", "Failed to fetch product"));
+      return;
+    }
+  }
+
+  //
+  // PUT — update a product
+  //
+  if (req.method === "PUT") {
     let body: unknown = req.body;
-    if (typeof body === 'string') {
+    if (typeof body === "string") {
       try {
         body = JSON.parse(body);
       } catch {
-        res.status(400).json(err('invalid_request', 'Invalid JSON payload'));
+        res.status(400).json(err("invalid_request", "Invalid JSON payload"));
         return;
       }
     }
 
-    const parsed = UpdateProductInput.safeParse(body);
-    if (!parsed.success) {
-      res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
-      return;
-    }
-
+    // Update via Supabase directly
     try {
-      const product = await productService.updateProductForWorkspace(workspaceId, productId, parsed.data, { supabase });
+      const { data, error } = await supabase
+        .from("dropshipping_products")
+        .update(body as any)
+        .eq("id", id)
+        .eq("workspace_id", workspaceId)
+        .select()
+        .single();
 
-      logger.info('product_updated', {
-        workspaceId,
-        productId,
-      });
-
-      res.status(200).json(ok(product));
-    } catch (error) {
-      if (error instanceof HttpError) {
-        if (error.status === 404) {
-          res.status(404).json(err('not_found', 'Product not found'));
+      if (error) {
+        if (error.code === "PGRST116") {
+          // row not found
+          res.status(404).json(err("not_found", "Product not found"));
           return;
         }
-        if (error.status === 409) {
-          res.status(409).json(err('duplicate_slug', error.message));
-          return;
-        }
+
+        throw error;
       }
 
-      logger.error('product_update_failed', {
+      logger.info("product_updated", {
         workspaceId,
-        productId,
-        message: (error as Error)?.message ?? 'unknown',
+        productId: id,
       });
-      res.status(500).json(err('internal_error', 'Failed to update product'));
+
+      res.status(200).json(ok(data));
+      return;
+    } catch (error) {
+      logger.error("product_update_failed", {
+        workspaceId,
+        productId: id,
+        message: (error as any)?.message ?? "unknown",
+      });
+
+      res
+        .status(500)
+        .json(err("internal_error", "Failed to update product"));
+      return;
     }
-    return;
   }
 
-  res.setHeader('Allow', 'GET, PATCH');
-  res.status(405).json(err('method_not_allowed', 'Method not allowed'));
+  //
+  // DELETE — delete product directly
+  //
+  if (req.method === "DELETE") {
+    try {
+      const { error } = await supabase
+        .from("dropshipping_products")
+        .delete()
+        .eq("id", id)
+        .eq("workspace_id", workspaceId);
+
+      if (error) {
+        if (error.code === "PGRST116") {
+          res.status(404).json(err("not_found", "Product not found"));
+          return;
+        }
+        throw error;
+      }
+
+      logger.info("product_deleted", {
+        workspaceId,
+        productId: id,
+      });
+
+      res.status(200).json(ok({ success: true }));
+      return;
+    } catch (error) {
+      logger.error("product_delete_failed", {
+        workspaceId,
+        productId: id,
+        message: (error as any)?.message ?? "unknown",
+      });
+
+      res
+        .status(500)
+        .json(err("internal_error", "Failed to delete product"));
+      return;
+    }
+  }
+
+  res.setHeader("Allow", "GET, PUT, DELETE");
+  res.status(405).json(err("method_not_allowed", "Method not allowed"));
 });
+
 
 

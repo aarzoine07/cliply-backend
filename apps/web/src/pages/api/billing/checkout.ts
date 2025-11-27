@@ -73,7 +73,7 @@ const params: Stripe.Checkout.SessionCreateParams = {
   success_url: successUrl,
   cancel_url: cancelUrl,
   metadata: {
-    workspace_id: workspaceId,
+    workspace_id: workspaceId ?? null,
   },
 };
 

@@ -1,14 +1,7 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.UsageLimitExceededError = void 0;
-exports.recordUsage = recordUsage;
-exports.getUsageSummary = getUsageSummary;
-exports.checkUsage = checkUsage;
-exports.assertWithinUsage = assertWithinUsage;
-const supabase_js_1 = require("@supabase/supabase-js");
-const planMatrix_1 = require("./planMatrix");
-const billing_1 = require("../types/billing");
-const logger_1 = require("../logging/logger");
+import { createClient } from "@supabase/supabase-js";
+import { PLAN_MATRIX } from "./planMatrix";
+import { BillingErrorCode } from "../types/billing";
+import { logger } from "../logging/logger";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL) {
@@ -17,7 +10,7 @@ if (!SUPABASE_URL) {
 if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
 }
-const supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -26,11 +19,11 @@ const supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_
 /**
  * Error thrown when usage limit is exceeded.
  */
-class UsageLimitExceededError extends Error {
+export class UsageLimitExceededError extends Error {
     constructor(metric, used, limit) {
         const message = `Usage limit exceeded for ${metric}: ${used}/${limit}`;
         super(message);
-        this.code = billing_1.BillingErrorCode.PLAN_LIMIT;
+        this.code = BillingErrorCode.PLAN_LIMIT;
         this.status = 429;
         this.name = "UsageLimitExceededError";
         this.metric = metric;
@@ -38,7 +31,6 @@ class UsageLimitExceededError extends Error {
         this.limit = limit;
     }
 }
-exports.UsageLimitExceededError = UsageLimitExceededError;
 /**
  * Get the start of the current calendar month (UTC).
  */
@@ -66,7 +58,7 @@ async function getWorkspacePlan(workspaceId) {
         .eq("id", workspaceId)
         .maybeSingle();
     if (error && error.code !== "PGRST116") {
-        logger_1.logger.error("usage_tracker_get_plan_failed", {
+        logger.error("usage_tracker_get_plan_failed", {
             workspaceId,
             error: error.message,
         });
@@ -81,7 +73,7 @@ async function getWorkspacePlan(workspaceId) {
  * Get the limit for a metric from the plan matrix.
  */
 function getMetricLimit(planName, metric) {
-    const plan = planMatrix_1.PLAN_MATRIX[planName];
+    const plan = PLAN_MATRIX[planName];
     if (!plan) {
         return null;
     }
@@ -101,7 +93,7 @@ function getMetricLimit(planName, metric) {
  * Record usage increment for a workspace.
  * This upserts the usage row, incrementing the specified metric atomically.
  */
-async function recordUsage(incr) {
+export async function recordUsage(incr) {
     const periodStart = getPeriodStart(incr.at);
     const periodStartStr = formatPeriodStart(periodStart);
     const metricColumn = incr.metric === "clips" ? "clips_count" : incr.metric === "projects" ? "projects_count" : "source_minutes";
@@ -131,7 +123,7 @@ async function recordUsage(incr) {
                 .eq("workspace_id", incr.workspaceId)
                 .eq("period_start", periodStartStr);
             if (updateError) {
-                logger_1.logger.error("usage_tracker_record_failed", {
+                logger.error("usage_tracker_record_failed", {
                     workspaceId: incr.workspaceId,
                     metric: incr.metric,
                     error: updateError.message,
@@ -152,7 +144,7 @@ async function recordUsage(incr) {
                 ...initialValues,
             });
             if (insertError) {
-                logger_1.logger.error("usage_tracker_record_failed", {
+                logger.error("usage_tracker_record_failed", {
                     workspaceId: incr.workspaceId,
                     metric: incr.metric,
                     error: insertError.message,
@@ -161,7 +153,7 @@ async function recordUsage(incr) {
             }
         }
     }
-    logger_1.logger.info("usage_tracker_recorded", {
+    logger.info("usage_tracker_recorded", {
         workspaceId: incr.workspaceId,
         metric: incr.metric,
         amount: incr.amount,
@@ -171,7 +163,7 @@ async function recordUsage(incr) {
 /**
  * Get current usage summary for a workspace.
  */
-async function getUsageSummary(workspaceId, at) {
+export async function getUsageSummary(workspaceId, at) {
     const periodStart = getPeriodStart(at);
     const periodStartStr = formatPeriodStart(periodStart);
     const planName = await getWorkspacePlan(workspaceId);
@@ -182,7 +174,7 @@ async function getUsageSummary(workspaceId, at) {
         .eq("period_start", periodStartStr)
         .maybeSingle();
     if (error && error.code !== "PGRST116") {
-        logger_1.logger.error("usage_tracker_get_summary_failed", {
+        logger.error("usage_tracker_get_summary_failed", {
             workspaceId,
             error: error.message,
         });
@@ -215,7 +207,7 @@ async function getUsageSummary(workspaceId, at) {
  * Check if adding the specified amount would exceed the limit.
  * Returns a result object (does not throw).
  */
-async function checkUsage(workspaceId, metric, amount, at) {
+export async function checkUsage(workspaceId, metric, amount, at) {
     const summary = await getUsageSummary(workspaceId, at);
     const metricData = summary.metrics[metric];
     if (!metricData) {
@@ -240,10 +232,9 @@ async function checkUsage(workspaceId, metric, amount, at) {
  * Assert that adding the specified amount would not exceed the limit.
  * Throws UsageLimitExceededError if limit would be exceeded.
  */
-async function assertWithinUsage(workspaceId, metric, amount, at) {
+export async function assertWithinUsage(workspaceId, metric, amount, at) {
     const result = await checkUsage(workspaceId, metric, amount, at);
     if (!result.ok && result.reason === "limit_exceeded") {
         throw new UsageLimitExceededError(result.metric, result.used, result.limit);
     }
 }
-//# sourceMappingURL=usageTracker.js.map

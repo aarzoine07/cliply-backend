@@ -20,4 +20,3 @@ export declare function checkPlanAccess(plan: PlanName, feature: keyof PlanLimit
  */
 export declare function enforcePlanAccess(plan: PlanName, feature: keyof PlanLimits): void;
 export { BILLING_PLAN_LIMIT, BILLING_PLAN_REQUIRED };
-//# sourceMappingURL=planGate.d.ts.map

@@ -40,35 +40,32 @@ export async function scanSchedules(
     timestamp: new Date().toISOString(),
   });
 
-  // Step 1: Atomically claim all due schedules
-  // Use UPDATE ... WHERE status = 'scheduled' AND run_at <= now() with RETURNING
-  // Note: PostgREST supports .update().eq().lte().select() which returns updated rows
-  // This is reasonably atomic, though for true atomicity a PostgreSQL function would be better
+  // Step 1: Find all due schedules
+  // Select schedules with status='scheduled' and run_at <= now()
   const now = new Date().toISOString();
-  const { data: claimedSchedules, error: claimError } = await supabase
+  const { data: dueSchedules, error: selectError } = await supabase
     .from("schedules")
-    .update({ status: "processing", updated_at: now })
+    .select("id, workspace_id, clip_id, platform, run_at, status")
     .eq("status", "scheduled")
-    .lte("run_at", now)
-    .select("id, workspace_id, clip_id, platform, run_at, status");
+    .lte("run_at", now);
 
-  if (claimError) {
-    logger.error("cron_scan_schedules_claim_failed", {
+  if (selectError) {
+    logger.error("cron_scan_schedules_select_failed", {
       runId,
-      error: claimError.message,
+      error: selectError.message,
     });
-    throw new Error(`Failed to claim schedules: ${claimError.message}`);
+    throw new Error(`Failed to select schedules: ${selectError.message}`);
   }
 
-  const claimed = (claimedSchedules as ScheduleRow[]) || [];
-  const scanned = claimed.length; // In a real implementation, you'd query total count separately
+  const schedules = (dueSchedules as ScheduleRow[]) || [];
+  const scanned = schedules.length;
 
-  logger.info("cron_scan_schedules_claimed", {
+  logger.info("cron_scan_schedules_found", {
     runId,
-    claimed_count: claimed.length,
+    found_count: schedules.length,
   });
 
-  if (claimed.length === 0) {
+  if (schedules.length === 0) {
     logger.info("cron_scan_schedules_complete", {
       runId,
       scanned: 0,
@@ -91,14 +88,14 @@ export async function scanSchedules(
     };
   }
 
-  // Step 2: Enqueue jobs for each claimed schedule
+  // Step 2: Enqueue jobs for each schedule and update status
   let enqueued = 0;
   let enqueuedTiktok = 0;
   let enqueuedYoutube = 0;
   let skipped = 0;
   let failed = 0;
 
-  for (const schedule of claimed) {
+  for (const schedule of schedules) {
     try {
       // Skip schedules without platform (backward compatibility - should be rare)
       if (!schedule.platform) {
@@ -173,6 +170,9 @@ export async function scanSchedules(
       const jobKind = schedule.platform === "tiktok" ? "PUBLISH_TIKTOK" : "PUBLISH_YOUTUBE";
 
       // Enqueue one job per account
+      let scheduleEnqueued = false;
+      let scheduleFailed = false;
+
       for (const accountId of accountIds) {
         const payload: Record<string, unknown> = {
           clipId: schedule.clip_id,
@@ -196,6 +196,7 @@ export async function scanSchedules(
         });
 
         if (result.ok) {
+          scheduleEnqueued = true;
           enqueued++;
           if (schedule.platform === "tiktok") {
             enqueuedTiktok++;
@@ -210,7 +211,39 @@ export async function scanSchedules(
             platform: schedule.platform,
             error: result.error,
           });
+          scheduleFailed = true;
           failed++;
+        }
+      }
+
+      // Update schedule status based on result
+      if (scheduleEnqueued && !scheduleFailed) {
+        // All jobs enqueued successfully - mark as executed
+        const { error: updateError } = await supabase
+          .from("schedules")
+          .update({ status: "executed", updated_at: now })
+          .eq("id", schedule.id);
+
+        if (updateError) {
+          logger.error("cron_scan_schedules_status_update_failed", {
+            runId,
+            scheduleId: schedule.id,
+            error: updateError.message,
+          });
+        }
+      } else if (scheduleFailed) {
+        // At least one job failed - mark as failed
+        const { error: updateError } = await supabase
+          .from("schedules")
+          .update({ status: "failed", updated_at: now })
+          .eq("id", schedule.id);
+
+        if (updateError) {
+          logger.error("cron_scan_schedules_status_update_failed", {
+            runId,
+            scheduleId: schedule.id,
+            error: updateError.message,
+          });
         }
       }
     } catch (error) {
@@ -220,13 +253,27 @@ export async function scanSchedules(
         error: (error as Error)?.message ?? "unknown",
       });
       failed++;
+
+      // Mark schedule as failed on exception
+      try {
+        await supabase
+          .from("schedules")
+          .update({ status: "failed", updated_at: now })
+          .eq("id", schedule.id);
+      } catch (updateError) {
+        logger.error("cron_scan_schedules_status_update_failed", {
+          runId,
+          scheduleId: schedule.id,
+          error: (updateError as Error)?.message ?? "unknown",
+        });
+      }
     }
   }
 
   logger.info("cron_scan_schedules_complete", {
     runId,
     scanned,
-    claimed: claimed.length,
+    claimed: schedules.length,
     enqueued,
     enqueued_tiktok: enqueuedTiktok,
     enqueued_youtube: enqueuedYoutube,
@@ -237,7 +284,7 @@ export async function scanSchedules(
 
   return {
     scanned,
-    claimed: claimed.length,
+    claimed: schedules.length,
     enqueued,
     enqueued_tiktok: enqueuedTiktok,
     enqueued_youtube: enqueuedYoutube,

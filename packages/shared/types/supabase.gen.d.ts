@@ -944,4 +944,3 @@ export declare const Constants: {
     };
 };
 export {};
-//# sourceMappingURL=supabase.gen.d.ts.map

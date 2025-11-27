@@ -17,16 +17,13 @@ enabled = true
 site_url = "http://127.0.0.1:54321"
 additional_redirect_urls = ["http://localhost:54321"]
 
-# ✅ Use HS256 for local development
-jwt_secret = "super-secret-jwt-token-with-at-least-32-characters"
+# MUST match .env.test
+jwt_secret = "HnhM2nlIMkEqyKFxliq+dzs6K+TwnInuB2sTXB9HkYEAeFa3Kb6RgymlaIoNxufF+q9YoS8VM8VQ8yBLBT5Jow=="
 jwt_expiry = 3600
-
 
 # --- TLS ---
 [api.tls]
 enabled = false
-# cert_path = "../certs/my-cert.pem"
-# key_path  = "../certs/my-key.pem"
 
 # --- DATABASE ---
 [db]
@@ -68,3 +65,7 @@ openai_api_key = "env(OPENAI_API_KEY)"
 # --- ANALYTICS ---
 [analytics]
 enabled = false
+
+# --- STORAGE ---
+[storage]
+enabled = true

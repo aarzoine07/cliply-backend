@@ -13,6 +13,7 @@ console.log(`✅ dotenv loaded from: ${envPath}`);
 const SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "test-service-role-key";
 const CRON_SECRET = process.env.CRON_SECRET || "test-cron-secret";
+const VERCEL_AUTOMATION_BYPASS_SECRET = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "test-bypass-secret";
 
 const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -157,10 +158,11 @@ describe("POST /api/cron/scan-schedules", () => {
       expect(statusCode).toBe(200);
     });
 
-    it("returns 200 with service role auth (fallback)", async () => {
+    it("returns 200 with VERCEL_AUTOMATION_BYPASS_SECRET in header", async () => {
       const mockReq = {
         method: "POST",
-        headers: { authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+        headers: { "x-cron-secret": VERCEL_AUTOMATION_BYPASS_SECRET },
+        url: "http://localhost/api/cron/scan-schedules",
       };
       let statusCode: number | undefined;
       const mockRes = {
@@ -175,6 +177,48 @@ describe("POST /api/cron/scan-schedules", () => {
 
       await handler(mockReq, mockRes);
       expect(statusCode).toBe(200);
+    });
+
+    it("returns 200 with VERCEL_AUTOMATION_BYPASS_SECRET in query param", async () => {
+      const mockReq = {
+        method: "POST",
+        headers: {},
+        url: `http://localhost/api/cron/scan-schedules?secret=${VERCEL_AUTOMATION_BYPASS_SECRET}`,
+      };
+      let statusCode: number | undefined;
+      const mockRes = {
+        status(code: number) {
+          statusCode = code;
+          return this;
+        },
+        json() {
+          return this;
+        },
+      };
+
+      await handler(mockReq, mockRes);
+      expect(statusCode).toBe(200);
+    });
+
+    it("returns 403 with invalid secret", async () => {
+      const mockReq = {
+        method: "POST",
+        headers: { "x-cron-secret": "invalid-secret" },
+        url: "http://localhost/api/cron/scan-schedules",
+      };
+      let statusCode: number | undefined;
+      const mockRes = {
+        status(code: number) {
+          statusCode = code;
+          return this;
+        },
+        json() {
+          return this;
+        },
+      };
+
+      await handler(mockReq, mockRes);
+      expect(statusCode).toBe(403);
     });
   });
 
@@ -217,7 +261,7 @@ describe("POST /api/cron/scan-schedules", () => {
       expect(result.enqueued_tiktok).toBe(1);
       expect(result.enqueued_youtube).toBe(1);
 
-      // Verify schedules are now processing
+      // Verify schedules are now executed
       const { data: updatedSchedules } = await adminClient
         .from("schedules")
         .select("status")
@@ -225,7 +269,7 @@ describe("POST /api/cron/scan-schedules", () => {
 
       expect(updatedSchedules).toBeTruthy();
       updatedSchedules?.forEach((s) => {
-        expect(s.status).toBe("processing");
+        expect(s.status).toBe("executed");
       });
 
       // Verify jobs were created

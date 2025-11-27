@@ -8,8 +8,9 @@ export type ConnectedAccountPlatform = z.infer<typeof ConnectedAccountPlatform>;
 
 /**
  * Status of a connected account
+ * Updated in migration 20251201030000_connected_accounts_platform_status.sql
  */
-export const ConnectedAccountStatus = z.enum(["active", "disabled"]);
+export const ConnectedAccountStatus = z.enum(["active", "revoked", "error"]);
 export type ConnectedAccountStatus = z.infer<typeof ConnectedAccountStatus>;
 
 /**

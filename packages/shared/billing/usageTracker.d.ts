@@ -67,4 +67,3 @@ export declare function checkUsage(workspaceId: string, metric: UsageMetric, amo
  * Throws UsageLimitExceededError if limit would be exceeded.
  */
 export declare function assertWithinUsage(workspaceId: string, metric: UsageMetric, amount: number, at?: Date): Promise<void>;
-//# sourceMappingURL=usageTracker.d.ts.map

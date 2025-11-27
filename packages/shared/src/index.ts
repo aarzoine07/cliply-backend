@@ -9,6 +9,7 @@ export * from "./guards";
 export * from "./http";
 export * from "./logging";
 export * from "./schemas";
+export * from "./status";
 export * from "./types";
 
 // ─────────────────────────────────────────────
@@ -66,6 +67,12 @@ export * from "./types/supabase";
 export * from "../types/auth";
 export * from "../types/billing";
 export * from "../types/rateLimit";
+
+// ─────────────────────────────────────────────
+// Database Types & Accessors
+// ─────────────────────────────────────────────
+export * from "./db/connected-account";
+export * from "./db/connected-account-access";
 
 // ─────────────────────────────────────────────
 // Services

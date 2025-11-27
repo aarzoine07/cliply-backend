@@ -92,7 +92,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       }
     }
 
-    const workspaceId = auth?.workspaceId || auth?.workspace_id || 'unknown';
+    const workspaceId = 'unknown';
     logger.error('action_execute_route_failed', {
       workspaceId,
       actionId: (req.query.id as string) || 'unknown',

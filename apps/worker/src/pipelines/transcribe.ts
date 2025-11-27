@@ -6,6 +6,7 @@ import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/s
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import { logPipelineStep } from '@cliply/shared/observability/logging';
+import type { ProjectStatus } from '@cliply/shared';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
@@ -40,6 +41,12 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     }
 
     const sourceKey = await resolveSourceKey(ctx, workspaceId, payload.projectId, payload.sourceExt);
+
+    // Set project status to 'processing' when transcription starts
+    await ctx.supabase
+      .from('projects')
+      .update({ status: 'processing' as ProjectStatus })
+      .eq('id', payload.projectId);
 
     logPipelineStep(
       { jobId: String(job.id)        , workspaceId, clipId: payload.projectId },
@@ -86,6 +93,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     ]);
 
     const project = await fetchProject(ctx, payload.projectId);
+    // TODO: Legacy status check - 'transcribed' and 'clips_proposed' are not in the lifecycle
+    // but may exist in DB from before lifecycle standardization. Keep processing status.
     const alreadyTranscribed = project?.status === 'transcribed' || project?.status === 'clips_proposed';
 
     if (!alreadyTranscribed) {
@@ -99,7 +108,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
         });
       }
 
-      await ctx.supabase.from('projects').update({ status: 'transcribed' }).eq('id', payload.projectId);
+      // Keep project in 'processing' status - highlight detection will continue the pipeline
+      // Project status will be set to 'ready' when all clips are rendered
       await ctx.queue.enqueue({
         type: 'HIGHLIGHT_DETECT',
         workspaceId,

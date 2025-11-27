@@ -42,4 +42,3 @@ export interface PlanDefinition {
 export type PlanMatrix = Readonly<Record<PlanName, Readonly<PlanDefinition>>>;
 /** Plan capability matrix consumed by backend services and UI gating. */
 export declare const PLAN_MATRIX: PlanMatrix;
-//# sourceMappingURL=planMatrix.d.ts.map

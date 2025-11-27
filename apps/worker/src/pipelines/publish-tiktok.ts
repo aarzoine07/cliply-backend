@@ -1,5 +1,6 @@
 import { PUBLISH_TIKTOK } from "@cliply/shared/schemas/jobs";
 import { getFreshTikTokAccessToken } from "@cliply/shared/services/tiktokAuth";
+import type { ConnectedAccountRow } from "@cliply/shared/db/connected-account";
 import type { Job, WorkerContext } from "./types";
 import { TikTokClient, TikTokApiError } from "../services/tiktok/client";
 import * as variantPostsService from "../services/viral/variantPosts";
@@ -14,13 +15,6 @@ interface ClipRow {
   storage_path?: string | null;
   external_id?: string | null;
   caption_suggestion?: string | null;
-}
-
-interface ConnectedAccountRow {
-  id: string;
-  workspace_id: string;
-  platform: string;
-  status?: string | null;
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {

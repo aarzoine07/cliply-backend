@@ -89,36 +89,54 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        await upsertBillingFromCheckout(session, supabase, stripe);
+        try {
+          await upsertBillingFromCheckout(session, supabase, stripe);
+        } catch (err) {
+          console.error("Error handling checkout.session.completed:", err);
+        }
         break;
       }
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        const workspaceId = await handleSubscriptionEvent(
-          subscription,
-          event.type,
-          supabase,
-          logAuditEvent,
-        );
+        try {
+          await handleSubscriptionEvent(
+            subscription,
+            event.type,
+            supabase,
+            logAuditEvent,
+          );
+        } catch (err) {
+          console.error(`Error handling ${event.type}:`, err);
+        }
         break;
       }
       case "invoice.payment_succeeded":
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const workspaceId = await handleInvoiceEvent(invoice, event.type, supabase);
-        await logAuditEvent(workspaceId, event.type, event.id, {
-          invoice_id: invoice.id,
-          subscription_id:
-            typeof invoice.subscription === "string"
-              ? invoice.subscription
-              : invoice.subscription?.id,
-          amount_paid: invoice.amount_paid,
-          amount_due: invoice.amount_due,
-          currency: invoice.currency,
-          status: invoice.status,
-        });
+        try {
+          const workspaceId = await handleInvoiceEvent(invoice, event.type, supabase);
+          if (workspaceId) {
+            try {
+              await logAuditEvent(workspaceId, event.type, event.id, {
+                invoice_id: invoice.id,
+                subscription_id:
+                  typeof invoice.subscription === "string"
+                    ? invoice.subscription
+                    : invoice.subscription?.id,
+                amount_paid: invoice.amount_paid,
+                amount_due: invoice.amount_due,
+                currency: invoice.currency,
+                status: invoice.status,
+              });
+            } catch (auditErr) {
+              console.error("Error logging audit event:", auditErr);
+            }
+          }
+        } catch (err) {
+          console.error(`Error handling ${event.type}:`, err);
+        }
         break;
       }
       default:
@@ -126,13 +144,12 @@ export async function POST(req: NextRequest) {
         break;
     }
 
-    return NextResponse.json({ ok: true }, { status: 200 });
+    // Always return 200 to acknowledge receipt
+    return NextResponse.json({ received: true }, { status: 200 });
   } catch (err) {
+    // Catch-all: log but always return 200
     const message = err instanceof Error ? err.message : "Stripe webhook processing error.";
     console.error("Stripe webhook error:", message);
-    return NextResponse.json(
-      billingErrorResponse(BillingErrorCode.WEBHOOK_ERROR, message, 500),
-      { status: 500 },
-    );
+    return NextResponse.json({ received: true }, { status: 200 });
   }
 }

@@ -1,8 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkRateLimit = checkRateLimit;
-const supabase_js_1 = require("@supabase/supabase-js");
-const billing_1 = require("../types/billing");
+import { createClient } from "@supabase/supabase-js";
+import { BillingErrorCode } from "../types/billing";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL) {
@@ -11,7 +8,7 @@ if (!SUPABASE_URL) {
 if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
 }
-const supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -21,7 +18,7 @@ const supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_
  * Checks rate limit for a specific workspace and feature.
  * Throws BILLING_RATE_LIMITED when tokens are exhausted.
  */
-async function checkRateLimit(workspace_id, feature) {
+export async function checkRateLimit(workspace_id, feature) {
     // Call Supabase RPC to consume a token from the bucket (if available).
     const { data, error } = await supabase.rpc("fn_consume_token", {
         p_workspace_id: workspace_id,
@@ -29,7 +26,7 @@ async function checkRateLimit(workspace_id, feature) {
     });
     if (error) {
         throw {
-            code: billing_1.BillingErrorCode.RATE_LIMITED,
+            code: BillingErrorCode.RATE_LIMITED,
             message: `Rate limit check failed for ${feature}: ${error.message}`,
             status: 500,
         };
@@ -37,10 +34,9 @@ async function checkRateLimit(workspace_id, feature) {
     // When the RPC returns explicit false, tokens are depleted for this period.
     if (data === false) {
         throw {
-            code: billing_1.BillingErrorCode.RATE_LIMITED,
+            code: BillingErrorCode.RATE_LIMITED,
             message: `Rate limit exceeded for ${feature}. Please wait before retrying.`,
             status: 429,
         };
     }
 }
-//# sourceMappingURL=checkRateLimit.js.map

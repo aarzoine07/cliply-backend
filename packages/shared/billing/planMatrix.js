@@ -1,8 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PLAN_MATRIX = void 0;
 /** Plan capability matrix consumed by backend services and UI gating. */
-exports.PLAN_MATRIX = {
+export const PLAN_MATRIX = {
     /** Basic — individual creators getting started with automated clipping. */
     basic: {
         description: "Individual creators experimenting with AI-powered clipping.",
@@ -58,4 +55,3 @@ exports.PLAN_MATRIX = {
         },
     },
 };
-//# sourceMappingURL=planMatrix.js.map

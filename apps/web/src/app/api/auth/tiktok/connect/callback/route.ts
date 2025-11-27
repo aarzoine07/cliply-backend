@@ -121,6 +121,7 @@ export async function GET(request: NextRequest) {
         refresh_token_encrypted_ref: encryptSecret(tokenData.refresh_token, { purpose: "tiktok_token" }),
         expires_at: expiresAt,
         scopes: tokenData.scope ? tokenData.scope.split(",") : ["user.info.basic", "video.upload"],
+        status: "active",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "workspace_id,platform" }

@@ -71,6 +71,10 @@ export { EnvSchema };
 
 let cached: Env | null = null;
 
+const DISABLE_ENV_CACHE =
+  process.env.NODE_ENV === "test" ||
+  process.env.DISABLE_ENV_CACHE === "1";
+
 /**
  * Get the parsed environment variables.
  * This function parses and validates env vars on first call, then caches the result.
@@ -78,7 +82,8 @@ let cached: Env | null = null;
  * @throws {z.ZodError} If required env vars are missing or invalid
  */
 export function getEnv(): Env {
-  if (cached) return cached;
+  // ⛔ Disable caching during test mode
+  if (cached && !DISABLE_ENV_CACHE) return cached;
   
   try {
     cached = EnvSchema.parse(process.env);

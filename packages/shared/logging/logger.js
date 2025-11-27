@@ -1,18 +1,9 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.logger = void 0;
-exports.log = log;
-exports.pretty = pretty;
-exports.onLog = onLog;
-const util_1 = __importDefault(require("util"));
-const env_1 = require("../env");
+import util from "util";
+import { getEnv } from "../src/env";
 const SECRET_PATTERNS = [/key/i, /token/i, /secret/i, /password/i, /authorization/i, /bearer/i];
 const observers = new Set();
 const SAMPLE_RATE = (() => {
-    const env = (0, env_1.getEnv)();
+    const env = getEnv();
     const rate = Number(env.LOG_SAMPLE_RATE ?? 1);
     if (!Number.isFinite(rate) || rate <= 0)
         return 0;
@@ -74,7 +65,7 @@ function shouldSample(event, level, force) {
         return false;
     return Math.random() < SAMPLE_RATE;
 }
-function log(entry) {
+export function log(entry) {
     const normalised = normaliseEntry(entry);
     const { level, force, ...rest } = normalised;
     if (!shouldSample(rest.event, level, force)) {
@@ -163,18 +154,17 @@ function legacyLog(level, event, context, meta) {
         force: level !== "info",
     });
 }
-exports.logger = {
+export const logger = {
     info: (event, context, meta) => legacyLog("info", event, context, meta),
     warn: (event, context, meta) => legacyLog("warn", event, context, meta),
     error: (event, context, meta) => legacyLog("error", event, context, meta),
 };
-function pretty(value) {
-    return util_1.default.inspect(value, { depth: 6, colors: true });
+export function pretty(value) {
+    return util.inspect(value, { depth: 6, colors: true });
 }
-function onLog(observer) {
+export function onLog(observer) {
     observers.add(observer);
     return () => {
         observers.delete(observer);
     };
 }
-//# sourceMappingURL=logger.js.map

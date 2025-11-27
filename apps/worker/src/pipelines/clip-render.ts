@@ -10,6 +10,8 @@ import {
   EXTENSION_MIME_MAP,
 } from "@cliply/shared/constants";
 import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
+import type { ClipStatus, ProjectStatus } from "@cliply/shared";
+import { incrementUsage } from "@cliply/shared/billing/usage";
 
 import { buildRenderCommand } from "../services/ffmpeg/build-commands";
 import { runFFmpeg } from "../services/ffmpeg/run";
@@ -50,6 +52,12 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const workspaceId = clip.workspace_id;
     const projectId = clip.project_id;
     const clipId = clip.id;
+
+    // Set clip status to 'rendering' when render job starts
+    await ctx.supabase
+      .from("clips")
+      .update({ status: "rendering" as ClipStatus })
+      .eq("id", clipId);
 
     const sourceKey = await resolveSourceKey(ctx, workspaceId, projectId);
     const subtitlesKey = `${workspaceId}/${projectId}/transcript.srt`;
@@ -94,11 +102,17 @@ await ensureFileExists(tempThumb);
     await ctx.supabase
       .from("clips")
       .update({
-        status: "ready",
+        status: "ready" as ClipStatus,
         storage_path: `${BUCKET_RENDERS}/${videoKey}`,
         thumb_path: `${BUCKET_THUMBS}/${thumbKey}`,
       })
       .eq("id", clipId);
+
+    // Increment usage for successful clip render
+    await incrementUsage(ctx.supabase, {
+      workspaceId,
+      clipRenders: 1,
+    });
 
     // Check if all clips for this project are now ready, and update project status accordingly
     await checkAndUpdateProjectStatus(ctx, projectId, workspaceId);
@@ -112,6 +126,22 @@ await ensureFileExists(tempThumb);
       thumbKey,
     });
   } catch (error) {
+    // Set clip status to 'failed' on unrecoverable error
+    try {
+      const payload = CLIP_RENDER.parse(job.payload);
+      await ctx.supabase
+        .from("clips")
+        .update({ status: "failed" as ClipStatus })
+        .eq("id", payload.clipId);
+    } catch (updateError) {
+      ctx.logger.warn("clip_render_failed_status_update_failed", {
+        pipeline: PIPELINE,
+        jobId: job.id,
+        workspaceId: job.workspaceId,
+        error: (updateError as Error)?.message ?? String(updateError),
+      });
+    }
+
     ctx.sentry.captureException(error, {
       tags: { pipeline: PIPELINE },
       extra: { jobId: String(job.id), workspaceId: job.workspaceId },
@@ -224,7 +254,7 @@ async function checkAndUpdateProjectStatus(
     // All clips are ready - update project status to 'ready'
     const { error: updateError } = await ctx.supabase
       .from("projects")
-      .update({ status: "ready" })
+      .update({ status: "ready" as ProjectStatus })
       .eq("id", projectId)
       .eq("workspace_id", workspaceId);
 
@@ -248,7 +278,7 @@ async function checkAndUpdateProjectStatus(
     // This allows the UI to show the project as ready even if some clips failed
     const { error: updateError } = await ctx.supabase
       .from("projects")
-      .update({ status: "ready" })
+      .update({ status: "ready" as ProjectStatus })
       .eq("id", projectId)
       .eq("workspace_id", workspaceId);
 

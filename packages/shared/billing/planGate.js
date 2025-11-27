@@ -1,19 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BILLING_PLAN_REQUIRED = exports.BILLING_PLAN_LIMIT = void 0;
-exports.checkPlanAccess = checkPlanAccess;
-exports.enforcePlanAccess = enforcePlanAccess;
-const planMatrix_1 = require("./planMatrix");
+import { PLAN_MATRIX } from "./planMatrix";
 const BILLING_PLAN_REQUIRED = "BILLING_PLAN_REQUIRED";
-exports.BILLING_PLAN_REQUIRED = BILLING_PLAN_REQUIRED;
 const BILLING_PLAN_LIMIT = "BILLING_PLAN_LIMIT";
-exports.BILLING_PLAN_LIMIT = BILLING_PLAN_LIMIT;
 /**
  * Compute the feature or quota availability for the given plan.
  * Returns a structured result that middleware and APIs can inspect.
  */
-function checkPlanAccess(plan, feature) {
-    const definition = planMatrix_1.PLAN_MATRIX[plan];
+export function checkPlanAccess(plan, feature) {
+    const definition = PLAN_MATRIX[plan];
     if (!definition) {
         // Unknown plan should soft-fail and prompt upgrade flow.
         return { active: false, message: "Invalid plan provided.", reason: "plan" };
@@ -52,7 +45,7 @@ function checkPlanAccess(plan, feature) {
  * Enforce plan access by throwing a standardized billing error when unavailable.
  * Downstream handlers can catch and return the error payload directly.
  */
-function enforcePlanAccess(plan, feature) {
+export function enforcePlanAccess(plan, feature) {
     const result = checkPlanAccess(plan, feature);
     if (!result.active) {
         // Map the reason to a stable billing error code and HTTP status.
@@ -64,4 +57,4 @@ function enforcePlanAccess(plan, feature) {
         };
     }
 }
-//# sourceMappingURL=planGate.js.map
+export { BILLING_PLAN_LIMIT, BILLING_PLAN_REQUIRED };

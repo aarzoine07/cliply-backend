@@ -1,6 +1,9 @@
-﻿// C2: YouTube OAuth callback endpoint
+﻿// DEV-ONLY — Legacy OAuth route. Do NOT use in production.
+// C2: YouTube OAuth callback endpoint (Pages Router)
 // Note: This endpoint is called by Google, so it doesn't require user auth
 // State parameter contains workspace/user info for validation
+// 
+// New App Router route: /api/auth/youtube/callback
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { getEnv } from '@cliply/shared/env';

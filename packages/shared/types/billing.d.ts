@@ -31,4 +31,3 @@ export interface BillingPlanGateResult {
     active: boolean;
     message?: string;
 }
-//# sourceMappingURL=billing.d.ts.map

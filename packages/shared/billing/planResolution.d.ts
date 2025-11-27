@@ -15,4 +15,3 @@ export type ResolvedPlan = {
 export declare function resolveWorkspacePlan(workspaceId: string, ctx: {
     supabase: SupabaseClient;
 }): Promise<ResolvedPlan>;
-//# sourceMappingURL=planResolution.d.ts.map

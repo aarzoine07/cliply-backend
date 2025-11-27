@@ -73,8 +73,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
       res.status(201).json(ok(product));
     } catch (error) {
-      if (error instanceof HttpError && error.status === 409) {
-        res.status(409).json(err('duplicate_slug', error.message));
+      if (typeof error === "object" && error !== null && (error as any).status === 409) {
+        res.status(409).json(err("duplicate_slug", (error as any).message ?? "Conflict"));
         return;
       }
 

@@ -1,8 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.RATE_LIMIT_CONFIG = void 0;
 /** Default plan-based rate limit configuration for Cliply workspaces. */
-exports.RATE_LIMIT_CONFIG = {
+export const RATE_LIMIT_CONFIG = {
     basic: {
         upload: { capacity: 20, refill_rate: 5 },
         render: { capacity: 10, refill_rate: 3 },
@@ -22,4 +19,3 @@ exports.RATE_LIMIT_CONFIG = {
         ai_caption: { capacity: 150, refill_rate: 30 },
     },
 };
-//# sourceMappingURL=rateLimitConfig.js.map

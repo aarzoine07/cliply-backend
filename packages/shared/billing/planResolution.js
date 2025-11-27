@@ -1,13 +1,10 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveWorkspacePlan = resolveWorkspacePlan;
 /**
  * Resolves the effective plan for a workspace by looking up active subscriptions.
  * Returns the plan from the most recent active or trialing subscription, or "free" if none exists.
  *
  * This is the single source of truth for plan resolution used by withPlanGate and other gating logic.
  */
-async function resolveWorkspacePlan(workspaceId, ctx) {
+export async function resolveWorkspacePlan(workspaceId, ctx) {
     // Query subscriptions table for the workspace
     // Prioritize active/trialing subscriptions, ordered by current_period_end (most recent first)
     const { data: subscription, error } = await ctx.supabase
@@ -67,4 +64,3 @@ function mapSubscriptionStatusToResolvedStatus(status) {
             return "free";
     }
 }
-//# sourceMappingURL=planResolution.js.map

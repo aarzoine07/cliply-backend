@@ -1,29 +1,26 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "rootDir": ".",
     "outDir": "dist",
     "composite": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
   },
   "include": [
-    "src/**/*.ts",
-    "types/**/*.ts",
-    "billing/**/*.ts",
-    "logging/**/*.ts",
-    "auth/**/*.ts",
-    "lib/**/*.ts",
-    "logger.ts",
-    "sentry.ts",
-    "env.ts"
+    "src/**/*",
+    "billing/**/*",
+    "types/**/*",
+    "logging/**/*",
+    "lib/**/*",
+    "*.ts"
   ],
-  "exclude": [
-    "dist",
-    "**/dist",
-    "../../node_modules",
-    "node_modules"
-  ]
+  "exclude": ["node_modules", "dist"]
 }
+
 
 
