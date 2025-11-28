@@ -113,8 +113,6 @@ export function getEnv(): Env {
  * 
  * Note: getEnv is already exported above as a function declaration.
  */
-// Re-export env type for convenience
-export type { Env };
 
 // For testing: clear cache to allow env changes
 export function clearEnvCache(): void {

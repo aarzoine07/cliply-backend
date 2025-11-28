@@ -84,7 +84,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
 
     // Log pipeline step start
     logPipelineStep(
-      { jobId: job.id, workspaceId, clipId: projectId },
+      { jobId: String(job.id), workspaceId, clipId: projectId },
       "download",
       "start",
       { videoId, storagePath: targetPath },
@@ -100,14 +100,14 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
 
       logPipelineStep(
-        { jobId: job.id, workspaceId, clipId: projectId },
+        { jobId: String(job.id), workspaceId, clipId: projectId },
         "download",
         "success",
         { videoId, storagePath: targetPath },
       );
     } catch (error) {
       logPipelineStep(
-        { jobId: job.id, workspaceId, clipId: projectId },
+        { jobId: String(job.id), workspaceId, clipId: projectId },
         "download",
         "error",
         { videoId, error: error instanceof Error ? error.message : String(error) },

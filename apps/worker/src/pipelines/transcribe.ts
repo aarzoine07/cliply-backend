@@ -42,7 +42,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const sourceKey = await resolveSourceKey(ctx, workspaceId, payload.projectId, payload.sourceExt);
 
     logPipelineStep(
-      { jobId: job.id, workspaceId, clipId: payload.projectId },
+      { jobId: String(job.id), workspaceId, clipId: payload.projectId },
       'transcribe',
       'start',
       { sourceKey },
@@ -57,14 +57,14 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     try {
       result = await transcriber.transcribe(downloadedPath);
       logPipelineStep(
-        { jobId: job.id, workspaceId, clipId: payload.projectId },
+        { jobId: String(job.id), workspaceId, clipId: payload.projectId },
         'transcribe',
         'success',
         { durationSec: result.durationSec },
       );
     } catch (error) {
       logPipelineStep(
-        { jobId: job.id, workspaceId, clipId: payload.projectId },
+        { jobId: String(job.id), workspaceId, clipId: payload.projectId },
         'transcribe',
         'error',
         { error: error instanceof Error ? error.message : String(error) },

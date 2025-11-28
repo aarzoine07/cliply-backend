@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { getEnv } from '@cliply/shared/env';
 import { toSrt } from '../captions/srt';
 
 export interface TranscribeResult {
@@ -62,6 +63,7 @@ function buildSegments(): StubSegment[] {
 }
 
 export function getTranscriber(): Transcriber {
+  const env = getEnv();
   if (env.DEEPGRAM_API_KEY) {
     throw new Error('Deepgram disabled in tests');
   }
