@@ -62,6 +62,7 @@ const EnvSchema = z.object({
   NEXT_PUBLIC_TIKTOK_REDIRECT_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
+  NEXT_PUBLIC_YOUTUBE_REDIRECT_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

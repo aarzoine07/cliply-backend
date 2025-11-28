@@ -1,31 +1,32 @@
-// @ts-nocheck
+// apps/web/test/jobs.enqueue.test.ts
+
+import { test, expect } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it } from "vitest";
-import * as dotenv from "dotenv-defaults";
+import { env, resetDatabase } from "@cliply/shared/test/setup";
 
-import path from "path";
+const SERVICE_CLIENT = createClient(
+  env.SUPABASE_URL,
+  env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-import { resetDatabase } from "@cliply/shared/test/setup";
+test("⚙️ Enqueue API Functionality > creates a new queued job with correct defaults", async () => {
+  // Reset DB is already handled globally, but keeping in test is safe.
 
-dotenv.config({ path: path.resolve(process.cwd(), "../../.env.test"), override: true });
+  const { data, error } = await SERVICE_CLIENT
+    .from("jobs")
+    .insert({
+      name: "test_job",
+      input: { a: 1 },
+      workspace_id: "123e4567-e89b-12d3-a456-426614174000",
+    })
+    .select()
+    .single();
 
-describe("⚙️ Enqueue API Functionality", () => {
-  beforeAll(async () => {
-    console.log("⚙️  resetDatabase() called (stubbed for local tests)");
-    await resetDatabase?.();
-  });
+  console.log("insert error:", error);
+  console.log("insert data:", data);
 
-  it("creates a new queued job with correct defaults", async () => {
-    const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    const { data, error } = await client
-      .from("jobs")
-      .insert([{ workspace_id: "00000000-0000-0000-0000-000000000001", kind: "TRANSCRIBE" }])
-      .select("*")
-      .single();
-
-    console.log("insert error:", error);
-    expect(error).toBeNull();
-    expect(data.state).toBe("queued");
-    expect(data.priority).toBe(5);
-  });
+  expect(error).toBeNull();
+  expect(data.state).toBe("queued");
+  expect(data.priority).toBe(5);
+  expect(data.name).toBe("test_job");
 });

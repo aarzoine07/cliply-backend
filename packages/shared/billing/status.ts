@@ -6,5 +6,8 @@ export type BillingStatus =
   | "active"
   | "trialing"
   | "past_due"
-  | "canceled";
+  | "canceled"
+  | "incomplete"
+  | "incomplete_expired"
+  | "paused";
 

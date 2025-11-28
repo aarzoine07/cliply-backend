@@ -1,14 +1,11 @@
 {
   "name": "cliply-backend",
   "private": true,
-  "packageManager": "pnpm@10.23.0+sha512.21c4e5698002ade97e4efe8b8b4a89a8de3c85a37919f957e7a0f30f38fbc5bbdd05980ffe29179b2fb6e6e691242e098d945d1601772cad0fef5fb6411e2a4b",
-
+  "packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a",
   "type": "module",
-
   "imports": {
     "@cliply/shared": "./packages/shared"
   },
-
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
@@ -27,12 +24,10 @@
     "db:apply:sql": "tsx scripts/db/apply-sql.ts",
     "dev:web": "tsx apps/web/src/server.ts"
   },
-
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
-
   "devDependencies": {
     "@eslint/js": "^9.36.0",
     "@types/express": "^5.0.3",
@@ -44,6 +39,7 @@
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
+    "execa": "^9.6.0",
     "express": "^5.1.0",
     "globals": "^16.4.0",
     "jose": "^6.1.0",
@@ -59,7 +55,6 @@
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"
   },
-
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "dotenv": "^17.2.3",
@@ -67,4 +62,3 @@
     "zod": "^4.1.9"
   }
 }
-

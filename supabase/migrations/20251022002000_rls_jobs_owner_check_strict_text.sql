@@ -1,4 +1,6 @@
--- Fix UUID comparison by enforcing text cast on both sides
+-- Patched: owner_id no longer exists on public.workspaces.
+-- Recreate a minimal safe jobs_all policy without referencing owner_id.
+
 drop policy if exists jobs_all on public.jobs;
 
 create policy jobs_all
@@ -9,22 +11,17 @@ to public
 using (
   exists (
     select 1
-    from public.workspaces w
-    where w.id = jobs.workspace_id
-      and (
-        text(w.owner_id) = text(current_setting('request.jwt.claim.sub', true))
-        or user_has_org_link(w.id)
-      )
+    from public.workspace_members m
+    where m.workspace_id = jobs.workspace_id
+      and m.user_id::text = current_setting('request.jwt.claim.sub', true)
   )
 )
 with check (
   exists (
     select 1
-    from public.workspaces w
-    where w.id = jobs.workspace_id
-      and (
-        text(w.owner_id) = text(current_setting('request.jwt.claim.sub', true))
-        or user_has_org_link(w.id)
-      )
+    from public.workspace_members m
+    where m.workspace_id = jobs.workspace_id
+      and m.user_id::text = current_setting('request.jwt.claim.sub', true)
   )
 );
+

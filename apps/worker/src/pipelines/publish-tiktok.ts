@@ -91,9 +91,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       throw new Error(`Connected account is not TikTok: ${payload.connectedAccountId} (platform: ${account.platform})`);
     }
 
-    if (account.status !== "active" && account.status !== null) {
-      throw new Error(`TikTok connected account is not active: ${payload.connectedAccountId} (status: ${account.status})`);
-    }
+   // Connected accounts table has no status column.
+   // Presence of the row means the Tiktokaccount is active.
 
     // Download clip from storage
     const storagePath = clip.storage_path.replace(/^renders\//, "");

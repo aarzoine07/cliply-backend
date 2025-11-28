@@ -1,13 +1,22 @@
--- Safe, idempotent fix for jobs.status constraint
+-- 20251020044441_fix_jobs_state_check.sql
+-- ------------------------------------------------------------------
+-- This migration used to modify the jobs.status CHECK constraint
+-- based on a previous "remote schema" layout where the jobs table
+-- had a "status" column instead of "state".
+--
+-- The current Cliply backend uses the canonical jobs schema:
+--   - "state" column: queued | processing | done | failed
+--   - no "status" column
+--
+-- Trying to patch a non-existent "status" column causes
+-- `supabase db reset` to fail with:
+--   ERROR: column "status" does not exist
+--
+-- To keep the migration history consistent but avoid breaking local
+-- resets, we intentionally turn this migration into a NO-OP.
+
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_status_check'
-  ) THEN
-    ALTER TABLE public.jobs
-      ADD CONSTRAINT jobs_status_check
-      CHECK (status IN ('queued', 'processing', 'completed', 'failed', 'cancelled'));
-  ELSE
-    RAISE NOTICE 'Constraint "jobs_status_check" already exists, skipping.';
-  END IF;
-END $$;
+  RAISE NOTICE '20251020044441_fix_jobs_state_check: no-op under current schema';
+END
+$$;
