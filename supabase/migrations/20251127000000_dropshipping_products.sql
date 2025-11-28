@@ -56,11 +56,11 @@ BEGIN
   END IF;
 END $$;
 
--- Add updated_at trigger for products
-CREATE TRIGGER trg_products_updated_at
-  BEFORE UPDATE ON products
-  FOR EACH ROW
-  EXECUTE FUNCTION moddatetime('updated_at');
+-- Trigger already created in products_base.sql; skip duplicate creation
+-- CREATE TRIGGER trg_products_updated_at
+--   BEFORE UPDATE ON products
+--   FOR EACH ROW
+--   EXECUTE FUNCTION moddatetime('updated_at');
 
 -- Drop old RLS policies if they exist (to replace with new pattern)
 DROP POLICY IF EXISTS products_all ON products;

@@ -10,16 +10,25 @@ create table if not exists public.projects (
     references public.workspaces(id)
     on delete cascade,
 
+  -- project title (required by backend + seed)
+  title text not null,
+
   -- source (file upload, youtube, etc.)
   source_type text not null
     check (source_type in ('file', 'youtube')),
+
+  -- file extension (e.g., mp4) - used by worker
+  source_ext text,
+
+  -- storage key of uploaded file (e.g., sample.mp4)
+  source_key text,
 
   -- file key or YouTube URL
   source_uri text,
 
   -- processing lifecycle
   status text not null default 'queued'
-    check (status in ('queued', 'processing', 'ready', 'error')),
+    check (status in ('queued', 'processing', 'ready', 'error', 'uploaded')),
 
   -- optional: store error messages
   error jsonb,

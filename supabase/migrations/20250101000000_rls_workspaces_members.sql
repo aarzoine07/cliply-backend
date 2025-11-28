@@ -2,7 +2,9 @@
 create table if not exists public.workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  created_at timestamptz default now()
+  owner_id uuid not null,
+  org_id uuid,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.workspace_members (
