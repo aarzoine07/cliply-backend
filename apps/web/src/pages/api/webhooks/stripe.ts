@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { BillingErrorCode, billingErrorResponse } from "@cliply/shared/types/billing";
+import { logAuditEvent } from "@cliply/shared/logging/audit";
 import {
   handleInvoiceEvent,
   handleSubscriptionEvent,
@@ -40,25 +41,6 @@ export const config = {
     bodyParser: false,
   },
 };
-
-async function logAuditEvent(
-  workspaceId: string,
-  eventType: string,
-  stripeEventId: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  const { error } = await supabase.from("events_audit").insert({
-    workspace_id: workspaceId,
-    actor_id: null,
-    event_type: eventType,
-    target_id: workspaceId,
-    payload: { stripe_event_id: stripeEventId, ...payload },
-  });
-
-  if (error) {
-    throw new Error(`Failed to record audit event (${eventType}): ${error.message}`);
-  }
-}
 
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("stripe-signature");
@@ -101,11 +83,34 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
         try {
-          await handleSubscriptionEvent(
+          const workspaceId = await handleSubscriptionEvent(
             subscription,
             event.type,
             supabase,
-            logAuditEvent,
+            async (wsId: string, evtType: string, evtId: string, payload: Record<string, unknown>) => {
+              // Map old signature to new logAuditEvent signature
+              const action = evtType === "customer.subscription.created" 
+                ? "subscription.created"
+                : evtType === "customer.subscription.updated"
+                ? "subscription.updated"
+                : "subscription.deleted";
+              
+              try {
+                await logAuditEvent({
+                  workspaceId: wsId,
+                  actorId: null,
+                  eventType: "billing",
+                  action,
+                  targetId: subscription.id,
+                  meta: {
+                    stripe_event_id: evtId,
+                    ...payload,
+                  },
+                });
+              } catch (auditErr) {
+                console.error("Error logging audit event:", auditErr);
+              }
+            },
           );
         } catch (err) {
           console.error(`Error handling ${event.type}:`, err);
@@ -119,16 +124,28 @@ export async function POST(req: NextRequest) {
           const workspaceId = await handleInvoiceEvent(invoice, event.type, supabase);
           if (workspaceId) {
             try {
-              await logAuditEvent(workspaceId, event.type, event.id, {
-                invoice_id: invoice.id,
-                subscription_id:
-                  typeof invoice.subscription === "string"
-                    ? invoice.subscription
-                    : invoice.subscription?.id,
-                amount_paid: invoice.amount_paid,
-                amount_due: invoice.amount_due,
-                currency: invoice.currency,
-                status: invoice.status,
+              const action = event.type === "invoice.payment_succeeded"
+                ? "invoice.payment_succeeded"
+                : "invoice.payment_failed";
+              
+              await logAuditEvent({
+                workspaceId,
+                actorId: null,
+                eventType: "billing",
+                action,
+                targetId: invoice.id,
+                meta: {
+                  stripe_event_id: event.id,
+                  invoice_id: invoice.id,
+                  subscription_id:
+                    typeof invoice.subscription === "string"
+                      ? invoice.subscription
+                      : invoice.subscription?.id,
+                  amount_paid: invoice.amount_paid,
+                  amount_due: invoice.amount_due,
+                  currency: invoice.currency,
+                  status: invoice.status,
+                },
               });
             } catch (auditErr) {
               console.error("Error logging audit event:", auditErr);

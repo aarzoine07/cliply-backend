@@ -6,6 +6,8 @@ import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import type { ClipStatus } from '@cliply/shared';
+import { setPipelineStage } from '@cliply/shared/pipeline/stages';
+import { PIPELINE_HIGHLIGHT_DETECT } from '@cliply/shared/pipeline/names';
 
 import type { Job, WorkerContext } from './types';
 
@@ -18,7 +20,9 @@ interface TranscriptSegment {
   confidence?: number;
 }
 
-interface HighlightCandidate {
+// ClipCandidate represents potential highlights detected from transcript segments.
+// These will be inserted into the clips table with status='proposed' (see docs/machine-mapping.md)
+interface ClipCandidate {
   start: number;
   end: number;
   duration: number;
@@ -40,9 +44,11 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     } catch (error) {
       if (error instanceof UsageLimitExceededError) {
         ctx.logger.warn('highlight_detect_usage_limit_exceeded', {
-          pipeline: PIPELINE,
+          pipeline: PIPELINE_HIGHLIGHT_DETECT,
+          jobKind: job.type,
           jobId: job.id,
           workspaceId,
+          projectId: payload.projectId,
           metric: error.metric,
           used: error.used,
           limit: error.limit,
@@ -68,9 +74,25 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const parsed = JSON.parse(raw) as { segments?: TranscriptSegment[] };
     const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
 
+    // Set pipeline_stage to 'analyzing' when starting highlight detection
+    const { data: projectRows } = await ctx.supabase
+      .from('projects')
+      .select('id,pipeline_stage')
+      .eq('id', payload.projectId);
+    const project = projectRows?.[0];
+    if (project) {
+      setPipelineStage(project, 'analyzing');
+      await ctx.supabase
+        .from('projects')
+        .update({ pipeline_stage: project.pipeline_stage })
+        .eq('id', payload.projectId);
+    }
+
     if (segments.length === 0) {
       ctx.logger.warn('highlight_no_segments', {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_HIGHLIGHT_DETECT,
+        jobKind: job.type,
+        jobId: String(job.id),
         projectId: payload.projectId,
         workspaceId,
       });
@@ -80,11 +102,13 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const groups = groupSegments(segments, payload.minGapSec);
     const candidates = groups
       .map((group) => buildCandidate(group, payload.keywords))
-      .filter((candidate): candidate is HighlightCandidate => candidate !== null);
+      .filter((candidate): candidate is ClipCandidate => candidate !== null);
 
     if (candidates.length === 0) {
       ctx.logger.info('highlight_no_candidates', {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_HIGHLIGHT_DETECT,
+        jobKind: job.type,
+        jobId: String(job.id),
         projectId: payload.projectId,
         workspaceId,
       });
@@ -142,7 +166,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
         const { error: jobError } = await ctx.supabase.from('jobs').insert(renderJobs);
         if (jobError) {
           ctx.logger.warn('highlight_detect_render_enqueue_failed', {
-            pipeline: PIPELINE,
+            pipeline: PIPELINE_HIGHLIGHT_DETECT,
+            jobKind: job.type,
+            jobId: String(job.id),
             projectId: payload.projectId,
             workspaceId,
             error: jobError.message,
@@ -151,7 +177,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
           // Don't fail the whole pipeline if render job enqueue fails - they can be manually triggered
         } else {
           ctx.logger.info('highlight_detect_render_enqueued', {
-            pipeline: PIPELINE,
+            pipeline: PIPELINE_HIGHLIGHT_DETECT,
+            jobKind: job.type,
+            jobId: String(job.id),
             projectId: payload.projectId,
             workspaceId,
             clipCount: insertedClips.length,
@@ -162,22 +190,59 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
 
     await ensureProjectStatus(ctx, payload.projectId, 'clips_proposed');
 
+    // Set pipeline_stage to 'clips_proposed' after creating clip proposals
+    if (project) {
+      setPipelineStage(project, 'clips_proposed');
+      await ctx.supabase
+        .from('projects')
+        .update({ pipeline_stage: project.pipeline_stage })
+        .eq('id', payload.projectId);
+    }
+
     ctx.logger.info('pipeline_completed', {
-      pipeline: PIPELINE,
+      pipeline: PIPELINE_HIGHLIGHT_DETECT,
+      jobKind: job.type,
+      jobId: String(job.id),
       projectId: payload.projectId,
       workspaceId,
       candidates: candidates.length,
       inserted: inserts.length,
     });
   } catch (error) {
+    // Set pipeline_stage to 'failed' on error
+    try {
+      const payload = HIGHLIGHT_DETECT.parse(job.payload);
+      const { data: projectRows } = await ctx.supabase
+        .from('projects')
+        .select('id,pipeline_stage')
+        .eq('id', payload.projectId);
+      const failedProject = projectRows?.[0];
+      if (failedProject) {
+        setPipelineStage(failedProject, 'failed');
+        await ctx.supabase
+          .from('projects')
+          .update({ pipeline_stage: failedProject.pipeline_stage })
+          .eq('id', payload.projectId);
+      }
+    } catch (stageUpdateError) {
+      // Ignore stage update errors - don't prevent main error from being thrown
+    }
+
+    const payload = HIGHLIGHT_DETECT.parse(job.payload);
     ctx.sentry.captureException(error, {
-      tags: { pipeline: PIPELINE },
-      extra: { jobId: String(job.id), workspaceId: job.workspaceId },
+      tags: { pipeline: PIPELINE_HIGHLIGHT_DETECT, jobKind: job.type },
+      extra: { 
+        jobId: String(job.id), 
+        workspaceId: job.workspaceId,
+        projectId: payload.projectId 
+      },
     });
     ctx.logger.error('pipeline_failed', {
-      pipeline: PIPELINE,
+      pipeline: PIPELINE_HIGHLIGHT_DETECT,
+      jobKind: job.type,
       jobId: job.id,
       workspaceId: job.workspaceId,
+      projectId: payload.projectId,
       error: (error as Error)?.message ?? String(error),
     });
     throw error;
@@ -214,7 +279,7 @@ function groupSegments(segments: TranscriptSegment[], minGapSec: number): Transc
   return groups;
 }
 
-function buildCandidate(segments: TranscriptSegment[], keywords: string[]): HighlightCandidate | null {
+function buildCandidate(segments: TranscriptSegment[], keywords: string[]): ClipCandidate | null {
   const start = segments[0]?.start ?? 0;
   const end = segments[segments.length - 1]?.end ?? start;
   let adjustedEnd = end;

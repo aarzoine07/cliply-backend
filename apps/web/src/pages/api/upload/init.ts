@@ -3,8 +3,10 @@
 import { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC, getExtension } from '@cliply/shared/constants';
 import { UploadInitFileOut, UploadInitInput, UploadInitYtOut } from '@cliply/shared/schemas';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { projectSourcePath } from '@cliply/shared/storage/paths';
 
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
+import { logEvent } from '@cliply/shared/logging/logger';
 
 import { HttpError } from '@/lib/errors';
 import { handler, ok, err } from '@/lib/http';
@@ -72,7 +74,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     const projectId = randomUUID();
     const extension = getExtension(input.filename) ?? '.mp4';
     const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
-    const storageKey = `${workspaceId}/${projectId}/source${normalizedExtension}`;
+    const extensionWithoutDot = normalizedExtension.startsWith('.') 
+      ? normalizedExtension.slice(1) 
+      : normalizedExtension;
+    const storageKey = projectSourcePath(workspaceId, projectId, extensionWithoutDot);
     const storagePath = `${BUCKET_VIDEOS}/${storageKey}`;
 
     try {
@@ -143,6 +148,20 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         uploadUrl: signedUrl,
         storagePath,
         projectId,
+      });
+
+      logEvent({
+        service: 'web',
+        event: 'upload_init_complete',
+        workspaceId,
+        projectId,
+        meta: {
+          source: 'file',
+          durationMs: Date.now() - started,
+          remainingTokens: rate.remaining,
+          filename: input.filename,
+          size: input.size,
+        },
       });
 
       logger.info('upload_init_success', {
@@ -249,6 +268,19 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     const payload = UploadInitYtOut.parse({ projectId });
+
+    logEvent({
+      service: 'web',
+      event: 'upload_init_complete',
+      workspaceId,
+      projectId,
+      meta: {
+        source: 'youtube',
+        durationMs: Date.now() - started,
+        remainingTokens: rate.remaining,
+        youtubeUrl: input.url,
+      },
+    });
 
     logger.info('upload_init_success', {
       userId,

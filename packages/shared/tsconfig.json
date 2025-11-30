@@ -17,6 +17,8 @@
     "types/**/*",
     "logging/**/*",
     "lib/**/*",
+    "pipeline/**/*",
+    "storage/**/*",
     "*.ts"
   ],
   "exclude": ["node_modules", "dist"]

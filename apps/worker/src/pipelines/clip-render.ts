@@ -12,6 +12,14 @@ import {
 import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
 import type { ClipStatus, ProjectStatus } from "@cliply/shared";
 import { incrementUsage } from "@cliply/shared/billing/usage";
+import { logEvent } from "@cliply/shared/logging/logger";
+import { setPipelineStage } from '@cliply/shared/pipeline/stages';
+import { 
+  transcriptSrtPath, 
+  clipRenderPath, 
+  clipThumbnailPath 
+} from '@cliply/shared/storage/paths';
+import { PIPELINE_CLIP_RENDER } from '@cliply/shared/pipeline/names';
 
 import { buildRenderCommand } from "../services/ffmpeg/build-commands";
 import { runFFmpeg } from "../services/ffmpeg/run";
@@ -54,19 +62,50 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const clipId = clip.id;
 
     // Set clip status to 'rendering' when render job starts
-    await ctx.supabase
+    // After rendering, this becomes a generated_clip with status='ready' (see docs/machine-mapping.md)
+    const { data: clipRows } = await ctx.supabase
       .from("clips")
       .update({ status: "rendering" as ClipStatus })
-      .eq("id", clipId);
+      .eq("id", clipId)
+      .select();
+    
+    const clipForStage = clipRows?.[0];
+    if (clipForStage) {
+      setPipelineStage(clipForStage, 'rendering');
+      await ctx.supabase
+        .from("clips")
+        .update({ pipeline_stage: clipForStage.pipeline_stage })
+        .eq("id", clipId);
+    }
+
+    logEvent({
+      service: 'worker',
+      event: 'clip_render_start',
+      workspaceId,
+      jobId: String(job.id),
+      projectId,
+      clipId,
+      meta: {
+        startSec: clip.start_s,
+        endSec: clip.end_s,
+      },
+    });
 
     const sourceKey = await resolveSourceKey(ctx, workspaceId, projectId);
-    const subtitlesKey = `${workspaceId}/${projectId}/transcript.srt`;
-    const videoKey = `${workspaceId}/${projectId}/${clipId}.mp4`;
-    const thumbKey = `${workspaceId}/${projectId}/${clipId}.jpg`;
+    const subtitlesKey = transcriptSrtPath(workspaceId, projectId);
+    const videoKey = clipRenderPath(workspaceId, projectId, clipId, 'mp4');
+    const thumbKey = clipThumbnailPath(workspaceId, projectId, clipId, 'jpg');
 
     const videoExists = await ctx.storage.exists(BUCKET_RENDERS, videoKey);
     if (videoExists && clip.status === "ready") {
-      ctx.logger.info("render_skip_ready", { pipeline: PIPELINE, clipId });
+      ctx.logger.info("render_skip_ready", { 
+        pipeline: PIPELINE_CLIP_RENDER, 
+        jobKind: job.type,
+        jobId: String(job.id),
+        clipId,
+        projectId,
+        workspaceId 
+      });
       return;
     }
 
@@ -99,14 +138,25 @@ await ensureFileExists(tempThumb);
     await uploadIfMissing(ctx, BUCKET_RENDERS, videoKey, tempVideo, "video/mp4");
     await uploadIfMissing(ctx, BUCKET_THUMBS, thumbKey, tempThumb, "image/jpeg");
 
-    await ctx.supabase
+    // Update to generated_clip status='ready' after successful render
+    const { data: readyClipRows } = await ctx.supabase
       .from("clips")
       .update({
         status: "ready" as ClipStatus,
         storage_path: `${BUCKET_RENDERS}/${videoKey}`,
         thumb_path: `${BUCKET_THUMBS}/${thumbKey}`,
       })
-      .eq("id", clipId);
+      .eq("id", clipId)
+      .select();
+    
+    const readyClip = readyClipRows?.[0];
+    if (readyClip) {
+      setPipelineStage(readyClip, 'rendered');
+      await ctx.supabase
+        .from("clips")
+        .update({ pipeline_stage: readyClip.pipeline_stage })
+        .eq("id", clipId);
+    }
 
     // Increment usage for successful clip render
     await incrementUsage(ctx.supabase, {
@@ -117,8 +167,23 @@ await ensureFileExists(tempThumb);
     // Check if all clips for this project are now ready, and update project status accordingly
     await checkAndUpdateProjectStatus(ctx, projectId, workspaceId);
 
+    logEvent({
+      service: 'worker',
+      event: 'clip_render_complete',
+      workspaceId,
+      jobId: String(job.id),
+      projectId,
+      clipId,
+      meta: {
+        videoKey,
+        thumbKey,
+      },
+    });
+
     ctx.logger.info("pipeline_completed", {
-      pipeline: PIPELINE,
+      pipeline: PIPELINE_CLIP_RENDER,
+      jobKind: job.type,
+      jobId: String(job.id),
       clipId,
       projectId,
       workspaceId,
@@ -127,29 +192,50 @@ await ensureFileExists(tempThumb);
     });
   } catch (error) {
     // Set clip status to 'failed' on unrecoverable error
+    let clipIdForError: string | undefined;
     try {
       const payload = CLIP_RENDER.parse(job.payload);
-      await ctx.supabase
+      clipIdForError = payload.clipId;
+      const { data: failedClipRows } = await ctx.supabase
         .from("clips")
         .update({ status: "failed" as ClipStatus })
-        .eq("id", payload.clipId);
+        .eq("id", payload.clipId)
+        .select();
+      
+      const failedClip = failedClipRows?.[0];
+      if (failedClip) {
+        setPipelineStage(failedClip, 'failed');
+        await ctx.supabase
+          .from("clips")
+          .update({ pipeline_stage: failedClip.pipeline_stage })
+          .eq("id", payload.clipId);
+      }
     } catch (updateError) {
       ctx.logger.warn("clip_render_failed_status_update_failed", {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_CLIP_RENDER,
+        jobKind: job.type,
         jobId: job.id,
         workspaceId: job.workspaceId,
+        ...(clipIdForError && { clipId: clipIdForError }),
         error: (updateError as Error)?.message ?? String(updateError),
       });
     }
 
+    const payload = CLIP_RENDER.parse(job.payload);
     ctx.sentry.captureException(error, {
-      tags: { pipeline: PIPELINE },
-      extra: { jobId: String(job.id), workspaceId: job.workspaceId },
+      tags: { pipeline: PIPELINE_CLIP_RENDER, jobKind: job.type },
+      extra: { 
+        jobId: String(job.id), 
+        workspaceId: job.workspaceId,
+        clipId: payload.clipId 
+      },
     });
     ctx.logger.error("pipeline_failed", {
-      pipeline: PIPELINE,
+      pipeline: PIPELINE_CLIP_RENDER,
+      jobKind: job.type,
       jobId: job.id,
       workspaceId: job.workspaceId,
+      clipId: payload.clipId,
       error: (error as Error)?.message ?? String(error),
     });
     throw error;
@@ -233,7 +319,7 @@ async function checkAndUpdateProjectStatus(
 
   if (clipsError) {
     ctx.logger.warn("clip_render_status_check_failed", {
-      pipeline: PIPELINE,
+      pipeline: PIPELINE_CLIP_RENDER,
       projectId,
       workspaceId,
       error: clipsError.message,
@@ -260,14 +346,14 @@ async function checkAndUpdateProjectStatus(
 
     if (updateError) {
       ctx.logger.warn("clip_render_project_status_update_failed", {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_CLIP_RENDER,
         projectId,
         workspaceId,
         error: updateError.message,
       });
     } else {
       ctx.logger.info("clip_render_project_ready", {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_CLIP_RENDER,
         projectId,
         workspaceId,
         totalClips: clips.length,
@@ -284,14 +370,14 @@ async function checkAndUpdateProjectStatus(
 
     if (updateError) {
       ctx.logger.warn("clip_render_project_status_update_failed", {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_CLIP_RENDER,
         projectId,
         workspaceId,
         error: updateError.message,
       });
     } else {
       ctx.logger.info("clip_render_project_ready_with_failures", {
-        pipeline: PIPELINE,
+        pipeline: PIPELINE_CLIP_RENDER,
         projectId,
         workspaceId,
         totalClips: clips.length,

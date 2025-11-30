@@ -1,6 +1,7 @@
 import util from "util";
 
 import { getEnv } from "../src/env";
+import type { LogEvent } from "./types";
 
 const SECRET_PATTERNS = [/key/i, /token/i, /secret/i, /password/i, /authorization/i, /bearer/i];
 
@@ -236,6 +237,62 @@ export function onLog(observer: LogObserver): () => void {
   return () => {
     observers.delete(observer);
   };
+}
+
+// Try to import Sentry, but handle gracefully if not available
+let Sentry: typeof import("@sentry/node") | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Sentry = require("@sentry/node");
+} catch {
+  // Sentry not available - that's okay, we'll just skip breadcrumbs
+}
+
+/**
+ * Structured log event function that accepts LogEvent type.
+ * Serializes to structured JSON and adds Sentry breadcrumb if configured.
+ */
+export function logEvent(event: LogEvent): void {
+  const level =
+    event.event.toLowerCase().includes("error") || event.event.toLowerCase().includes("fail")
+      ? "error"
+      : "info";
+
+  // Convert LogEvent to LogEntry format for existing log function
+  log({
+    service: event.service,
+    event: event.event,
+    workspaceId: event.workspaceId,
+    jobId: event.jobId,
+    meta: {
+      ...(event.projectId && { projectId: event.projectId }),
+      ...(event.clipId && { clipId: event.clipId }),
+      ...(event.meta && event.meta),
+    },
+    level,
+  });
+
+  // Add Sentry breadcrumb if available
+  if (Sentry && typeof Sentry.addBreadcrumb === "function") {
+    try {
+      Sentry.addBreadcrumb({
+        category: "log",
+        message: event.event,
+        level: level === "error" ? "error" : "info",
+        data: {
+          service: event.service,
+          ...(event.workspaceId && { workspaceId: event.workspaceId }),
+          ...(event.jobId && { jobId: event.jobId }),
+          ...(event.projectId && { projectId: event.projectId }),
+          ...(event.clipId && { clipId: event.clipId }),
+          ...(event.meta && event.meta),
+        },
+        timestamp: Date.now() / 1000,
+      });
+    } catch {
+      // Silently fail - breadcrumbs are optional
+    }
+  }
 }
 
 export type { LogObserverPayload };

@@ -52,6 +52,16 @@
       "import": "./dist/types/*.js",
       "require": "./dist/types/*.js",
       "types": "./dist/types/*.d.ts"
+    },
+    "./pipeline/*": {
+      "import": "./dist/pipeline/*.js",
+      "require": "./dist/pipeline/*.js",
+      "types": "./dist/pipeline/*.d.ts"
+    },
+    "./storage/*": {
+      "import": "./dist/storage/*.js",
+      "require": "./dist/storage/*.js",
+      "types": "./dist/storage/*.d.ts"
     }
   },
 

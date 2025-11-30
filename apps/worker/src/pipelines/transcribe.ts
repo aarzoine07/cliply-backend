@@ -6,7 +6,11 @@ import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/s
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import { logPipelineStep } from '@cliply/shared/observability/logging';
+import { logEvent } from '@cliply/shared/logging/logger';
 import type { ProjectStatus } from '@cliply/shared';
+import { setPipelineStage } from '@cliply/shared/pipeline/stages';
+import { projectSourcePath, transcriptSrtPath, transcriptJsonPath } from '@cliply/shared/storage/paths';
+import { PIPELINE_TRANSCRIBE } from '@cliply/shared/pipeline/names';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
@@ -42,18 +46,49 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
 
     const sourceKey = await resolveSourceKey(ctx, workspaceId, payload.projectId, payload.sourceExt);
 
-    // Set project status to 'processing' when transcription starts
-    await ctx.supabase
+    // Update video_project (projects table) status to 'processing' when transcription starts
+    // See docs/machine-mapping.md for terminology reference
+    const { data: projectRows } = await ctx.supabase
       .from('projects')
       .update({ status: 'processing' as ProjectStatus })
-      .eq('id', payload.projectId);
+      .eq('id', payload.projectId)
+      .select();
+    
+    const projectForStage = projectRows?.[0];
+    if (projectForStage) {
+      setPipelineStage(projectForStage, 'transcribing');
+      await ctx.supabase
+        .from('projects')
+        .update({ pipeline_stage: projectForStage.pipeline_stage })
+        .eq('id', payload.projectId);
+    }
 
     logPipelineStep(
-      { jobId: String(job.id)        , workspaceId, clipId: payload.projectId },
+      { 
+        jobId: String(job.id), 
+        workspaceId, 
+        clipId: payload.projectId 
+      },
       'transcribe',
       'start',
-      { sourceKey },
+      { 
+        pipeline: PIPELINE_TRANSCRIBE, 
+        jobKind: job.type, 
+        projectId: payload.projectId,
+        sourceKey 
+      },
     );
+
+    logEvent({
+      service: 'worker',
+      event: 'transcribe_start',
+      workspaceId,
+      jobId: String(job.id),
+      projectId: payload.projectId,
+      meta: {
+        sourceExt: payload.sourceExt,
+      },
+    });
 
     const tempDir = await fs.mkdtemp(join(tmpdir(), 'cliply-transcribe-'));
     const localSource = join(tempDir, 'source');
@@ -64,17 +99,46 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     try {
       result = await transcriber.transcribe(downloadedPath);
       logPipelineStep(
-        { jobId: String(job.id)          , workspaceId, clipId: payload.projectId },
+        { 
+          jobId: String(job.id), 
+          workspaceId, 
+          clipId: payload.projectId 
+        },
         'transcribe',
         'success',
-        { durationSec: result.durationSec },
+        { 
+          pipeline: PIPELINE_TRANSCRIBE, 
+          jobKind: job.type, 
+          projectId: payload.projectId,
+          durationSec: result.durationSec 
+        },
       );
+
+      logEvent({
+        service: 'worker',
+        event: 'transcribe_complete',
+        workspaceId,
+        jobId: String(job.id),
+        projectId: payload.projectId,
+        meta: {
+          durationSec: result.durationSec,
+        },
+      });
     } catch (error) {
       logPipelineStep(
-        { jobId: String(job.id)          , workspaceId, clipId: payload.projectId },
+        { 
+          jobId: String(job.id), 
+          workspaceId, 
+          clipId: payload.projectId 
+        },
         'transcribe',
         'error',
-        { error: error instanceof Error ? error.message : String(error) },
+        { 
+          pipeline: PIPELINE_TRANSCRIBE, 
+          jobKind: job.type, 
+          projectId: payload.projectId,
+          error: error instanceof Error ? error.message : String(error) 
+        },
       );
       throw error;
     }
@@ -95,6 +159,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const project = await fetchProject(ctx, payload.projectId);
     // TODO: Legacy status check - 'transcribed' and 'clips_proposed' are not in the lifecycle
     // but may exist in DB from before lifecycle standardization. Keep processing status.
+    // Note: Transcript data stored in transcripts bucket as SRT + JSON (see docs/machine-mapping.md)
     const alreadyTranscribed = project?.status === 'transcribed' || project?.status === 'clips_proposed';
 
     if (!alreadyTranscribed) {
@@ -117,6 +182,14 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
     }
 
+    logEvent({
+      service: 'worker',
+      event: 'transcribe_pipeline_complete',
+      workspaceId,
+      jobId: String(job.id),
+      projectId: payload.projectId,
+    });
+
     ctx.logger.info('pipeline_completed', {
       pipeline: PIPELINE,
       jobId: job.id,
@@ -125,9 +198,33 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       storagePath: sourceKey,
     });
   } catch (error) {
+    // Set pipeline_stage to 'failed' on error
+    try {
+      const payload = TRANSCRIBE.parse(job.payload);
+      const { data: projectRows } = await ctx.supabase
+        .from('projects')
+        .select('id,pipeline_stage')
+        .eq('id', payload.projectId);
+      const failedProject = projectRows?.[0];
+      if (failedProject) {
+        setPipelineStage(failedProject, 'failed');
+        await ctx.supabase
+          .from('projects')
+          .update({ pipeline_stage: failedProject.pipeline_stage })
+          .eq('id', payload.projectId);
+      }
+    } catch (stageUpdateError) {
+      // Ignore stage update errors - don't prevent main error from being thrown
+    }
+
+    const payload = TRANSCRIBE.parse(job.payload);
     ctx.sentry.captureException(error, {
-      tags: { pipeline: PIPELINE },
-      extra: { jobId: String(job.id), workspaceId: job.workspaceId },
+      tags: { pipeline: PIPELINE_TRANSCRIBE, jobKind: job.type },
+      extra: { 
+        jobId: String(job.id), 
+        workspaceId: job.workspaceId,
+        projectId: payload.projectId 
+      },
     });
     ctx.logger.error('pipeline_failed', {
       pipeline: PIPELINE,
@@ -148,7 +245,7 @@ async function resolveSourceKey(
   explicitExt?: string,
 ): Promise<string> {
   if (explicitExt) {
-    const candidate = `${workspaceId}/${projectId}/source.${explicitExt}`;
+    const candidate = projectSourcePath(workspaceId, projectId, explicitExt);
     const exists = await ctx.storage.exists(BUCKET_VIDEOS, candidate);
     if (!exists) {
       throw new Error(`source object missing: ${candidate}`);
@@ -181,7 +278,9 @@ async function ensureTranscriptUploaded(
   contentType: string,
   tempDir: string,
 ): Promise<void> {
-  const key = `${workspaceId}/${projectId}/${filename}`;
+  const key = filename === TRANSCRIPT_SRT 
+    ? transcriptSrtPath(workspaceId, projectId)
+    : transcriptJsonPath(workspaceId, projectId);
   const exists = await ctx.storage.exists(BUCKET_TRANSCRIPTS, key);
   if (exists) return;
 

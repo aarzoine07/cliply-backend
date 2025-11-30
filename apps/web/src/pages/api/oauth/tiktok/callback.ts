@@ -13,6 +13,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { getEnv } from '@cliply/shared/env';
+import { logAuditEvent } from '@cliply/shared/logging/audit';
 
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
@@ -107,6 +108,29 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       openId: result.userInfo.openId,
       durationMs: Date.now() - started,
     });
+
+    // Audit log: connected account linked
+    try {
+      await logAuditEvent({
+        workspaceId,
+        actorId: userId,
+        eventType: 'oauth',
+        action: 'connected_account.linked',
+        targetId: result.accountId,
+        meta: {
+          provider: 'tiktok',
+          openId: result.userInfo.openId,
+          displayName: result.userInfo.displayName,
+        },
+      });
+    } catch (auditError) {
+      // Don't fail the request if audit logging fails
+      logger.warn('oauth_tiktok_callback_audit_failed', {
+        workspaceId,
+        accountId: result.accountId,
+        error: (auditError as Error)?.message ?? 'unknown',
+      });
+    }
 
     // Return success (frontend can redirect to settings page)
     res.status(200).json(ok({
