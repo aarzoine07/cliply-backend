@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as usageTracker from '../../packages/shared/billing/usageTracker';
 import * as storage from '../../apps/web/src/lib/storage';
 import * as supabaseAdmin from '../../apps/web/src/lib/supabase';
+import * as rateLimit from '../../apps/web/src/lib/rate-limit';
 import uploadInit from '../../apps/web/src/pages/api/upload/init';
 import uploadComplete from '../../apps/web/src/pages/api/upload/complete';
 import { supertestHandler } from '../utils/supertest-next';
@@ -32,7 +33,10 @@ const commonHeaders = {
 type AdminMock = {
   inserted: Array<Record<string, unknown>>;
   from: ReturnType<typeof vi.fn>;
-  rpc?: ReturnType<typeof vi.fn>;
+  rpc: ReturnType<typeof vi.fn>;
+  auth: {
+    getUser: ReturnType<typeof vi.fn>;
+  };
 };
 
 function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic'): AdminMock {
@@ -60,16 +64,18 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic'): AdminMock
         const chain = {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
           order: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
           maybeSingle: vi.fn().mockResolvedValue({
-            data: plan === 'basic' ? null : { plan_name: plan }, // Basic plan = no subscription
+            data: plan === 'basic' ? null : { plan_name: plan, status: 'active' }, // Basic plan = no subscription
             error: null,
           }),
         };
         // Support chaining
         chain.select = vi.fn().mockReturnValue(chain);
         chain.eq = vi.fn().mockReturnValue(chain);
+        chain.in = vi.fn().mockReturnValue(chain);
         chain.order = vi.fn().mockReturnValue(chain);
         chain.limit = vi.fn().mockReturnValue(chain);
         return chain;
@@ -107,6 +113,10 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic'): AdminMock
         maybeSingle: vi.fn(),
       };
     }),
+    rpc: vi.fn().mockResolvedValue({
+      data: 60, // Return remaining tokens
+      error: null,
+    }),
     auth: {
       getUser: vi.fn().mockResolvedValue({
         data: { user: { id: userId } },
@@ -128,12 +138,21 @@ describe('Plan Gating - Upload Endpoints', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockSupabaseClientFactory.mockClear();
+    // Mock rate limiting to always allow
+    vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+      allowed: true,
+      remaining: 60,
+    });
   });
 
   describe('POST /api/upload/init', () => {
     it('allows upload when plan includes uploads_per_day and under limit', async () => {
       const admin = createAdminMock('pro'); // Pro plan has uploads_per_day: 30
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
       vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
       vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
       vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
@@ -168,6 +187,10 @@ describe('Plan Gating - Upload Endpoints', () => {
       // But we verify the gating mechanism works by checking response structure
       const admin = createAdminMock('basic'); // Basic plan has uploads_per_day: 5
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
       vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
       vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
       vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
@@ -191,6 +214,10 @@ describe('Plan Gating - Upload Endpoints', () => {
     it('blocks when workspace has no active subscription (defaults to basic)', async () => {
       const admin = createAdminMock('basic'); // No subscription = basic plan
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
       vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
       vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
       vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
@@ -213,6 +240,10 @@ describe('Plan Gating - Upload Endpoints', () => {
     it('handles usage limit exceeded separately (429)', async () => {
       const admin = createAdminMock('basic');
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
       vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
       vi.spyOn(usageTracker, 'assertWithinUsage').mockRejectedValue(
         new usageTracker.UsageLimitExceededError('projects', 150, 150),
@@ -239,6 +270,10 @@ describe('Plan Gating - Upload Endpoints', () => {
     it('allows job enqueue when under concurrent_jobs limit', async () => {
       const admin = createAdminMock('pro'); // Pro plan has concurrent_jobs: 6
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
 
       const res = await supertestHandler(toApiHandler(uploadComplete))
         .post('/')
@@ -259,6 +294,10 @@ describe('Plan Gating - Upload Endpoints', () => {
       // Test with basic plan - should still allow (has concurrent_jobs: 2)
       const admin = createAdminMock('basic');
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
 
       const res = await supertestHandler(toApiHandler(uploadComplete))
         .post('/')
@@ -276,6 +315,10 @@ describe('Plan Gating - Upload Endpoints', () => {
       // Mock subscription query to return no active subscription
       const admin = createAdminMock('basic'); // No subscription = basic plan (default)
       mockAdminClient(admin);
+      vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+        allowed: true,
+        remaining: 60,
+      });
 
       // Should still work because defaults to basic which has concurrent_jobs
       const res = await supertestHandler(toApiHandler(uploadComplete))

@@ -1,31 +1,49 @@
 // C2: YouTube OAuth service tests
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as envModule from '../../packages/shared/src/env';
+import { clearEnvCache } from '@cliply/shared/env';
+import { resetEnvForTesting } from '../../apps/web/src/lib/env';
 import * as youtubeAuth from '../../packages/shared/src/services/youtubeAuth';
 
 // Mock fetch globally
 global.fetch = vi.fn();
 
+// Capture original env at module load
+const ORIGINAL_ENV = { ...process.env };
+
 beforeEach(() => {
   vi.restoreAllMocks();
-  // Clear env cache if available
-  if (typeof envModule.clearEnvCache === 'function') {
-    envModule.clearEnvCache();
-  }
-  // Reset env
+  // Reset env to baseline - this clears cache internally
+  resetEnvForTesting();
+  // CRITICAL: Set NODE_ENV to "test" to enable non-caching behavior in getEnv()
+  process.env.NODE_ENV = 'test';
+  // Ensure cache is cleared (no-op in test mode, but harmless)
+  clearEnvCache();
+  // Set required env vars for schema validation (these are required by the schema)
+  // Use test values that won't interfere with actual functionality
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://test.supabase.co';
+  process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'test-anon-key-min-20-chars';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key-min-20-chars';
+  // Delete YouTube OAuth vars to ensure clean state
   delete process.env.GOOGLE_CLIENT_ID;
   delete process.env.GOOGLE_CLIENT_SECRET;
   delete process.env.YOUTUBE_OAUTH_REDIRECT_URL;
+  // Clear cache again after setting/deleting
+  clearEnvCache();
+});
+
+afterAll(() => {
+  // Restore original env
+  process.env = { ...ORIGINAL_ENV };
 });
 
 describe('buildYouTubeAuthUrl', () => {
   it('builds correct authorization URL', () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
+    // Set env vars for this test - must be set before getEnv() is called
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.YOUTUBE_OAUTH_REDIRECT_URL = 'http://localhost:3000/callback';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     const url = youtubeAuth.buildYouTubeAuthUrl({
       workspaceId: 'workspace-123',
@@ -49,6 +67,11 @@ describe('buildYouTubeAuthUrl', () => {
   });
 
   it('throws when OAuth not configured', () => {
+    // Explicitly delete env vars for this test
+    delete process.env.GOOGLE_CLIENT_ID;
+    delete process.env.YOUTUBE_OAUTH_REDIRECT_URL;
+    clearEnvCache();
+
     expect(() => {
       youtubeAuth.buildYouTubeAuthUrl({
         workspaceId: 'workspace-123',
@@ -58,11 +81,11 @@ describe('buildYouTubeAuthUrl', () => {
   });
 
   it('uses custom redirect URI when provided', () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
+    // Set env vars for this test (redirectUri param will override YOUTUBE_OAUTH_REDIRECT_URL)
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.YOUTUBE_OAUTH_REDIRECT_URL = 'http://localhost:3000/default';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     const url = youtubeAuth.buildYouTubeAuthUrl({
       workspaceId: 'workspace-123',
@@ -70,17 +93,19 @@ describe('buildYouTubeAuthUrl', () => {
       redirectUri: 'http://custom.com/callback',
     });
 
-    expect(url).toContain('http://custom.com/callback');
+    // The redirect URI is URL-encoded in the query string, so check for the encoded version
+    expect(url).toContain('http%3A%2F%2Fcustom.com%2Fcallback');
+    // Also verify it's not using the default from env
+    expect(url).not.toContain('http%3A%2F%2Flocalhost%3A3000%2Fdefault');
   });
 });
 
 describe('exchangeYouTubeCodeForTokens', () => {
   it('exchanges code for tokens', async () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
@@ -115,11 +140,11 @@ describe('exchangeYouTubeCodeForTokens', () => {
   });
 
   it('throws on API error', async () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
+    // Set env vars for this test
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     (global.fetch as any).mockResolvedValueOnce({
       ok: false,
@@ -127,10 +152,8 @@ describe('exchangeYouTubeCodeForTokens', () => {
       text: async () => 'Invalid code',
     });
 
-    // Re-import to get fresh env
-    const { exchangeYouTubeCodeForTokens: exchangeCode } = await import('../../packages/shared/src/services/youtubeAuth');
     await expect(
-      exchangeCode({
+      youtubeAuth.exchangeYouTubeCodeForTokens({
         code: 'invalid-code',
         redirectUri: 'http://localhost:3000/callback',
       }),
@@ -183,11 +206,10 @@ describe('fetchYouTubeChannelForToken', () => {
 
 describe('refreshYouTubeAccessToken', () => {
   it('refreshes access token', async () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
@@ -206,11 +228,11 @@ describe('refreshYouTubeAccessToken', () => {
   });
 
   it('throws on refresh failure', async () => {
-    if (typeof envModule.clearEnvCache === 'function') {
-      envModule.clearEnvCache();
-    }
+    // Set env vars for this test
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    // Clear cache AFTER setting env vars so getEnv() reads fresh values
+    clearEnvCache();
 
     (global.fetch as any).mockResolvedValueOnce({
       ok: false,
@@ -218,9 +240,9 @@ describe('refreshYouTubeAccessToken', () => {
       text: async () => 'Invalid refresh token',
     });
 
-    // Re-import to get fresh env
-    const { refreshYouTubeAccessToken: refreshToken } = await import('../../packages/shared/src/services/youtubeAuth');
-    await expect(refreshToken('invalid-refresh')).rejects.toThrow('Failed to refresh');
+    await expect(
+      youtubeAuth.refreshYouTubeAccessToken('invalid-refresh'),
+    ).rejects.toThrow('Failed to refresh');
   });
 });
 

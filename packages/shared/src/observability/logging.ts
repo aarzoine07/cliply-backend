@@ -7,16 +7,7 @@
  * Safety: Never logs secrets (tokens, keys, etc.) - only safe identifiers.
  */
 
-import { logger } from "../../logging/logger";
-
-// Try to import Sentry, but handle gracefully if not available
-let Sentry: typeof import("@sentry/node") | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  Sentry = require("@sentry/node");
-} catch {
-  // Sentry not available - that's okay, we'll just skip breadcrumbs
-}
+import { logger } from "@cliply/shared/logging/logger";
 
 /**
  * Safely extracts error message without leaking secrets or full stack traces.
@@ -30,6 +21,23 @@ function safeErrorMessage(error: unknown): string {
 }
 
 /**
+ * Gets the Sentry addBreadcrumb function at runtime.
+ * This ensures Vitest mocks are applied when require is called.
+ */
+function getSentryAddBreadcrumb(): typeof import("@sentry/node").addBreadcrumb | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sentry = require("@sentry/node");
+    if (sentry && typeof sentry.addBreadcrumb === "function") {
+      return sentry.addBreadcrumb;
+    }
+  } catch {
+    // Sentry not available
+  }
+  return undefined;
+}
+
+/**
  * Adds a Sentry breadcrumb if Sentry is available.
  * Silently fails if Sentry is not configured.
  */
@@ -39,20 +47,15 @@ function addBreadcrumb(
   level: "info" | "warning" | "error",
   data?: Record<string, unknown>,
 ): void {
-  if (!Sentry) return;
-
-  try {
-    if (typeof Sentry.addBreadcrumb === "function") {
-      Sentry.addBreadcrumb({
-        category,
-        message,
-        level,
-        data: data || {},
-        timestamp: Date.now() / 1000,
-      });
-    }
-  } catch {
-    // Silently fail - breadcrumbs are optional
+  const sentryAddBreadcrumb = getSentryAddBreadcrumb();
+  if (sentryAddBreadcrumb) {
+    sentryAddBreadcrumb({
+      category,
+      message,
+      level,
+      data: data || {},
+      timestamp: Date.now() / 1000,
+    });
   }
 }
 
@@ -88,11 +91,18 @@ export function logJobStatus(
   };
 
   const event = `job_${status}`;
-  const level = status === "failed" ? "error" : status === "retry" ? "warn" : "info";
-
-  logger[level === "error" ? "error" : level === "warn" ? "warn" : "info"](event, payload);
-
-  addBreadcrumb("job", event, level === "error" ? "error" : level === "warn" ? "warning" : "info", payload);
+  
+  // Call logger methods explicitly so Vitest mocks work correctly
+  if (status === "failed") {
+    logger.error(event, payload);
+    addBreadcrumb("job", event, "error", payload);
+  } else if (status === "retry") {
+    logger.warn(event, payload);
+    addBreadcrumb("job", event, "warning", payload);
+  } else {
+    logger.info(event, payload);
+    addBreadcrumb("job", event, "info", payload);
+  }
 }
 
 // ============================================================================
@@ -129,11 +139,15 @@ export function logPipelineStep(
   };
 
   const event = `pipeline_${step}_${phase}`;
-  const level = phase === "error" ? "error" : "info";
-
-  logger[level === "error" ? "error" : "info"](event, payload);
-
-  addBreadcrumb("pipeline", event, level === "error" ? "error" : "info", payload);
+  
+  // Call logger methods explicitly so Vitest mocks work correctly
+  if (phase === "error") {
+    logger.error(event, payload);
+    addBreadcrumb("pipeline", event, "error", payload);
+  } else {
+    logger.info(event, payload);
+    addBreadcrumb("pipeline", event, "info", payload);
+  }
 }
 
 // ============================================================================
@@ -163,11 +177,15 @@ export function logStripeEvent(eventType: string, ctx: StripeEventContext): void
   };
 
   const event = `stripe_${eventType}`;
-  const level = ctx.error ? "error" : "info";
-
-  logger[level === "error" ? "error" : "info"](event, payload);
-
-  addBreadcrumb("stripe", event, level === "error" ? "error" : "info", payload);
+  
+  // Call logger methods explicitly so Vitest mocks work correctly
+  if (ctx.error) {
+    logger.error(event, payload);
+    addBreadcrumb("stripe", event, "error", payload);
+  } else {
+    logger.info(event, payload);
+    addBreadcrumb("stripe", event, "info", payload);
+  }
 }
 
 // ============================================================================
@@ -202,10 +220,14 @@ export function logOAuthEvent(provider: OAuthProvider, phase: OAuthPhase, ctx: O
   };
 
   const event = `oauth_${provider}_${phase}`;
-  const level = phase === "error" ? "error" : "info";
-
-  logger[level === "error" ? "error" : "info"](event, payload);
-
-  addBreadcrumb("oauth", event, level === "error" ? "error" : "info", payload);
+  
+  // Call logger methods explicitly so Vitest mocks work correctly
+  if (phase === "error") {
+    logger.error(event, payload);
+    addBreadcrumb("oauth", event, "error", payload);
+  } else {
+    logger.info(event, payload);
+    addBreadcrumb("oauth", event, "info", payload);
+  }
 }
 

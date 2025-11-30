@@ -9,15 +9,16 @@ import { AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
 export type { AuthContext } from "@cliply/shared/types/auth";
 
 /**
- * Convert NextApiRequest to a Request-like object for buildAuthContext
+ * Convert NextApiRequest or Express Request to a Request-like object for buildAuthContext
  */
-function nextRequestToRequest(req: NextApiRequest): Request {
-  // Create a minimal Request object from NextApiRequest
+function nextRequestToRequest(req: NextApiRequest | { headers?: Record<string, string | string[] | undefined>; url?: string; method?: string }): Request {
+  // Create a minimal Request object from NextApiRequest or Express Request
   const headers = new Headers();
   
-  // Copy all headers from NextApiRequest
+  // Copy all headers from request
   // Express/Next.js normalizes headers to lowercase, so we need to handle that
-  for (const [key, value] of Object.entries(req.headers)) {
+  const reqHeaders = req.headers || {};
+  for (const [key, value] of Object.entries(reqHeaders)) {
     if (value !== undefined && value !== null) {
       // Headers API is case-insensitive, but we'll use lowercase for consistency
       const normalizedKey = key.toLowerCase();
@@ -48,10 +49,10 @@ function nextRequestToRequest(req: NextApiRequest): Request {
 }
 
 /**
- * Build auth context from Next.js API request
+ * Build auth context from Next.js API request or Express Request
  * Supports debug headers in dev/test environments only
  */
-export async function buildAuthContext(req: NextApiRequest): Promise<SharedAuthContext> {
+export async function buildAuthContext(req: NextApiRequest | { headers?: Record<string, string | string[] | undefined>; url?: string; method?: string }): Promise<SharedAuthContext> {
   try {
     const request = nextRequestToRequest(req);
     return await buildAuthContextShared(request);

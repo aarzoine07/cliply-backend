@@ -2,7 +2,7 @@
 // Shared between web and worker for token refresh
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { getEnv } from "../env";
+import { getEnv } from "@cliply/shared/env";
 
 // Simple logger for YouTube auth service
 const logger = {
@@ -13,6 +13,19 @@ const logger = {
     console.error(JSON.stringify({ level: "error", component: "youtubeAuth", msg, ...context }));
   },
 };
+
+/**
+ * Get YouTube OAuth configuration from environment.
+ * Reads env at call-time, not module-load time, so tests can set env vars dynamically.
+ */
+function getYouTubeEnv() {
+  const env = getEnv();
+  return {
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    redirectUri: env.YOUTUBE_OAUTH_REDIRECT_URL,
+  };
+}
 
 export interface YouTubeTokenData {
   accessToken: string;
@@ -26,15 +39,22 @@ export interface YouTubeChannelInfo {
   channelTitle: string;
 }
 
+type GetEnv = typeof getEnv;
+
 /**
  * Build YouTube OAuth authorization URL
+ * Accepts optional getEnv for dependency injection in tests
  */
-export function buildYouTubeAuthUrl(params: {
-  workspaceId: string;
-  userId: string;
-  redirectUri?: string;
-}): string {
-  const env = getEnv();
+export function buildYouTubeAuthUrl(
+  params: {
+    workspaceId: string;
+    userId: string;
+    redirectUri?: string;
+  },
+  deps?: { getEnv?: GetEnv }
+): string {
+  const localGetEnv = deps?.getEnv ?? getEnv;
+  const env = localGetEnv();
   const clientId = env.GOOGLE_CLIENT_ID;
   const redirectUri = params.redirectUri || env.YOUTUBE_OAUTH_REDIRECT_URL;
 
@@ -76,9 +96,7 @@ export async function exchangeYouTubeCodeForTokens(params: {
   code: string;
   redirectUri: string;
 }): Promise<YouTubeTokenData> {
-  const env = getEnv();
-  const clientId = env.GOOGLE_CLIENT_ID;
-  const clientSecret = env.GOOGLE_CLIENT_SECRET;
+  const { clientId, clientSecret } = getYouTubeEnv();
 
   if (!clientId || !clientSecret) {
     throw new Error("YouTube OAuth not configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required");
@@ -107,7 +125,7 @@ export async function exchangeYouTubeCodeForTokens(params: {
       status: response.status,
       error: errorText,
     });
-    throw new Error(`Failed to exchange code for tokens: ${response.status} ${errorText}`);
+    throw new Error("Failed to exchange code");
   }
 
   const data = (await response.json()) as {
@@ -185,9 +203,7 @@ export async function fetchYouTubeChannelForToken(accessToken: string): Promise<
  * Refresh YouTube access token
  */
 export async function refreshYouTubeAccessToken(refreshToken: string): Promise<Omit<YouTubeTokenData, "refreshToken">> {
-  const env = getEnv();
-  const clientId = env.GOOGLE_CLIENT_ID;
-  const clientSecret = env.GOOGLE_CLIENT_SECRET;
+  const { clientId, clientSecret } = getYouTubeEnv();
 
   if (!clientId || !clientSecret) {
     throw new Error("YouTube OAuth not configured: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required");
@@ -215,7 +231,7 @@ export async function refreshYouTubeAccessToken(refreshToken: string): Promise<O
       status: response.status,
       error: errorText,
     });
-    throw new Error(`Failed to refresh token: ${response.status} ${errorText}`);
+    throw new Error("Failed to refresh");
   }
 
   const data = (await response.json()) as {

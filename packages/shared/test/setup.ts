@@ -10,6 +10,12 @@ const __dirname = dirname(__filename);
 const envPath = resolve(__dirname, "../../../.env.test");
 dotenv.config({ path: envPath });
 
+// Ensure NODE_ENV is set to "test" for test environment
+// This must be set before any modules that cache env are imported
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "test";
+}
+
 console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
 
@@ -71,4 +77,34 @@ export function createTestJwt(userId: string, workspaceId: string) {
 
 export async function resetDatabase() {
   console.log("⚙️  resetDatabase() called (stubbed for local tests)");
+}
+
+/**
+ * Checks if Supabase test client is configured and usable for real DB operations.
+ * Returns false if:
+ * - supabaseTest is null (missing credentials)
+ * - SUPABASE_URL is a dashboard URL (contains '/dashboard/') instead of an API URL
+ * 
+ * @returns true if Supabase is properly configured for tests, false otherwise
+ */
+export function isSupabaseTestConfigured(): boolean {
+  if (!supabaseTest) {
+    return false;
+  }
+  
+  // Check if URL is a dashboard URL (not a real API URL)
+  // Dashboard URLs: https://supabase.com/dashboard/project/...
+  // API URLs: https://xxx.supabase.co or https://xxx.supabase.io
+  const url = env.SUPABASE_URL || "";
+  if (url.includes("/dashboard/")) {
+    return false;
+  }
+  
+  // Check if it looks like a real Supabase API URL
+  // Real URLs typically end with .supabase.co or .supabase.io
+  if (!url.match(/\.supabase\.(co|io)/)) {
+    return false;
+  }
+  
+  return true;
 }

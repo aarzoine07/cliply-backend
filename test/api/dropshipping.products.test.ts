@@ -1,8 +1,156 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// CRITICAL: Set NODE_ENV to "test" to enable test-only plan resolution shortcut in buildAuthContext
+process.env.NODE_ENV = 'test';
+
 import productsRoute from '../../apps/web/src/pages/api/dropshipping/products';
 import productByIdRoute from '../../apps/web/src/pages/api/dropshipping/products/[id]';
 import { supertestHandler } from '../utils/supertest-next';
+
+// In-memory Supabase Query Builder Mock
+const inMemoryProducts = [];
+const inMemorySubscriptions = [
+  {
+    id: 'sub_mock',
+    workspace_id: '123e4567-e89b-12d3-a456-426614174000',
+    status: 'active',
+    plan_id: 'pro',
+    current_period_end: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
+  },
+];
+const workspaceId = '123e4567-e89b-12d3-a456-426614174000';
+const userId = '123e4567-e89b-12d3-a456-426614174001';
+
+function makeQueryBuilder(sourceRows) {
+  let filtered = [...sourceRows];
+  const builder = {
+    select(_columns) { return builder; },
+    eq(col, val) { filtered = filtered.filter((row) => row[col] === val); return builder; },
+    order(col, options) { const asc = options?.ascending !== false; filtered.sort((a, b) => { if (a[col] === b[col]) return 0; return asc ? (a[col] < b[col] ? -1 : 1) : a[col] > b[col] ? -1 : 1; }); return builder; },
+    maybeSingle() { return Promise.resolve({ data: filtered[0] ?? null, error: null }); },
+    single() { const row = filtered[0] ?? null; return row ? Promise.resolve({ data: row, error: null }) : Promise.resolve({ data: null, error: new Error('Row not found') }); },
+  };
+  return builder;
+}
+
+vi.mock('@/lib/supabase', () => ({
+  getAdminClient: () => ({
+    from(table) {
+      if (table === 'products') {
+        return {
+          select(_columns) { return makeQueryBuilder(inMemoryProducts); },
+          insert: (rows) => {
+            const rowsArray = Array.isArray(rows) ? rows : [rows];
+            const withIds = rowsArray.map((row) => ({
+              id: row.id ?? `prod_${inMemoryProducts.length + 1}`,
+              workspace_id: row.workspace_id ?? workspaceId,
+              ...row,
+              created_at: row.created_at || new Date().toISOString(),
+              updated_at: row.updated_at || new Date().toISOString(),
+            }));
+            inMemoryProducts.push(...withIds);
+            const result = { data: withIds, error: null };
+            const builder = {
+              then: (onfulfilled, onrejected) => Promise.resolve(result).then(onfulfilled, onrejected),
+              select(_columns) {
+                return {
+                  single() {
+                    const first = withIds[0] ?? null;
+                    if (!first) return Promise.resolve({ data: null, error: new Error('Row not found') });
+                    return Promise.resolve({ data: first, error: null });
+                  },
+                  maybeSingle() {
+                    const first = withIds[0] ?? null;
+                    return Promise.resolve({ data: first, error: null });
+                  },
+                };
+              },
+            };
+            return builder;
+          },
+          update: (patch) => {
+            let filtered = [...inMemoryProducts];
+            const updateBuilder = {
+              eq: (col, val) => {
+                filtered = filtered.filter((row) => row[col] === val);
+                return updateBuilder; // Return builder for chaining
+              },
+              select: (_columns) => {
+                // Apply update to all filtered rows
+                const updatedRows = [];
+                inMemoryProducts.forEach((p, idx) => {
+                  if (filtered.includes(p)) {
+                    inMemoryProducts[idx] = { ...p, ...patch, updated_at: new Date().toISOString() };
+                    updatedRows.push(inMemoryProducts[idx]);
+                  }
+                });
+                return {
+                  single: () => {
+                    const first = updatedRows[0] ?? null;
+                    if (!first) return Promise.resolve({ data: null, error: new Error('Row not found') });
+                    return Promise.resolve({ data: first, error: null });
+                  },
+                  maybeSingle: () => {
+                    const first = updatedRows[0] ?? null;
+                    return Promise.resolve({ data: first, error: null });
+                  },
+                };
+              },
+              then: (onfulfilled, onrejected) => {
+                // Apply update to all filtered rows
+                const updatedRows = [];
+                inMemoryProducts.forEach((p, idx) => {
+                  if (filtered.includes(p)) {
+                    inMemoryProducts[idx] = { ...p, ...patch, updated_at: new Date().toISOString() };
+                    updatedRows.push(inMemoryProducts[idx]);
+                  }
+                });
+                const result = { data: updatedRows, error: null };
+                return Promise.resolve(result).then(onfulfilled, onrejected);
+              },
+            };
+            return updateBuilder;
+          },
+          delete: () => ({
+            eq: (col, val) => {
+              const before = inMemoryProducts.length;
+              for (let i = inMemoryProducts.length - 1; i >= 0; i--) {
+                if (inMemoryProducts[i][col] === val && inMemoryProducts[i].workspace_id === workspaceId) {
+                  inMemoryProducts.splice(i, 1);
+                }
+              }
+              return Promise.resolve({ data: before - inMemoryProducts.length, error: null });
+            },
+          }),
+        };
+      }
+      if (table === 'workspace_members') {
+        return {
+          select: function () { return this; },
+          eq: function () { return this; },
+          maybeSingle: function () { return Promise.resolve({ data: { workspace_id: workspaceId, user_id: userId }, error: null }); },
+        };
+      }
+      if (table === 'subscriptions') {
+        return {
+          select: function () { return this; },
+          eq: function (col, val) { this._filtered = (this._filtered || inMemorySubscriptions).filter(row => row[col] === val); return this; },
+          in: function () { return this; },
+          order: function () { return this; },
+          limit: function () { return this; },
+          maybeSingle: function () { const arr = this._filtered || inMemorySubscriptions; return Promise.resolve({ data: arr.length > 0 ? arr[0] : null, error: null }); },
+        };
+      }
+      // fallback
+      return {
+        select: () => makeQueryBuilder([]),
+        insert: () => Promise.resolve({ data: [], error: null }),
+        update: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }),
+        delete: () => ({ eq: () => Promise.resolve({ data: 0, error: null }) }),
+      };
+    },
+  })
+}));
 
 const toApiHandler = (handler: typeof productsRoute | typeof productByIdRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 

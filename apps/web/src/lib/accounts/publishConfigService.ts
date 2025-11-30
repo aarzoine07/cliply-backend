@@ -118,10 +118,20 @@ export async function updatePublishConfig(
 
   let result;
   if (existing) {
-    // Update existing
+    // Update existing - preserve fields that aren't being updated
+    const finalUpdateData = {
+      ...updateData,
+      // Preserve existing values for fields not being updated
+      enabled: params.enabled !== undefined ? params.enabled : existing.enabled ?? true,
+      default_visibility: params.default_visibility !== undefined ? params.default_visibility : existing.default_visibility ?? "public",
+      default_connected_account_ids: params.default_connected_account_ids !== undefined ? params.default_connected_account_ids : existing.default_connected_account_ids ?? [],
+      title_template: params.title_template !== undefined ? params.title_template : existing.title_template ?? null,
+      description_template: params.description_template !== undefined ? params.description_template : existing.description_template ?? null,
+    };
+
     const { data: updated, error: updateError } = await ctx.supabase
       .from("publish_config")
-      .update(updateData)
+      .update(finalUpdateData)
       .eq("id", existing.id)
       .select()
       .single();

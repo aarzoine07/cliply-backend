@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as actionExecutorService from '@/lib/dropshipping/actionExecutorService';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { HttpError } from '@/lib/errors';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'POST') {
@@ -73,6 +74,28 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(200).json(ok({ data: action }));
   } catch (error) {
     const errObj = error as Error & { status?: number; code?: string };
+    
+    // Handle HttpError instances
+    if (error instanceof HttpError) {
+      if (error.status === 404) {
+        res.status(404).json(err('not_found', error.message));
+        return;
+      }
+      if (error.status === 401) {
+        res.status(401).json(err('unauthorized', error.message));
+        return;
+      }
+      if (error.status === 409) {
+        res.status(409).json(err(error.code || 'action_already_processed', error.message));
+        return;
+      }
+      if (error.status === 400) {
+        res.status(400).json(err(error.code || 'invalid_request', error.message));
+        return;
+      }
+    }
+    
+    // Handle errors with status property (for backwards compatibility)
     if (errObj.status) {
       if (errObj.status === 401) {
         res.status(401).json(err('unauthorized', errObj.message));
@@ -90,6 +113,12 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         res.status(400).json(err(errObj.code || 'invalid_request', errObj.message));
         return;
       }
+    }
+    
+    // Handle "Action not found" errors (for test compatibility and service errors)
+    if (errObj.message === 'Action not found' || errObj.message?.includes('Action not found')) {
+      res.status(404).json(err('not_found', 'Action not found'));
+      return;
     }
 
     const workspaceId = auth?.workspaceId || auth?.workspace_id || 'unknown';

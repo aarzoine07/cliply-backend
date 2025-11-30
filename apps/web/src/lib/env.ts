@@ -8,6 +8,11 @@
  * All environment variables are defined in packages/shared/src/env.ts (single source of truth).
  */
 import { getEnv as getSharedEnv, type Env } from "@cliply/shared/env";
+import { clearEnvCache } from "@cliply/shared/env";
+
+// Capture original env at module load, so tests can restore to a known baseline
+// This snapshot is used by resetEnvForTesting() to restore env state
+const ORIGINAL_ENV: NodeJS.ProcessEnv = { ...process.env };
 
 /**
  * Get server-side environment variables.
@@ -60,3 +65,31 @@ export function getEnv(): Env {
  * Re-exports clearEnvCache from shared for convenience.
  */
 export { clearEnvCache } from "@cliply/shared/env";
+
+/**
+ * Test helper to reset environment variables to a known baseline.
+ * This is used in test setup to ensure deterministic env state between tests.
+ * 
+ * @internal This function is only intended for use in tests.
+ */
+export function resetEnvForTesting(): void {
+  // Remove all current keys
+  for (const key of Object.keys(process.env)) {
+    delete (process.env as any)[key];
+  }
+
+  // Restore original snapshot
+  Object.assign(process.env, ORIGINAL_ENV);
+
+  // Clear the cached env so it will be re-parsed on next access
+  // Import dynamically to avoid ESM/CJS module resolution issues
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const envModule = require("@cliply/shared/env");
+    if (envModule && typeof envModule.clearEnvCache === "function") {
+      envModule.clearEnvCache();
+    }
+  } catch {
+    // Silently fail - tests can call clearEnvCache() directly if needed
+  }
+}

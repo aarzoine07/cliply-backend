@@ -1,12 +1,15 @@
 import { z } from "zod";
+import type { ResolvedPlan } from "../billing/planResolution";
 
 export type PlanName = "basic" | "pro" | "premium";
 
 export interface AuthContext {
   user_id: string;
   workspace_id: string;
-  plan: PlanName;
+  // plan is now the full ResolvedPlan (features? any for test/prod parity)
+  plan: ResolvedPlan & { features?: any };
   isAuthenticated: boolean;
+  planId?: string; // for compatibility if needed
   // For backwards compatibility - these are always true when context is returned
   userId?: string;
   workspaceId?: string;

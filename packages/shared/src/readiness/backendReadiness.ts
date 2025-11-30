@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
-import { getEnv } from "../env";
+import { getEnv } from "@cliply/shared/env";
 import { STRIPE_PLAN_MAP } from "../../billing/stripePlanMap";
 
 // WorkerEnvStatus type (duplicated to avoid circular dependency)
@@ -72,23 +72,48 @@ function checkEnvironment(): {
     env = getEnv();
   } catch (error) {
     // If getEnv() throws, it means required vars are missing
+    // Try to extract which specific vars are missing from the error message
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const missing: string[] = [];
+    
+    // Check each required var to see if it's mentioned in the error
+    for (const key of REQUIRED_ENV_VARS) {
+      if (errorMessage.includes(key) || !process.env[key]) {
+        missing.push(key);
+      }
+    }
+    
+    // If we couldn't determine specific missing vars, assume all are missing
+    if (missing.length === 0) {
+      return {
+        ok: false,
+        missing: REQUIRED_ENV_VARS.slice(),
+        optionalMissing: [],
+      };
+    }
+    
     return {
       ok: false,
-      missing: REQUIRED_ENV_VARS.slice(),
+      missing,
       optionalMissing: [],
     };
   }
 
+  // Check if the returned env object has all required keys
+  // Handle both real Env objects and mocked objects from tests
   const missing: string[] = [];
   for (const key of REQUIRED_ENV_VARS) {
-    if (!env[key]) {
+    // Use bracket notation to access potentially missing keys
+    const value = (env as Record<string, unknown>)[key];
+    if (!value || (typeof value === 'string' && value.trim() === '')) {
       missing.push(key);
     }
   }
 
   const optionalMissing: string[] = [];
   for (const key of OPTIONAL_ENV_VARS) {
-    if (!env[key]) {
+    const value = (env as Record<string, unknown>)[key];
+    if (!value || (typeof value === 'string' && value.trim() === '')) {
       optionalMissing.push(key);
     }
   }
@@ -109,9 +134,24 @@ async function checkDatabase(): Promise<{
   tablesChecked: string[];
   missingTables: string[];
 }> {
-  const env = getEnv();
+  let env;
+  try {
+    env = getEnv();
+  } catch {
+    return {
+      ok: false,
+      error: "Failed to load environment variables",
+      tablesChecked: [],
+      missingTables: CRITICAL_TABLES.slice(),
+    };
+  }
 
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+  // Handle both real Env objects and mocked objects from tests
+  const envRecord = env as Record<string, unknown>;
+  const supabaseUrl = envRecord.SUPABASE_URL as string | undefined;
+  const supabaseServiceRoleKey = envRecord.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
     return {
       ok: false,
       error: "Missing Supabase credentials",
@@ -122,7 +162,7 @@ async function checkDatabase(): Promise<{
 
   try {
     // Create Supabase client with service role key (bypasses RLS)
-    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -191,25 +231,41 @@ function checkStripe(): {
   missingEnv: string[];
   priceIdsConfigured: number;
 } {
-  const env = getEnv();
+  let env;
+  try {
+    env = getEnv();
+  } catch {
+    // If getEnv() fails, Stripe is not configured
+    return {
+      ok: true, // Stripe is optional
+      missingEnv: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+      priceIdsConfigured: Object.keys(STRIPE_PLAN_MAP).length,
+    };
+  }
+
+  // Handle both real Env objects and mocked objects from tests
+  const envRecord = env as Record<string, unknown>;
   const missingEnv: string[] = [];
 
   // Check for required Stripe env vars (if billing is enabled)
-  if (!env.STRIPE_SECRET_KEY) {
+  const stripeSecretKey = envRecord.STRIPE_SECRET_KEY as string | undefined;
+  const stripeWebhookSecret = envRecord.STRIPE_WEBHOOK_SECRET as string | undefined;
+  
+  if (!stripeSecretKey) {
     missingEnv.push("STRIPE_SECRET_KEY");
   }
-  if (!env.STRIPE_WEBHOOK_SECRET) {
+  if (!stripeWebhookSecret) {
     missingEnv.push("STRIPE_WEBHOOK_SECRET");
   }
 
   // Verify Stripe key format (basic validation without network call)
   let keyValid = false;
-  if (env.STRIPE_SECRET_KEY) {
+  if (stripeSecretKey) {
     try {
       // Stripe keys start with sk_ for secret keys
-      if (env.STRIPE_SECRET_KEY.startsWith("sk_")) {
+      if (stripeSecretKey.startsWith("sk_")) {
         // Try to instantiate Stripe client (no network call)
-        new Stripe(env.STRIPE_SECRET_KEY, {
+        new Stripe(stripeSecretKey, {
           apiVersion: "2025-10-29.clover",
         });
         keyValid = true;
@@ -225,7 +281,7 @@ function checkStripe(): {
   // 1. All env vars present and key is valid, OR
   // 2. Stripe is not configured at all (all optional for basic functionality)
   // If STRIPE_SECRET_KEY is provided, it must be valid
-  const ok = missingEnv.length === 0 && (keyValid || !env.STRIPE_SECRET_KEY);
+  const ok = missingEnv.length === 0 && (keyValid || !stripeSecretKey);
 
   return {
     ok,
@@ -241,11 +297,26 @@ function checkSentry(): {
   ok: boolean;
   missingEnv: string[];
 } {
-  const env = getEnv();
+  let env;
+  try {
+    env = getEnv();
+  } catch {
+    // If getEnv() fails, Sentry is not configured (optional)
+    return {
+      ok: true,
+      missingEnv: ["SENTRY_DSN or NEXT_PUBLIC_SENTRY_DSN"],
+    };
+  }
+
+  // Handle both real Env objects and mocked objects from tests
+  const envRecord = env as Record<string, unknown>;
   const missingEnv: string[] = [];
 
   // Sentry is optional, but log if DSNs are missing
-  if (!env.SENTRY_DSN && !env.NEXT_PUBLIC_SENTRY_DSN) {
+  const sentryDsn = envRecord.SENTRY_DSN as string | undefined;
+  const publicSentryDsn = envRecord.NEXT_PUBLIC_SENTRY_DSN as string | undefined;
+  
+  if (!sentryDsn && !publicSentryDsn) {
     missingEnv.push("SENTRY_DSN or NEXT_PUBLIC_SENTRY_DSN");
   }
 

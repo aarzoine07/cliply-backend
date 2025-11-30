@@ -63,10 +63,12 @@ describe('createVariantPostsForClip', () => {
           };
         }
         if (table === 'connected_accounts') {
-          return {
+          const queryBuilder = {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({ data: [], error: null }),
           };
+          return queryBuilder;
         }
         return {
           select: vi.fn().mockReturnThis(),
@@ -109,6 +111,23 @@ describe('createVariantPostsForClip', () => {
   it('creates variant_posts for multiple accounts', async () => {
     const accountId1 = 'acc-1';
     const accountId2 = 'acc-2';
+    
+    // Create a persistent mock for variant_posts table so we can track insert calls
+    const variantPostsInsert = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+    });
+    
+    const variantPostsTable = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [], // No existing posts
+        error: null,
+      }),
+      insert: variantPostsInsert,
+    };
+    
     const mockSupabase = {
       from: vi.fn().mockImplementation((table: string) => {
         if (table === 'clips') {
@@ -127,18 +146,7 @@ describe('createVariantPostsForClip', () => {
           };
         }
         if (table === 'variant_posts') {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            in: vi.fn().mockResolvedValue({
-              data: [], // No existing posts
-              error: null,
-            }),
-            insert: vi.fn().mockResolvedValue({
-              data: null,
-              error: null,
-            }),
-          };
+          return variantPostsTable;
         }
         return {
           select: vi.fn().mockReturnThis(),
@@ -191,7 +199,7 @@ describe('createVariantPostsForClip', () => {
       { supabase: mockSupabase },
     );
 
-    expect(mockSupabase.from('variant_posts').insert).toHaveBeenCalledWith(
+    expect(variantPostsInsert).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           variant_id: 'var-1',
@@ -214,6 +222,25 @@ describe('createVariantPostsForClip', () => {
   it('skips creating duplicate variant_posts (idempotency)', async () => {
     const accountId1 = 'acc-1';
     const accountId2 = 'acc-2';
+    
+    // Create a persistent mock for variant_posts table so we can track insert calls
+    const variantPostsInsert = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+    });
+    
+    const variantPostsTable = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [
+          { connected_account_id: accountId1 }, // Already exists
+        ],
+        error: null,
+      }),
+      insert: variantPostsInsert,
+    };
+    
     const mockSupabase = {
       from: vi.fn().mockImplementation((table: string) => {
         if (table === 'clips') {
@@ -232,20 +259,7 @@ describe('createVariantPostsForClip', () => {
           };
         }
         if (table === 'variant_posts') {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            in: vi.fn().mockResolvedValue({
-              data: [
-                { connected_account_id: accountId1 }, // Already exists
-              ],
-              error: null,
-            }),
-            insert: vi.fn().mockResolvedValue({
-              data: null,
-              error: null,
-            }),
-          };
+          return variantPostsTable;
         }
         return {
           select: vi.fn().mockReturnThis(),
@@ -298,7 +312,7 @@ describe('createVariantPostsForClip', () => {
     );
 
     // Should only insert for accountId2 (accountId1 already exists)
-    expect(mockSupabase.from('variant_posts').insert).toHaveBeenCalledWith([
+    expect(variantPostsInsert).toHaveBeenCalledWith([
       expect.objectContaining({
         connected_account_id: accountId2,
       }),

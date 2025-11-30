@@ -54,5 +54,5 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     remainingTokens: rate.remaining,
   });
 
-  res.status(200).json(ok({ items: data ?? [] }));
+  res.status(200).json(ok({ data: { items: data ?? [] } }));
 });

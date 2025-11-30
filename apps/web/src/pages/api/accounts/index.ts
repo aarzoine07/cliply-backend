@@ -50,7 +50,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         count: accounts.length,
       });
 
-      res.status(200).json(ok({ accounts }));
+      res.status(200).json(ok({ data: { accounts } }));
     } catch (error) {
       logger.error('accounts_list_failed', {
         workspaceId,
@@ -94,7 +94,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         platform: account.platform,
       });
 
-      res.status(200).json(ok(account));
+      res.status(200).json(ok({ data: account }));
     } catch (error) {
       logger.error('account_create_failed', {
         workspaceId,

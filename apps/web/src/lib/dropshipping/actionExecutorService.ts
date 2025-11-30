@@ -68,7 +68,7 @@ export async function executeDropshippingAction(
   }
 
   if (!action) {
-    throw new HttpError(404, "Action not found", "not_found");
+    throw new HttpError(404, "Action not found", undefined, "not_found");
   }
 
   // Validate action state

@@ -8,6 +8,8 @@ import schedulesIndexRoute from '../../apps/web/src/pages/api/schedules/index';
 import { supertestHandler } from '../utils/supertest-next';
 import * as connectedAccountsService from '../../apps/web/src/lib/accounts/connectedAccountsService';
 import * as supabase from '../../apps/web/src/lib/supabase';
+import * as rateLimit from '../../apps/web/src/lib/rate-limit';
+import * as idempotency from '../../apps/web/src/lib/idempotency';
 
 // Mock Supabase client creation for buildAuthContext
 // Use vi.hoisted to avoid hoisting issues
@@ -58,16 +60,18 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic') {
         const chain = {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
           order: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
           maybeSingle: vi.fn().mockResolvedValue({
-            data: plan === 'basic' ? null : { plan_name: plan }, // Basic plan = no subscription
+            data: plan === 'basic' ? null : { plan_name: plan, status: 'active' }, // Basic plan = no subscription
             error: null,
           }),
         };
         // Support chaining
         chain.select = vi.fn().mockReturnValue(chain);
         chain.eq = vi.fn().mockReturnValue(chain);
+        chain.in = vi.fn().mockReturnValue(chain);
         chain.order = vi.fn().mockReturnValue(chain);
         chain.limit = vi.fn().mockReturnValue(chain);
         return chain;
@@ -165,6 +169,19 @@ describe('Plan Gating - Schedule Feature', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockSupabaseClientFactory.mockClear();
+    
+    // Mock rate limiting to always allow
+    vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+      allowed: true,
+      remaining: 100,
+      resetAt: Date.now() + 3600000,
+    });
+    
+    // Mock idempotency to always return fresh results
+    vi.spyOn(idempotency, 'withIdempotency').mockImplementation(async (key, fn) => {
+      const value = await fn();
+      return { fresh: true, value, responseHash: 'mock-hash' };
+    });
   });
 
   describe('POST /api/publish/youtube with scheduleAt', () => {
@@ -210,8 +227,10 @@ describe('Plan Gating - Schedule Feature', () => {
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
 
-      // Verify schedule was created
-      expect(admin.from('schedules').insert).toHaveBeenCalled();
+      // Verify schedule was created by checking the response contains scheduleId
+      // The response structure is { ok: true, scheduled: true, scheduleId: '...', idempotent: ... }
+      expect(res.body).toHaveProperty('scheduled', true);
+      expect(res.body).toHaveProperty('scheduleId');
     });
 
     it('allows scheduled publish for premium plan', async () => {
@@ -252,8 +271,12 @@ describe('Plan Gating - Schedule Feature', () => {
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
 
-      // Verify job was created (not schedule)
-      expect(admin.from('jobs').insert).toHaveBeenCalled();
+      // Verify that jobs were inserted by checking the response contains jobIds
+      // Note: withIdempotency calls getAdminClient() internally, so we verify via response data
+      // The response structure is { ok: true, jobIds: [...], accountCount: ..., idempotent: ... }
+      expect(res.body).toHaveProperty('jobIds');
+      expect(Array.isArray(res.body.jobIds)).toBe(true);
+      expect(res.body.jobIds.length).toBeGreaterThan(0);
     });
   });
 
@@ -262,17 +285,14 @@ describe('Plan Gating - Schedule Feature', () => {
       const admin = createAdminMock('pro');
       mockAdminClient(admin);
 
-      // Mock schedules query
-      admin.from('schedules').maybeSingle = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      });
-      admin.from('schedules').select = vi.fn().mockReturnValue({
+      // Mock schedules query - the actual code calls .select('*').eq('workspace_id', workspaceId)
+      const schedulesChain = {
         eq: vi.fn().mockResolvedValue({
           data: [],
           error: null,
         }),
-      });
+      };
+      admin.from('schedules').select = vi.fn().mockReturnValue(schedulesChain);
 
       const res = await supertestHandler(toApiHandler(schedulesIndexRoute as any), 'get')
         .get('/')
@@ -297,12 +317,14 @@ describe('Plan Gating - Schedule Feature', () => {
       const admin = createAdminMock('basic');
       mockAdminClient(admin);
 
-      admin.from('schedules').select = vi.fn().mockReturnValue({
+      // Mock schedules query - the actual code calls .select('*').eq('workspace_id', workspaceId)
+      const schedulesChain = {
         eq: vi.fn().mockResolvedValue({
           data: [],
           error: null,
         }),
-      });
+      };
+      admin.from('schedules').select = vi.fn().mockReturnValue(schedulesChain);
 
       const res = await supertestHandler(toApiHandler(schedulesIndexRoute as any), 'get')
         .get('/')

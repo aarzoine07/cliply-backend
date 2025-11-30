@@ -20,7 +20,7 @@
     "baseUrl": ".",
     "paths": {
       "@cliply/shared": ["./src/index.ts"],
-      "@cliply/shared/*": ["./*"]
+      "@cliply/shared/*": ["./*", "./src/*"]
     }
   },
   "include": [

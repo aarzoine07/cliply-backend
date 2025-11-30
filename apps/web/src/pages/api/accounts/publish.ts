@@ -63,8 +63,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       });
 
       res.status(200).json(ok({
-        connectedAccounts: accounts,
-        publishConfig,
+        data: {
+          connectedAccounts: accounts,
+          publishConfig,
+        },
       }));
     } catch (error) {
       logger.error('publish_config_get_failed', {
@@ -97,18 +99,29 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     try {
       // Validate that default_connected_account_ids belong to workspace and platform if provided
       if (parsed.data.default_connected_account_ids && parsed.data.default_connected_account_ids.length > 0) {
-        const validAccounts = await connectedAccountsService.getConnectedAccountsForPublish(
-          {
-            workspaceId,
-            platform,
-            connectedAccountIds: parsed.data.default_connected_account_ids,
-          },
-          { supabase },
-        );
+        try {
+          const validAccounts = await connectedAccountsService.getConnectedAccountsForPublish(
+            {
+              workspaceId,
+              platform,
+              connectedAccountIds: parsed.data.default_connected_account_ids,
+            },
+            { supabase },
+          );
 
-        if (validAccounts.length !== parsed.data.default_connected_account_ids.length) {
-          res.status(400).json(err('invalid_request', 'Some connected account IDs are invalid or do not belong to this workspace/platform'));
-          return;
+          if (validAccounts.length !== parsed.data.default_connected_account_ids.length) {
+            res.status(400).json(err('invalid_request', 'Some connected account IDs are invalid or do not belong to this workspace/platform'));
+            return;
+          }
+        } catch (accountError) {
+          // getConnectedAccountsForPublish throws when accounts are not found
+          const errorMessage = (accountError as Error)?.message ?? 'unknown';
+          if (errorMessage.includes('not found') || errorMessage.includes('inactive')) {
+            res.status(400).json(err('invalid_request', errorMessage));
+            return;
+          }
+          // Re-throw unexpected errors
+          throw accountError;
         }
       }
 
@@ -127,13 +140,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         configId: updatedConfig.id,
       });
 
-      res.status(200).json(ok(updatedConfig));
+      res.status(200).json(ok({
+        data: updatedConfig,
+      }));
     } catch (error) {
+      const errorMessage = (error as Error)?.message ?? 'unknown';
       logger.error('publish_config_update_failed', {
         workspaceId,
         platform,
-        message: (error as Error)?.message ?? 'unknown',
+        message: errorMessage,
       });
+      // Return 500 for unexpected errors, but validation errors should already be handled above
       res.status(500).json(err('internal_error', 'Failed to update publish config'));
     }
     return;

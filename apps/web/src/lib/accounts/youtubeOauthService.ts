@@ -12,16 +12,24 @@ import {
 
 import { logger } from "../logger";
 import * as connectedAccountsService from "./connectedAccountsService";
+import { getEnv, type Env } from "@cliply/shared/env";
+
+type GetEnv = typeof getEnv;
 
 /**
  * Build YouTube OAuth authorization URL for a workspace
+ * Accepts optional getEnv for dependency injection in tests
  */
-export function buildYouTubeAuthUrl(params: {
-  workspaceId: string;
-  userId: string;
-  redirectUri?: string;
-}): string {
-  return buildAuthUrl(params);
+export function buildYouTubeAuthUrl(
+  params: {
+    workspaceId: string;
+    userId: string;
+    redirectUri?: string;
+  },
+  deps?: { getEnv?: GetEnv }
+): string {
+  // Pass through DI
+  return buildAuthUrl(params, { getEnv: deps?.getEnv ?? getEnv });
 }
 
 /**

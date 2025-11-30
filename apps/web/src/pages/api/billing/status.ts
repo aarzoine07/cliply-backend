@@ -5,7 +5,7 @@ import { PLAN_MATRIX } from '@cliply/shared/billing/planMatrix';
 import { getUsageSummary } from '@cliply/shared/billing/usageTracker';
 import type { PlanName } from '@cliply/shared/types/auth';
 
-import { requireUser } from '@/lib/auth';
+import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
@@ -18,14 +18,22 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
+  let auth;
   try {
-    const auth = requireUser(req);
-    const { workspaceId } = auth;
+    auth = await buildAuthContext(req);
+  } catch (error) {
+    handleAuthError(error, res);
+    return;
+  }
 
-    if (!workspaceId) {
-      res.status(400).json(err('invalid_request', 'workspace required'));
-      return;
-    }
+  const workspaceId = auth.workspaceId || auth.workspace_id;
+
+  if (!workspaceId) {
+    res.status(400).json(err('invalid_request', 'workspace required'));
+    return;
+  }
+
+  try {
 
     const supabase = getAdminClient();
 
@@ -105,7 +113,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       billingStatus,
     });
 
-    res.status(200).json(ok(response));
+    res.status(200).json(ok({ data: response }));
   } catch (error) {
     logger.error('billing_status_fetch_failed', {
       message: (error as Error)?.message ?? 'unknown',

@@ -17,15 +17,31 @@ vi.mock("@cliply/shared/logging/logger", () => ({
   },
 }));
 
-// Mock Sentry
-const mockAddBreadcrumb = vi.fn();
-vi.mock("@sentry/node", () => ({
-  addBreadcrumb: mockAddBreadcrumb,
+// Mock Sentry - hoist to ensure it's applied before imports
+const { mockAddBreadcrumb } = vi.hoisted(() => ({
+  mockAddBreadcrumb: vi.fn(),
 }));
+// Mock @sentry/node - must be hoisted before any imports that use it
+vi.mock("@sentry/node", () => {
+  return {
+    addBreadcrumb: mockAddBreadcrumb,
+    default: {
+      addBreadcrumb: mockAddBreadcrumb,
+    },
+    __esModule: true,
+  };
+});
 
 describe("Observability Logging Helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Ensure the mock is applied by spying on the module after it's loaded
+    // This helps when require() is called inside functions
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sentry = require("@sentry/node");
+    if (sentry && sentry.addBreadcrumb && sentry.addBreadcrumb !== mockAddBreadcrumb) {
+      vi.spyOn(sentry, "addBreadcrumb").mockImplementation(mockAddBreadcrumb);
+    }
   });
 
   describe("logJobStatus", () => {

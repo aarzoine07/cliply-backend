@@ -6,7 +6,16 @@ import * as connectedAccountsService from '../../apps/web/src/lib/accounts/conne
 import * as orchestrationService from '../../apps/web/src/lib/viral/orchestrationService';
 import * as experimentService from '../../apps/web/src/lib/viral/experimentService';
 import * as supabase from '../../apps/web/src/lib/supabase';
+import * as rateLimit from '../../apps/web/src/lib/rate-limit';
 import { TikTokClient } from '../../apps/worker/src/services/tiktok/client';
+
+// Mock Supabase client creation for buildAuthContext
+const { mockSupabaseClientFactory } = vi.hoisted(() => ({
+  mockSupabaseClientFactory: vi.fn(),
+}));
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: mockSupabaseClientFactory,
+}));
 
 const toApiHandler = (handler: typeof publishTikTokRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
@@ -19,9 +28,34 @@ const mockClipId = '123e4567-e89b-12d3-a456-426614174000';
 const mockAccountId1 = '223e4567-e89b-12d3-a456-426614174001';
 const mockAccountId2 = '323e4567-e89b-12d3-a456-426614174002';
 const mockWorkspaceId = '11111111-1111-1111-1111-111111111111';
+const userId = '00000000-0000-0000-0000-000000000001';
 
-function createAdminClient() {
-  return {
+// Shared idempotency state across all admin mocks
+const idempotencyState: Record<string, { status: string; response_hash: string | null }> = {};
+
+function createAdminMock() {
+  // Create a stable insert function that can be spied on
+  const jobsData: Array<Record<string, unknown>> = [];
+  const jobsInsertFn = vi.fn().mockImplementation((rows: unknown) => {
+    const rowsArray = Array.isArray(rows) ? rows : [rows];
+    const withIds = rowsArray.map((row: any) => ({
+      id: `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      workspace_id: row.workspace_id,
+      kind: row.kind,
+      status: row.status,
+      payload: row.payload,
+      ...row,
+    }));
+    jobsData.push(...withIds);
+    return {
+      select: vi.fn().mockResolvedValue({
+        data: withIds,
+        error: null,
+      }),
+    };
+  });
+  
+  const admin = {
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'clips') {
         return {
@@ -36,23 +70,143 @@ function createAdminClient() {
             },
             error: null,
           }),
+          update: vi.fn().mockReturnThis(),
         };
       }
-      if (table === 'jobs') {
+      if (table === 'variant_posts') {
         return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockResolvedValue({
-              data: [{ id: 'job-123' }, { id: 'job-456' }],
-              error: null,
-            }),
-          }),
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockResolvedValue({
-            data: [{ id: 'job-123' }, { id: 'job-456' }],
+          in: vi.fn().mockReturnThis(),
+          insert: vi.fn().mockResolvedValue({
+            data: [],
             error: null,
           }),
         };
+      }
+      if (table === 'experiments' || table === 'experiment_variants') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: 'exp-e2e-123',
+              workspace_id: mockWorkspaceId,
+              experiment_id: 'exp-e2e-123',
+            },
+            error: null,
+          }),
+        };
+      }
+      if (table === 'jobs') {
+        const jobsSelectChain = {
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockResolvedValue({
+            data: jobsData.filter((j: any) => {
+              // This will be called with filters, but we'll filter in order()
+              return true;
+            }),
+            error: null,
+          }),
+        };
+        // Support chaining for jobs queries (multiple .eq() calls)
+        jobsSelectChain.eq = vi.fn().mockReturnValue(jobsSelectChain);
+        return {
+          insert: jobsInsertFn, // Use the stable function reference
+          select: vi.fn().mockReturnValue(jobsSelectChain),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockResolvedValue({
+            data: jobsData,
+            error: null,
+          }),
+        };
+      }
+      if (table === 'schedules') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: null,
+            error: null,
+          }),
+        };
+      }
+      if (table === 'idempotency') {
+        // Track idempotency state for tests - shared across calls
+        let lastKey: string | null = null;
+        
+        const idempotencyChain = {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockImplementation((column: string, value: unknown) => {
+            if (column === 'key') {
+              lastKey = value as string;
+            }
+            return idempotencyChain;
+          }),
+          maybeSingle: vi.fn().mockImplementation(async () => {
+            if (lastKey && idempotencyState[lastKey] && idempotencyState[lastKey].status === 'completed') {
+              return { data: idempotencyState[lastKey], error: null };
+            }
+            return { data: null, error: null };
+          }),
+          upsert: vi.fn().mockImplementation(async (data: unknown, options?: unknown) => {
+            const row = Array.isArray(data) ? data[0] : data;
+            const key = (row as { key: string }).key;
+            const status = (row as { status: string }).status;
+            const response_hash = (row as { response_hash?: string }).response_hash ?? null;
+            if (key) {
+              idempotencyState[key] = { status, response_hash };
+            }
+            return { data: null, error: null };
+          }),
+        };
+        return idempotencyChain;
+      }
+      if (table === 'workspaces') {
+        const chain = {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              id: mockWorkspaceId,
+              plan: 'pro',
+            },
+            error: null,
+          }),
+        };
+        chain.eq = vi.fn().mockReturnValue(chain);
+        chain.select = vi.fn().mockReturnValue(chain);
+        return chain;
+      }
+      if (table === 'workspace_members') {
+        const chain = {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { workspace_id: mockWorkspaceId },
+            error: null,
+          }),
+        };
+        chain.eq = vi.fn().mockReturnValue(chain);
+        chain.select = vi.fn().mockReturnValue(chain);
+        return chain;
+      }
+      if (table === 'subscriptions') {
+        const chain = {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              workspace_id: mockWorkspaceId,
+              plan_name: 'pro',
+              status: 'active',
+            },
+            error: null,
+          }),
+        };
+        chain.eq = vi.fn().mockReturnValue(chain);
+        chain.select = vi.fn().mockReturnValue(chain);
+        return chain;
       }
       return {
         select: vi.fn().mockReturnThis(),
@@ -60,20 +214,41 @@ function createAdminClient() {
         maybeSingle: vi.fn(),
       };
     }),
+    rpc: vi.fn().mockResolvedValue({
+      data: 60, // Return remaining tokens
+      error: null,
+    }),
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: userId } },
+        error: null,
+      }),
+    },
+    // Expose the jobs insert function for tests to spy on
+    _jobsInsert: jobsInsertFn,
   };
+  return admin;
 }
 
-function mockAdminClient(admin: ReturnType<typeof createAdminClient>) {
+function mockAdminClient(admin: ReturnType<typeof createAdminMock>) {
   vi.spyOn(supabase, 'getAdminClient').mockReturnValue(admin as any);
+  // Set the mock client that createClient will return for buildAuthContext
+  mockSupabaseClientFactory.mockReturnValue(admin);
 }
 
 describe('POST /api/publish/tiktok - E2E Flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockSupabaseClientFactory.mockClear();
+    // Mock rate limiting to always allow
+    vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+      allowed: true,
+      remaining: 60,
+    });
   });
 
   it('enqueues jobs and verifies TikTok client integration points', async () => {
-    const admin = createAdminClient();
+    const admin = createAdminMock();
     mockAdminClient(admin);
 
     vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
@@ -123,8 +298,9 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
     expect(res.body.data.jobIds).toHaveLength(2);
 
     // Verify jobs were created with correct payloads
-    expect(admin.from('jobs').insert).toHaveBeenCalledTimes(1);
-    const insertCall = (admin.from('jobs').insert as any).mock.calls[0][0];
+    // Use the stable insert function reference stored on the admin mock
+    expect((admin as any)._jobsInsert).toHaveBeenCalledTimes(1);
+    const insertCall = (admin as any)._jobsInsert.mock.calls[0][0];
     expect(insertCall).toHaveLength(2);
 
     // Verify first job payload
@@ -155,7 +331,7 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
   });
 
   it('creates variant_posts for experiment flow', async () => {
-    const admin = createAdminClient();
+    const admin = createAdminMock();
     mockAdminClient(admin);
 
     vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
@@ -178,8 +354,8 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
     const attachClipSpy = vi.spyOn(experimentService, 'attachClipToExperimentVariant').mockResolvedValue(undefined);
     const createVariantPostsSpy = vi.spyOn(orchestrationService, 'createVariantPostsForClip').mockResolvedValue(undefined);
 
-    const experimentId = 'exp-e2e-123';
-    const variantId = 'var-e2e-123';
+    const experimentId = '423e4567-e89b-12d3-a456-426614174000';
+    const variantId = '523e4567-e89b-12d3-a456-426614174000';
 
     const res = await supertestHandler(toApiHandler(publishTikTokRoute))
       .post('/')
@@ -220,7 +396,7 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
   });
 
   it('handles idempotency correctly', async () => {
-    const admin = createAdminClient();
+    const admin = createAdminMock();
     mockAdminClient(admin);
 
     vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([

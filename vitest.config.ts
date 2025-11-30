@@ -11,6 +11,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "apps/web/src"),
+      "@cliply/shared/readiness/backendReadiness": resolve(__dirname, "packages/shared/src/readiness/backendReadiness.ts"),
+      "@cliply/shared/observability/logging": resolve(__dirname, "packages/shared/src/observability/logging.ts"),
+      "@cliply/shared/env": resolve(__dirname, "packages/shared/src/env.ts"),
+      "@cliply/shared/billing/planResolution": resolve(__dirname, "packages/shared/billing/planResolution.ts"),
+      "@cliply/shared/billing/stripePlanMap": resolve(__dirname, "packages/shared/billing/stripePlanMap.ts"),
+      "@cliply/shared/logging/logger": resolve(__dirname, "packages/shared/logging/logger.ts"),
     },
   },
   test: {
@@ -18,6 +24,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     setupFiles: [resolve(__dirname, "./packages/shared/test/setup.ts")],
     env: {
+      NODE_ENV: "test",
       DOTENV_CONFIG_PATH: resolve(__dirname, "./.env.test"),
     },
     coverage: {

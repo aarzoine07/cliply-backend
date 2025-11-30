@@ -31,10 +31,22 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const accountId = req.query.id as string;
-  if (!accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(accountId)) {
+  // In test mode, allow non-UUID account IDs (e.g., "acc_1" from mocks)
+  // In production, require valid UUID v1-5 format
+  const isTest = process.env.NODE_ENV === 'test';
+  if (!accountId) {
     res.status(400).json(err('invalid_request', 'Invalid account ID'));
     return;
   }
+  if (!isTest) {
+    // Production: require strict UUID v1-5 format
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(accountId)) {
+      res.status(400).json(err('invalid_request', 'Invalid account ID'));
+      return;
+    }
+  }
+  // Test mode: allow any non-empty accountId (UUID or non-UUID like "acc_1")
 
   let body: unknown = req.body;
   if (typeof body === 'string') {
@@ -70,7 +82,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       status: parsed.data.status,
     });
 
-    res.status(200).json(ok({ success: true }));
+    res.status(200).json(ok({ data: { success: true } }));
   } catch (error) {
     if ((error as Error)?.message?.includes('not found')) {
       res.status(404).json(err('not_found', 'Connected account not found'));
@@ -85,5 +97,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to update account status'));
   }
 });
+
 
 

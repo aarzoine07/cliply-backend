@@ -37,7 +37,8 @@
     "./services/youtubeAuth": "./src/services/youtubeAuth.ts",
     "./services/tiktokAuth": "./src/services/tiktokAuth.ts",
     "./crypto/encryptedSecretEnvelope": "./src/crypto/encryptedSecretEnvelope.ts",
-    "./health/readyChecks": "./src/health/readyChecks.ts"
+    "./health/readyChecks": "./src/health/readyChecks.ts",
+    "./readiness/backendReadiness": "./src/readiness/backendReadiness.ts"
   },
   "main": "./src/index.ts",
   "scripts": {

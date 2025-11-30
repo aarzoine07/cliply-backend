@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as productService from '@/lib/dropshipping/productService';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { HttpError } from '@/lib/errors';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   let auth;

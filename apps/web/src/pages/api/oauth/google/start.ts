@@ -6,59 +6,73 @@ import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { buildYouTubeAuthUrl } from '@/lib/accounts/youtubeOauthService';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { getEnv, type Env } from '@cliply/shared/env';
 
-export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    res.status(405).json(err('method_not_allowed', 'Method not allowed'));
-    return;
-  }
+type GetEnv = typeof getEnv;
 
-  const started = Date.now();
+export function createGoogleOAuthStartHandler(deps?: { getEnv?: GetEnv }) {
+  const { getEnv: localGetEnv = getEnv } = deps ?? {};
 
-  try {
-    const auth = await buildAuthContext(req);
-    const userId = auth.userId || auth.user_id;
-    const workspaceId = auth.workspaceId || auth.workspace_id;
-
-    if (!workspaceId) {
-      res.status(400).json(err('invalid_request', 'workspace required'));
+  return handler(async (req: NextApiRequest, res: NextApiResponse) => {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      res.status(405).json(err('method_not_allowed', 'Method not allowed'));
       return;
     }
 
-    await checkRateLimit(userId, 'oauth:google:start');
+    const started = Date.now();
 
-    const redirectUri = req.query.redirect_uri as string | undefined;
-    const authUrl = buildYouTubeAuthUrl({
-      workspaceId,
-      userId,
-      redirectUri,
-    });
+    try {
+      const auth = await buildAuthContext(req);
+      const userId = auth.userId || auth.user_id;
+      const workspaceId = auth.workspaceId || auth.workspace_id;
 
-    logger.info('oauth_google_start', {
-      userId,
-      workspaceId,
-      durationMs: Date.now() - started,
-    });
+      if (!workspaceId) {
+        res.status(400).json(err('invalid_request', 'workspace required'));
+        return;
+      }
 
-    res.status(200).json(ok({ url: authUrl }));
-  } catch (error) {
-    // Handle auth errors
-    if (error && typeof error === 'object' && 'code' in error && 'status' in error) {
-      handleAuthError(error, res);
-      return;
+      await checkRateLimit(userId, 'oauth:google:start');
+      const redirectUri = req.query.redirect_uri as string | undefined;
+
+      // Use DI for buildYouTubeAuthUrl
+      const authUrl = buildYouTubeAuthUrl(
+        {
+          workspaceId,
+          userId,
+          redirectUri,
+        },
+        { getEnv: localGetEnv }
+      );
+
+      logger.info('oauth_google_start', {
+        userId,
+        workspaceId,
+        durationMs: Date.now() - started,
+      });
+
+      res.status(200).json({ ok: true, data: { url: authUrl } });
+    } catch (error) {
+      // Handle auth errors
+      if (error && typeof error === 'object' && 'code' in error && 'status' in error) {
+        handleAuthError(error, res);
+        return;
+      }
+
+      logger.error('oauth_google_start_failed', {
+        message: (error as Error)?.message ?? 'unknown',
+        durationMs: Date.now() - started,
+      });
+
+      if ((error as Error)?.message?.includes('not configured')) {
+        res.status(500).json(err('internal_error', 'YouTube OAuth not configured'));
+        return;
+      }
+
+      res.status(500).json(err('internal_error', 'Failed to start OAuth flow'));
     }
+  });
+}
 
-    logger.error('oauth_google_start_failed', {
-      message: (error as Error)?.message ?? 'unknown',
-      durationMs: Date.now() - started,
-    });
-
-    if ((error as Error)?.message?.includes('not configured')) {
-      res.status(500).json(err('internal_error', 'YouTube OAuth not configured'));
-      return;
-    }
-
-    res.status(500).json(err('internal_error', 'Failed to start OAuth flow'));
-  }
-});
+// Default export for Next.js (production + non-DI tests)
+export default createGoogleOAuthStartHandler();

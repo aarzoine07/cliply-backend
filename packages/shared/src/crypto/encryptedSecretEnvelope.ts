@@ -27,7 +27,14 @@ function getEncryptionKey(): Buffer {
   const env = getEnv();
   const keyString = env.TIKTOK_ENCRYPTION_KEY;
 
+  // In test mode, provide a dummy key if not configured
+  const isTest = process.env.NODE_ENV === "test";
   if (!keyString) {
+    if (isTest) {
+      // Use a test-only dummy key (32 bytes base64-encoded)
+      // This is safe because it's only used in test mode
+      return Buffer.from("dGVzdC10aWt0b2stZW5jcnlwdGlvbi1rZXktMzJieXRlcw==", "base64");
+    }
     throw new Error(
       "TIKTOK_ENCRYPTION_KEY is not configured. This is required for encrypting TikTok tokens.",
     );

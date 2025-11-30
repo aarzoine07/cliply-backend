@@ -8,6 +8,7 @@ vi.mock('@cliply/shared', () => ({
 const { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC } = await import('@cliply/shared');
 
 import { resetEnvForTesting } from '../../../apps/web/src/lib/env';
+import { clearEnvCache } from '@cliply/shared/env';
 import { getSignedUploadUrl } from '../../../apps/web/src/lib/storage';
 import * as supabase from '../../../apps/web/src/lib/supabase';
 
@@ -26,9 +27,11 @@ describe('storage.getSignedUploadUrl', () => {
     Object.assign(process.env, {
       NODE_ENV: 'test',
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key-min-20-chars',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-min-20-chars',
     });
+    // Clear cache after setting env vars so getEnv() reads fresh values
+    clearEnvCache();
   });
 
   afterEach(() => {

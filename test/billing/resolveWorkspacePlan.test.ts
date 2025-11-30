@@ -36,7 +36,8 @@ function createMockSupabase() {
                           : 0;
                         return options.ascending ? aTime - bTime : bTime - aTime;
                       });
-                      return { data: sorted.length > 0 ? [sorted[0]] : null, error: null };
+                      // maybeSingle returns a single object, not an array
+                      return { data: sorted.length > 0 ? sorted[0] : null, error: null };
                     }),
                   })),
                 })),

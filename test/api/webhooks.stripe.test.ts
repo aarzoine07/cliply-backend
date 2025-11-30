@@ -6,18 +6,21 @@ import {
   handleSubscriptionEvent,
   upsertBillingFromCheckout,
 } from "../../apps/web/src/lib/billing/stripeHandlers";
-import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
-
-// Mock dependencies
-vi.mock("@cliply/shared/billing/stripePlanMap", () => ({
-  getPlanFromPriceId: vi.fn((priceId: string) => {
+// Mock dependencies - hoist the mock to ensure it's applied before imports
+const { mockGetPlanFromPriceId } = vi.hoisted(() => {
+  const mockGetPlanFromPriceId = vi.fn((priceId: string) => {
     const map: Record<string, string> = {
       price_basic: "basic",
       price_pro: "pro",
       price_premium: "premium",
     };
     return map[priceId] ?? null;
-  }),
+  });
+  return { mockGetPlanFromPriceId };
+});
+
+vi.mock("@cliply/shared/billing/stripePlanMap", () => ({
+  getPlanFromPriceId: (...args: unknown[]) => mockGetPlanFromPriceId(...args),
 }));
 
 vi.mock("../../apps/web/src/lib/billing/workspacePlanService", () => ({
@@ -41,68 +44,99 @@ function createMockSupabase() {
     current_period_end: string | null;
   }> = [];
 
+  // Create a chainable query builder mock
+  const createQueryBuilder = () => {
+    const builder = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    return builder;
+  };
+
   return {
     subscriptions,
     from: vi.fn((table: string) => {
       if (table === "subscriptions") {
-        return {
-          select: vi.fn((columns: string) => ({
-            eq: vi.fn((column: string, value: unknown) => ({
-              in: vi.fn((column: string, values: unknown[]) => ({
-                order: vi.fn((column: string, options: { ascending: boolean }) => ({
-                  limit: vi.fn((n: number) => ({
-                    maybeSingle: vi.fn(async () => {
-                      const sub = subscriptions.find(
-                        (s) => s[column as keyof typeof subscriptions[0]] === value,
-                      );
-                      return { data: sub ?? null, error: null };
+        const queryBuilder = createQueryBuilder();
+        
+        // Override select to return a chainable builder
+        queryBuilder.select = vi.fn((columns: string) => {
+          const selectBuilder = {
+            eq: vi.fn((column: string, value: unknown) => {
+              const eqBuilder = {
+                in: vi.fn((column: string, values: unknown[]) => {
+                  const inBuilder = {
+                    order: vi.fn((column: string, options: { ascending: boolean }) => {
+                      const orderBuilder = {
+                        limit: vi.fn((n: number) => ({
+                          maybeSingle: vi.fn(async () => {
+                            const sub = subscriptions.find(
+                              (s) => s[column as keyof typeof subscriptions[0]] === value,
+                            );
+                            return { data: sub ?? null, error: null };
+                          }),
+                        })),
+                      };
+                      return orderBuilder;
                     }),
-                  })),
-                })),
-              })),
-              maybeSingle: vi.fn(async () => {
-                const sub = subscriptions.find(
-                  (s) => s[column as keyof typeof subscriptions[0]] === value,
-                );
-                return { data: sub ?? null, error: null };
-              }),
-            })),
-            upsert: vi.fn(async (data: unknown, options?: unknown) => {
-              const subData = data as typeof subscriptions[0];
-              const existingIndex = subscriptions.findIndex(
-                (s) =>
-                  s.workspace_id === subData.workspace_id &&
-                  s.stripe_subscription_id === subData.stripe_subscription_id,
-              );
-              if (existingIndex >= 0) {
-                subscriptions[existingIndex] = { ...subscriptions[existingIndex], ...subData };
-              } else {
-                subscriptions.push(subData);
-              }
-              return { error: null };
+                  };
+                  return inBuilder;
+                }),
+                maybeSingle: vi.fn(async () => {
+                  const sub = subscriptions.find(
+                    (s) => s[column as keyof typeof subscriptions[0]] === value,
+                  );
+                  return { data: sub ?? null, error: null };
+                }),
+              };
+              return eqBuilder;
             }),
-            update: vi.fn((data: unknown) => ({
-              eq: vi.fn(async (column: string, value: unknown) => {
-                const index = subscriptions.findIndex(
-                  (s) => s[column as keyof typeof subscriptions[0]] === value,
-                );
-                if (index >= 0) {
-                  subscriptions[index] = { ...subscriptions[index], ...(data as object) };
-                }
-                return { error: null };
-              }),
-            })),
-            delete: vi.fn(() => ({
-              eq: vi.fn(async (column: string, value: unknown) => {
-                const index = subscriptions.findIndex(
-                  (s) => s[column as keyof typeof subscriptions[0]] === value,
-                );
-                if (index >= 0) {
-                  subscriptions.splice(index, 1);
-                }
-                return { error: null };
-              }),
-            })),
+          };
+          return selectBuilder;
+        });
+
+        return {
+          ...queryBuilder,
+          upsert: vi.fn(async (data: unknown, options?: unknown) => {
+            const subData = data as typeof subscriptions[0];
+            const existingIndex = subscriptions.findIndex(
+              (s) =>
+                s.workspace_id === subData.workspace_id &&
+                s.stripe_subscription_id === subData.stripe_subscription_id,
+            );
+            if (existingIndex >= 0) {
+              subscriptions[existingIndex] = { ...subscriptions[existingIndex], ...subData };
+            } else {
+              subscriptions.push(subData);
+            }
+            return { data: null, error: null };
+          }),
+          update: vi.fn((data: unknown) => ({
+            eq: vi.fn(async (column: string, value: unknown) => {
+              const index = subscriptions.findIndex(
+                (s) => s[column as keyof typeof subscriptions[0]] === value,
+              );
+              if (index >= 0) {
+                subscriptions[index] = { ...subscriptions[index], ...(data as object) };
+              }
+              return { data: null, error: null };
+            }),
+          })),
+          delete: vi.fn(() => ({
+            eq: vi.fn(async (column: string, value: unknown) => {
+              const index = subscriptions.findIndex(
+                (s) => s[column as keyof typeof subscriptions[0]] === value,
+              );
+              if (index >= 0) {
+                subscriptions.splice(index, 1);
+              }
+              return { data: null, error: null };
+            }),
           })),
         };
       }
