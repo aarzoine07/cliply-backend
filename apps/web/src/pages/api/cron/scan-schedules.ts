@@ -51,13 +51,16 @@ function isAuthorizedCronRequest(req: NextApiRequest): boolean {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const startTime = Date.now();
 
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
+  // Allow both GET (Vercel Cron default) and POST (manual/testing)
+  const method = req.method ?? "GET";
+  if (method !== "GET" && method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
   }
 
   if (!isAuthorizedCronRequest(req)) {
     logger.warn("cron_scan_schedules_unauthorized", {
+      method,
       headers: Object.keys(req.headers),
     });
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
