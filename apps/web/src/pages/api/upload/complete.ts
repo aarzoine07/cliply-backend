@@ -7,12 +7,27 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { getAdminClient } from '@/lib/supabase';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { withPlanGate } from '@/lib/billing/withPlanGate';
+import { applySecurityAndCors } from '@/lib/securityHeaders';
 
 const CompleteBody = z.object({ projectId: z.string().uuid() }).strict();
+
+// Configure body size limit for this endpoint (1MB for JSON)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
   logger.info('upload_complete_start', { method: req.method ?? 'GET' });
+
+  // Apply security headers and handle CORS
+  if (applySecurityAndCors(req, res)) {
+    return; // OPTIONS preflight handled
+  }
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');

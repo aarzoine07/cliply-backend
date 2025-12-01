@@ -3,7 +3,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { HttpError } from '@/lib/errors';
 import { handler, ok, err } from '@/lib/http';
-import { withIdempotency, keyFromRequest } from '@/lib/idempotency';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getAdminClient } from '@/lib/supabase';
@@ -13,10 +12,26 @@ import * as orchestrationService from '@/lib/viral/orchestrationService';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { withPlanGate } from '@/lib/billing/withPlanGate';
 import { checkPlanAccess } from '@cliply/shared/billing/planGate';
+import { runIdempotent, extractIdempotencyKey } from '@cliply/shared/idempotency/idempotencyHelper';
+import { applySecurityAndCors } from '@/lib/securityHeaders';
+
+// Configure body size limit for this endpoint (2MB for JSON - may include longer descriptions)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '2mb',
+    },
+  },
+};
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
   logger.info('publish_youtube_start', { method: req.method ?? 'GET' });
+
+  // Apply security headers and handle CORS
+  if (applySecurityAndCors(req, res)) {
+    return; // OPTIONS preflight handled
+  }
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -40,6 +55,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
     const rate = await checkRateLimit(userId, 'publish:youtube');
     if (!rate.allowed) {
+      logger.warn('publish_youtube_rate_limited', {
+        userId,
+        workspaceId,
+        remaining: rate.remaining,
+      });
       res.status(429).json(err('too_many_requests', 'Rate limited'));
       return;
     }
@@ -238,25 +258,62 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return { jobIds: jobInserts.data.map((j) => j.id), accountCount: resolvedAccountIds.length } as const;
   };
 
-  // In test mode, bypass idempotency to ensure jobs.insert is called
-  // Check for test environment via NODE_ENV or VITEST env var
-  const isTestMode = process.env.NODE_ENV === 'test' || process.env.VITEST !== undefined;
+  // Check for Idempotency-Key header
+  const idempotencyKey = extractIdempotencyKey(req);
   let responsePayload: Record<string, unknown>;
   let isIdempotent = false;
 
-  if (isTestMode) {
-    // Test mode: execute directly without idempotency
-    responsePayload = await runPublish();
+  if (idempotencyKey) {
+    // Use idempotency when header is present
+    try {
+      const result = await runIdempotent(
+        {
+          supabaseAdminClient: admin,
+          workspaceId,
+          userId,
+          key: idempotencyKey,
+          endpoint: 'publish/youtube',
+        },
+        parsed.data,
+        runPublish,
+      );
+
+      if (result.reused) {
+        // Reconstruct response from database
+        responsePayload = await resolveExistingPublishResult(
+          admin,
+          workspaceId,
+          parsed.data.clipId,
+          parsed.data.scheduleAt ?? null,
+        );
+        isIdempotent = true;
+      } else {
+        responsePayload = result.response;
+        isIdempotent = false;
+      }
+    } catch (error) {
+      // Handle idempotency errors (conflicts, pending, etc.)
+      const errorMessage = (error as Error)?.message ?? 'Unknown error';
+      if (errorMessage.includes('conflict')) {
+        res.status(400).json(err('idempotency_conflict', errorMessage));
+        return;
+      } else if (errorMessage.includes('still processing')) {
+        res.status(409).json(err('request_pending', errorMessage));
+        return;
+      }
+      // For other errors, log and continue without idempotency
+      logger.warn('publish_youtube_idempotency_error', {
+        workspaceId,
+        error: errorMessage,
+      });
+      // Fall through to execute without idempotency
+      responsePayload = await runPublish();
+      isIdempotent = false;
+    }
   } else {
-    // Production mode: use idempotency
-    const idempotencyKey = keyFromRequest({ method: req.method, url: '/api/publish/youtube', body: parsed.data });
-    const result = await withIdempotency(idempotencyKey, runPublish);
-    
-    // If idempotency returned a fresh result, use it; otherwise resolve existing
-    responsePayload = result.fresh
-      ? result.value
-      : await resolveExistingPublishResult(admin, workspaceId, parsed.data.clipId, parsed.data.scheduleAt ?? null);
-    isIdempotent = !result.fresh;
+    // No idempotency header - execute normally (backwards compatible)
+    responsePayload = await runPublish();
+    isIdempotent = false;
   }
 
   logger.info('publish_youtube_success', {

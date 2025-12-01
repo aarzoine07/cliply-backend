@@ -9,6 +9,7 @@ import {
   type YouTubeChannelInfo,
   type YouTubeTokenData,
 } from "@cliply/shared/services/youtubeAuth";
+import { encryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
 
 import { logger } from "../logger";
 import * as connectedAccountsService from "./connectedAccountsService";
@@ -51,6 +52,12 @@ export async function completeYouTubeOAuthFlow(params: {
   // Fetch channel info
   const channelInfo = await fetchYouTubeChannelForToken(tokenData.accessToken);
 
+  // Encrypt tokens before storing (same pattern as TikTok)
+  const encryptedAccessToken = encryptSecret(tokenData.accessToken, { purpose: "youtube_token" });
+  const encryptedRefreshToken = tokenData.refreshToken
+    ? encryptSecret(tokenData.refreshToken, { purpose: "youtube_token" })
+    : undefined;
+
   // Upsert connected account
   const account = await connectedAccountsService.createOrUpdateConnectedAccount(
     {
@@ -60,8 +67,8 @@ export async function completeYouTubeOAuthFlow(params: {
       provider: "google",
       external_id: channelInfo.channelId,
       display_name: channelInfo.channelTitle,
-      access_token: tokenData.accessToken,
-      refresh_token: tokenData.refreshToken,
+      access_token: encryptedAccessToken,
+      refresh_token: encryptedRefreshToken,
       scopes: tokenData.scope ? tokenData.scope.split(" ") : [],
       expires_at: tokenData.expiresAt,
     },

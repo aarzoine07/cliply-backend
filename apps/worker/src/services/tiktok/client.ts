@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { getEnv } from '@cliply/shared/env';
+import { withRetry, ServiceTemporarilyUnavailableError } from '@cliply/shared/resilience/externalServiceResilience';
+import { tiktokCircuitBreaker } from '@cliply/shared/resilience/serviceCircuitBreakers';
 
 export interface UploadVideoParams {
   filePath: string;
@@ -65,22 +67,97 @@ export class TikTokClient {
    * 1. Initialize upload (get upload URL)
    * 2. Upload video file to the upload URL
    * 3. Publish video
+   * 
+   * Uses retry logic and circuit breaker for resilience.
    */
   async uploadVideo(params: UploadVideoParams): Promise<UploadVideoResult> {
-    // Step 1: Initialize upload
-    const initResult = await this.initUpload(params);
-    const { upload_url, publish_id } = initResult;
+    return withRetry(
+      'tiktok.uploadVideo',
+      async (attemptNumber) => {
+        // Check circuit breaker
+        if (tiktokCircuitBreaker.isOpen()) {
+          throw new ServiceTemporarilyUnavailableError('TikTok');
+        }
 
-    // Step 2: Upload video file
-    await this.uploadFile(upload_url, params.filePath);
+        try {
+          // Step 1: Initialize upload
+          const initResult = await this.initUpload(params);
+          const { upload_url, publish_id } = initResult;
 
-    // Step 3: Publish video
-    const publishResult = await this.publishVideo(publish_id, params);
+          // Step 2: Upload video file
+          await this.uploadFile(upload_url, params.filePath);
 
-    return {
-      videoId: publishResult.video_id,
-      rawResponse: publishResult,
-    };
+          // Step 3: Publish video
+          const publishResult = await this.publishVideo(publish_id, params);
+
+          // Record success
+          tiktokCircuitBreaker.recordSuccess();
+
+          return {
+            videoId: publishResult.video_id,
+            rawResponse: publishResult,
+          };
+        } catch (error) {
+          // Record failure if it's a retryable error
+          if (this.shouldCountAsFailure(error)) {
+            tiktokCircuitBreaker.recordFailure();
+          }
+          throw error;
+        }
+      },
+      (error) => this.shouldRetryForTikTok(error),
+      {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        maxDelayMs: 10000,
+      },
+    );
+  }
+
+  /**
+   * Determine if an error should be retried for TikTok
+   */
+  private shouldRetryForTikTok(error: unknown): boolean {
+    // Network errors and timeouts
+    if (error instanceof Error) {
+      if (error.name === 'AbortError' || error.message.includes('timeout')) {
+        return true;
+      }
+      if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+        return true;
+      }
+    }
+
+    // TikTokApiError with retryable flag
+    if (error instanceof TikTokApiError) {
+      return error.retryable;
+    }
+
+    // Default: don't retry unknown errors
+    return false;
+  }
+
+  /**
+   * Determine if an error should count as a failure for the circuit breaker
+   */
+  private shouldCountAsFailure(error: unknown): boolean {
+    // Count network errors, 5xx, and 429 as failures
+    if (error instanceof TikTokApiError) {
+      return error.status >= 500 || error.status === 429 || error.retryable;
+    }
+
+    // Count network errors as failures
+    if (error instanceof Error) {
+      if (error.name === 'AbortError' || error.message.includes('timeout')) {
+        return true;
+      }
+      if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+        return true;
+      }
+    }
+
+    // Don't count 4xx client errors as circuit breaker failures
+    return false;
   }
 
   /**

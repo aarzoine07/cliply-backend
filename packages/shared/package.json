@@ -38,7 +38,10 @@
     "./services/tiktokAuth": "./src/services/tiktokAuth.ts",
     "./crypto/encryptedSecretEnvelope": "./src/crypto/encryptedSecretEnvelope.ts",
     "./health/readyChecks": "./src/health/readyChecks.ts",
-    "./readiness/backendReadiness": "./src/readiness/backendReadiness.ts"
+    "./readiness/backendReadiness": "./src/readiness/backendReadiness.ts",
+    "./resilience/externalServiceResilience": "./src/resilience/externalServiceResilience.ts",
+    "./resilience/serviceCircuitBreakers": "./src/resilience/serviceCircuitBreakers.ts",
+    "./idempotency/idempotencyHelper": "./idempotency/idempotencyHelper.ts"
   },
   "main": "./src/index.ts",
   "scripts": {

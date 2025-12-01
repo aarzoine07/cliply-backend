@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getEnv } from "@cliply/shared/env";
+import { encryptSecret, decryptSecret } from "../crypto/encryptedSecretEnvelope";
 
 // Simple logger for YouTube auth service
 const logger = {
@@ -277,17 +278,24 @@ export async function getFreshYouTubeAccessToken(
     throw new Error(`No access token for account: ${accountId}`);
   }
 
+  // Decrypt tokens
+  const accessToken = decryptSecret(account.access_token_encrypted_ref, { purpose: "youtube_token" });
+  const refreshToken = account.refresh_token_encrypted_ref
+    ? decryptSecret(account.refresh_token_encrypted_ref, { purpose: "youtube_token" })
+    : null;
+
   // Check if token is expired or expiring soon (within 5 minutes)
   const now = new Date();
   const expiresAt = account.expires_at ? new Date(account.expires_at) : null;
   const needsRefresh = !expiresAt || expiresAt.getTime() < now.getTime() + 5 * 60 * 1000;
 
   if (!needsRefresh) {
-    return account.access_token_encrypted_ref; // Return existing token
+    // Token is still valid, return decrypted token
+    return accessToken;
   }
 
   // Need to refresh
-  if (!account.refresh_token_encrypted_ref) {
+  if (!refreshToken) {
     throw new Error(`No refresh token for account: ${accountId}`);
   }
 
@@ -296,13 +304,16 @@ export async function getFreshYouTubeAccessToken(
     expiresAt: account.expires_at,
   });
 
-  const refreshed = await refreshYouTubeAccessToken(account.refresh_token_encrypted_ref);
+  const refreshed = await refreshYouTubeAccessToken(refreshToken);
 
-  // Update account with new token
+  // Encrypt new token before storing
+  const encryptedAccessToken = encryptSecret(refreshed.accessToken, { purpose: "youtube_token" });
+
+  // Update account with new encrypted token
   const { error: updateError } = await ctx.supabase
     .from("connected_accounts")
     .update({
-      access_token_encrypted_ref: refreshed.accessToken,
+      access_token_encrypted_ref: encryptedAccessToken,
       expires_at: refreshed.expiresAt,
       updated_at: new Date().toISOString(),
     })
@@ -321,6 +332,7 @@ export async function getFreshYouTubeAccessToken(
     newExpiresAt: refreshed.expiresAt,
   });
 
+  // Return decrypted token for use
   return refreshed.accessToken;
 }
 

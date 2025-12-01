@@ -16,6 +16,11 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "test";
 }
 
+// Set STRIPE_SECRET_KEY for tests (required by billing/checkout route)
+if (!process.env.STRIPE_SECRET_KEY) {
+  process.env.STRIPE_SECRET_KEY = "sk_test_mock_key_for_tests";
+}
+
 console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
 

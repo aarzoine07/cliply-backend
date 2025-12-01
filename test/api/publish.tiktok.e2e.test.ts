@@ -136,28 +136,80 @@ function createAdminMock() {
         let lastKey: string | null = null;
         
         const idempotencyChain = {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockImplementation((column: string, value: unknown) => {
-            if (column === 'key') {
-              lastKey = value as string;
-            }
-            return idempotencyChain;
+          select: vi.fn((columns?: string) => {
+            const selectChain = {
+              eq: vi.fn().mockImplementation((column: string, value: unknown) => {
+                if (column === 'key') {
+                  lastKey = value as string;
+                }
+                return {
+                  maybeSingle: vi.fn().mockImplementation(async () => {
+                    if (lastKey && idempotencyState[lastKey]) {
+                      const record = idempotencyState[lastKey];
+                      // Return only selected columns if specified
+                      if (columns) {
+                        const selected: any = {};
+                        columns.split(",").forEach((col) => {
+                          const trimmed = col.trim();
+                          if (record[trimmed as keyof typeof record] !== undefined) {
+                            selected[trimmed] = record[trimmed as keyof typeof record];
+                          }
+                        });
+                        return { data: selected, error: null };
+                      }
+                      return { data: record, error: null };
+                    }
+                    return { data: null, error: { code: "PGRST116" } };
+                  }),
+                };
+              }),
+            };
+            return selectChain;
           }),
-          maybeSingle: vi.fn().mockImplementation(async () => {
-            if (lastKey && idempotencyState[lastKey] && idempotencyState[lastKey].status === 'completed') {
-              return { data: idempotencyState[lastKey], error: null };
-            }
-            return { data: null, error: null };
-          }),
-          upsert: vi.fn().mockImplementation(async (data: unknown, options?: unknown) => {
+          insert: vi.fn().mockImplementation((data: unknown) => {
             const row = Array.isArray(data) ? data[0] : data;
             const key = (row as { key: string }).key;
             const status = (row as { status: string }).status;
-            const response_hash = (row as { response_hash?: string }).response_hash ?? null;
+            const request_hash = (row as { request_hash?: string }).request_hash ?? null;
             if (key) {
-              idempotencyState[key] = { status, response_hash };
+              idempotencyState[key] = { 
+                key,
+                user_id: (row as { user_id?: string }).user_id ?? '',
+                status, 
+                request_hash,
+                response_hash: null,
+                created_at: new Date().toISOString(),
+                expires_at: (row as { expires_at?: string }).expires_at ?? null,
+              };
             }
-            return { data: null, error: null };
+            return {
+              select: vi.fn(() => ({
+                single: vi.fn().mockResolvedValue({
+                  data: idempotencyState[key],
+                  error: null,
+                }),
+              })),
+            };
+          }),
+          update: vi.fn().mockImplementation((data: unknown) => {
+            return {
+              eq: vi.fn().mockImplementation((column: string, value: unknown) => {
+                if (column === 'key' && idempotencyState[value as string]) {
+                  idempotencyState[value as string] = {
+                    ...idempotencyState[value as string],
+                    ...(data as Record<string, unknown>),
+                  };
+                }
+                return {
+                  select: vi.fn(() => ({
+                    single: vi.fn().mockResolvedValue({
+                      data: idempotencyState[value as string] ?? null,
+                      error: null,
+                    }),
+                  })),
+                };
+              }),
+            };
           }),
         };
         return idempotencyChain;
@@ -416,33 +468,43 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
       },
     ]);
 
-    // First call - should create job
+    const idempotencyKey = 'test-idempotency-key-123';
+    const payload = {
+      clipId: mockClipId,
+      connectedAccountIds: [mockAccountId1],
+      caption: 'First call',
+    };
+
+    // First call with Idempotency-Key header - should create job
     const res1 = await supertestHandler(toApiHandler(publishTikTokRoute))
       .post('/')
-      .set(commonHeaders)
-      .send({
-        clipId: mockClipId,
-        connectedAccountIds: [mockAccountId1],
-        caption: 'First call',
-      });
+      .set({
+        ...commonHeaders,
+        'Idempotency-Key': idempotencyKey,
+      })
+      .send(payload);
 
     expect(res1.status).toBe(200);
     expect(res1.body.ok).toBe(true);
     expect(res1.body.data.idempotent).toBe(false);
 
-    // Second call with same payload - should return existing jobs
+    // Clear jobs insert call count
+    (admin as any)._jobsInsert.mockClear();
+
+    // Second call with same Idempotency-Key and same payload - should reuse
     const res2 = await supertestHandler(toApiHandler(publishTikTokRoute))
       .post('/')
-      .set(commonHeaders)
-      .send({
-        clipId: mockClipId,
-        connectedAccountIds: [mockAccountId1],
-        caption: 'First call', // Same payload
-      });
+      .set({
+        ...commonHeaders,
+        'Idempotency-Key': idempotencyKey,
+      })
+      .send(payload); // Same payload
 
     expect(res2.status).toBe(200);
     expect(res2.body.ok).toBe(true);
     expect(res2.body.data.idempotent).toBe(true);
+    // Verify no new jobs were created
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
   });
 });
 

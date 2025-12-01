@@ -14,10 +14,25 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { getSignedUploadUrl } from '@/lib/storage';
 import { getAdminClient } from '@/lib/supabase';
 import { withPlanGate } from '@/lib/billing/withPlanGate';
+import { applySecurityAndCors } from '@/lib/securityHeaders';
+
+// Configure body size limit for this endpoint (1MB for JSON metadata only, not the actual file)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
   logger.info('upload_init_start', { method: req.method ?? 'GET' });
+
+  // Apply security headers and handle CORS
+  if (applySecurityAndCors(req, res)) {
+    return; // OPTIONS preflight handled
+  }
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');

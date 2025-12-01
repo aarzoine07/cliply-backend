@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { getUsageSummary } from '@cliply/shared/billing/usageTracker';
+import { calculateUsageAlerts, getPreviousAlertLevel } from '@cliply/shared/billing/usageAlerts';
 
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
@@ -31,6 +32,49 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   try {
     const summary = await getUsageSummary(workspaceId);
 
+    // Calculate usage alerts
+    const alerts = calculateUsageAlerts(summary);
+
+    // Track previous alert levels to detect threshold crossings
+    // This is a simple in-memory cache per request cycle.
+    // In production, you might use Redis or a database to persist this across requests.
+    // For now, we'll log on every call if a metric is in warning/exceeded state.
+    // The logging system's sampling will help prevent spam.
+    const previousAlerts = (req as any).__previousUsageAlerts as typeof alerts | null;
+
+    // Log threshold crossings (idempotent-ish: log when level changes or when first detected)
+    for (const metricStatus of alerts.metrics) {
+      const previousLevel = previousAlerts
+        ? getPreviousAlertLevel(metricStatus.metric, previousAlerts)
+        : null;
+
+      // Log when crossing into warning or exceeded state
+      if (metricStatus.level === 'warning' && previousLevel !== 'warning') {
+        logger.warn('workspace_usage_warning', {
+          workspaceId,
+          metric: metricStatus.metric,
+          used: metricStatus.used,
+          limit: metricStatus.limit,
+          percent: metricStatus.percent,
+          plan: summary.planName,
+        });
+      } else if (metricStatus.level === 'exceeded' && previousLevel !== 'exceeded') {
+        logger.warn('workspace_usage_exceeded', {
+          workspaceId,
+          metric: metricStatus.metric,
+          used: metricStatus.used,
+          limit: metricStatus.limit,
+          percent: metricStatus.percent,
+          plan: summary.planName,
+        });
+      }
+    }
+
+    // Store current alerts for next request (simple in-memory approach)
+    // Note: This won't persist across requests, so logging may happen on each call.
+    // This is acceptable as the logging system has sampling to prevent spam.
+    (req as any).__previousUsageAlerts = alerts;
+
     // Transform to API response format
     const response = {
       plan: summary.planName,
@@ -47,6 +91,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         },
         {} as Record<string, { used: number; limit: number | null }>,
       ),
+      alerts: {
+        metrics: alerts.metrics.map((m) => ({
+          metric: m.metric,
+          used: m.used,
+          limit: m.limit,
+          percent: m.percent,
+          level: m.level,
+        })),
+        hasWarning: alerts.hasWarning,
+        hasExceeded: alerts.hasExceeded,
+      },
     };
 
     logger.info('usage_summary_fetched', {

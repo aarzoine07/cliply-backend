@@ -463,4 +463,254 @@ describe('POST /api/publish/youtube', () => {
       expect.any(Object),
     );
   });
+
+  it('returns 429 when rate limit is exceeded', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    // Mock rate limiting to return not allowed
+    vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+    });
+
+    const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        visibility: 'public',
+      });
+
+    expect(res.status).toBe(429);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('too_many_requests');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects account IDs from different workspace', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    const otherWorkspaceAccountId = '99999999-9999-4999-8999-999999999999';
+
+    // Mock getConnectedAccountsForPublish to throw error when account doesn't belong to workspace
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockRejectedValue(
+      new Error(`Some connected accounts not found or inactive: ${otherWorkspaceAccountId}`),
+    );
+
+    const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        visibility: 'public',
+        connectedAccountIds: [otherWorkspaceAccountId],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('invalid_request');
+    expect(res.body.message).toContain('not found or inactive');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects account IDs with wrong platform', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    const tiktokAccountId = '88888888-8888-4888-8888-888888888888';
+
+    // Mock getConnectedAccountsForPublish to return empty array (account exists but wrong platform)
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockRejectedValue(
+      new Error(`Some connected accounts not found or inactive: ${tiktokAccountId}`),
+    );
+
+    const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        visibility: 'public',
+        connectedAccountIds: [tiktokAccountId],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('invalid_request');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('only uses accounts from current workspace for default selection', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    // Mock getConnectedAccountsForPublish to return only accounts from current workspace
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+      {
+        id: mockAccountId1,
+        workspace_id: mockWorkspaceId, // Same workspace
+        platform: 'youtube',
+        provider: 'youtube',
+        external_id: 'channel-1',
+        display_name: 'Channel 1',
+        handle: null,
+        status: 'active',
+        scopes: null,
+        expires_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        visibility: 'public',
+        // No connectedAccountIds - should use defaults
+      });
+
+    expect(res.status).toBe(200);
+    // Verify getConnectedAccountsForPublish was called with correct workspace
+    expect(connectedAccountsService.getConnectedAccountsForPublish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: mockWorkspaceId,
+        platform: 'youtube',
+      }),
+      expect.any(Object),
+    );
+    // Verify only accounts from current workspace were used
+    const insertCall = (admin as any)._jobsInsert.mock.calls[0][0];
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
+  });
+
+  describe('Request validation', () => {
+    it('returns 400 when clipId is missing', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+        .post('/')
+        .set(commonHeaders)
+        .send({
+          visibility: 'public',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+      expect(res.body.code || res.body.error?.code).toBe('invalid_request');
+    });
+
+    it('returns 400 when clipId is not a valid UUID', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+        .post('/')
+        .set(commonHeaders)
+        .send({
+          clipId: 'not-a-uuid',
+          visibility: 'public',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+
+    it('returns 400 when visibility is invalid', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+        .post('/')
+        .set(commonHeaders)
+        .send({
+          clipId: mockClipId,
+          visibility: 'invalid-visibility',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+
+    it('returns 400 when descriptionOverride exceeds max length', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      const longDescription = 'a'.repeat(5001); // Exceeds 5000 char limit
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+        .post('/')
+        .set(commonHeaders)
+        .send({
+          clipId: mockClipId,
+          visibility: 'public',
+          descriptionOverride: longDescription,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+  });
+
+  describe('Security headers', () => {
+    it('returns security headers in response', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+        {
+          id: mockAccountId1,
+          workspace_id: mockWorkspaceId,
+          platform: 'youtube',
+          provider: 'youtube',
+          external_id: 'channel-1',
+          display_name: 'Channel 1',
+          handle: null,
+          status: 'active',
+          scopes: null,
+          expires_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
+        .post('/')
+        .set(commonHeaders)
+        .send({
+          clipId: mockClipId,
+          visibility: 'public',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    });
+
+    it('handles OPTIONS preflight request', async () => {
+      const admin = createAdminMock();
+      mockAdminClient(admin);
+
+      const res = await supertestHandler(toApiHandler(publishYouTubeRoute), 'options')
+        .options('/')
+        .set({
+          ...commonHeaders,
+          origin: 'http://localhost:3000',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+      expect(res.headers['access-control-allow-methods']).toContain('POST');
+    });
+  });
 });

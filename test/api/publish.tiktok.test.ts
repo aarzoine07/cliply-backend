@@ -456,4 +456,133 @@ describe('POST /api/publish/tiktok', () => {
       expect.any(Object),
     );
   });
+
+  it('returns 429 when rate limit is exceeded', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    // Mock rate limiting to return not allowed
+    vi.spyOn(rateLimit, 'checkRateLimit').mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+    });
+
+    const res = await supertestHandler(toApiHandler(publishTikTokRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        connectedAccountId: mockAccountId1,
+        caption: 'Test caption',
+      });
+
+    expect(res.status).toBe(429);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('too_many_requests');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects account IDs from different workspace', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    const otherWorkspaceAccountId = '99999999-9999-4999-8999-999999999999';
+
+    // Mock getConnectedAccountsForPublish to throw error when account doesn't belong to workspace
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockRejectedValue(
+      new Error(`Some connected accounts not found or inactive: ${otherWorkspaceAccountId}`),
+    );
+
+    const res = await supertestHandler(toApiHandler(publishTikTokRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        connectedAccountIds: [otherWorkspaceAccountId],
+        caption: 'Test caption',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('invalid_request');
+    expect(res.body.message).toContain('not found or inactive');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects account IDs with wrong platform', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    const youtubeAccountId = '88888888-8888-4888-8888-888888888888';
+
+    // Mock getConnectedAccountsForPublish to return empty array (account exists but wrong platform)
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockRejectedValue(
+      new Error(`Some connected accounts not found or inactive: ${youtubeAccountId}`),
+    );
+
+    const res = await supertestHandler(toApiHandler(publishTikTokRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        connectedAccountIds: [youtubeAccountId],
+        caption: 'Test caption',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('invalid_request');
+
+    // Verify no job was enqueued
+    expect((admin as any)._jobsInsert).not.toHaveBeenCalled();
+  });
+
+  it('only uses accounts from current workspace for default selection', async () => {
+    const admin = createAdminMock();
+    mockAdminClient(admin);
+
+    // Mock getConnectedAccountsForPublish to return only accounts from current workspace
+    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+      {
+        id: mockAccountId1,
+        workspace_id: mockWorkspaceId, // Same workspace
+        platform: 'tiktok',
+        provider: 'tiktok',
+        external_id: 'tiktok-1',
+        display_name: 'TikTok Account 1',
+        handle: null,
+        status: 'active',
+        scopes: null,
+        expires_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    const res = await supertestHandler(toApiHandler(publishTikTokRoute))
+      .post('/')
+      .set(commonHeaders)
+      .send({
+        clipId: mockClipId,
+        connectedAccountId: mockAccountId1,
+        caption: 'Test caption',
+      });
+
+    expect(res.status).toBe(200);
+    // Verify getConnectedAccountsForPublish was called with correct workspace
+    expect(connectedAccountsService.getConnectedAccountsForPublish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: mockWorkspaceId,
+        platform: 'tiktok',
+      }),
+      expect.any(Object),
+    );
+    // Verify only accounts from current workspace were used
+    const insertCall = (admin as any)._jobsInsert.mock.calls[0][0];
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
+  });
 });

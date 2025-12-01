@@ -28,12 +28,12 @@ export type VariantPostStatus = z.infer<typeof VariantPostStatus>;
  * Variant configuration (flexible JSONB structure)
  */
 export const ViralVariantConfig = z.object({
-  caption: z.string().optional(),
-  hashtags: z.array(z.string()).optional(),
-  sound: z.string().optional(),
-  thumbnail_style: z.string().optional(),
-  thumbnail_template: z.string().optional(),
-  posting_schedule_hint: z.string().optional(),
+  caption: z.string().max(5000).optional(), // Reasonable caption length
+  hashtags: z.array(z.string().max(100)).max(30).optional(), // Limit hashtag count and length
+  sound: z.string().max(255).optional(),
+  thumbnail_style: z.string().max(100).optional(),
+  thumbnail_template: z.string().max(255).optional(),
+  posting_schedule_hint: z.string().max(255).optional(),
 }).passthrough(); // Allow additional fields
 export type ViralVariantConfig = z.infer<typeof ViralVariantConfig>;
 
@@ -112,15 +112,15 @@ export type ViralVariantMetrics = z.infer<typeof ViralVariantMetrics>;
  * Create experiment input schema
  */
 export const CreateExperimentInput = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(255), // Reasonable name length limit
   goal_metric: ViralGoalMetric.default("views"),
   project_id: z.string().uuid().optional(),
   variants: z.array(
     z.object({
-      label: z.string().min(1),
+      label: z.string().min(1).max(100), // Reasonable label length limit
       config: ViralVariantConfig,
     }).strict()
-  ).min(1),
+  ).min(1).max(50), // Reasonable variant count limit
 }).strict();
 export type CreateExperimentInput = z.infer<typeof CreateExperimentInput>;
 

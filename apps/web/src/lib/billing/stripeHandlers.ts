@@ -5,9 +5,55 @@ import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { logStripeEvent } from "@cliply/shared/observability/logging";
 import * as workspacePlanService from "./workspacePlanService";
+import { withRetry } from "@cliply/shared/resilience/externalServiceResilience";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Determine if a Stripe API call error should be retried
+ * Only retry on network errors and clearly transient Stripe errors (5xx)
+ * Do NOT retry on validation errors or auth errors
+ */
+function shouldRetryStripeCall(error: unknown): boolean {
+  // Network errors and timeouts
+  if (error instanceof Error) {
+    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+      return true;
+    }
+    if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+      return true;
+    }
+  }
+
+  // Stripe errors
+  if (error && typeof error === 'object' && 'type' in error) {
+    const stripeError = error as { type?: string; statusCode?: number };
+    
+    // Retry on 5xx server errors
+    if (stripeError.statusCode && stripeError.statusCode >= 500) {
+      return true;
+    }
+
+    // Do NOT retry on:
+    // - card_declined
+    // - invalid_request_error
+    // - authentication_error
+    if (stripeError.type) {
+      const nonRetryableTypes = [
+        'card_error',
+        'invalid_request_error',
+        'authentication_error',
+      ];
+      if (nonRetryableTypes.includes(stripeError.type)) {
+        return false;
+      }
+    }
+  }
+
+  // Default: don't retry unknown errors
+  return false;
+}
 
 type SupportedSubscriptionStatus = "active" | "trialing" | "canceled" | "incomplete" | "past_due";
 
@@ -150,7 +196,18 @@ export async function upsertBillingFromCheckout(
   try {
     // If session has a subscription, retrieve and process it
     if (session.subscription && typeof session.subscription === "string") {
-      const subscription = await stripe.subscriptions.retrieve(session.subscription);
+      const subscription = await withRetry(
+        'stripe.subscriptions.retrieve',
+        async () => {
+          return await stripe.subscriptions.retrieve(session.subscription as string);
+        },
+        (error) => shouldRetryStripeCall(error),
+        {
+          maxAttempts: 2,
+          baseDelayMs: 300,
+          maxDelayMs: 2000,
+        },
+      );
       await upsertSubscriptionRecord(subscription, workspaceId, supabase, "checkout.session.completed");
     } else {
       // No subscription yet - this might be a one-time payment or incomplete checkout

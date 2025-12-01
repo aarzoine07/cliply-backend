@@ -7,8 +7,23 @@ import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as experimentService from '@/lib/viral/experimentService';
+import { applySecurityAndCors } from '@/lib/securityHeaders';
+
+// Configure body size limit for this endpoint (2MB for JSON - may include variant configs)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '2mb',
+    },
+  },
+};
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
+  // Apply security headers and handle CORS
+  if (applySecurityAndCors(req, res)) {
+    return; // OPTIONS preflight handled
+  }
+
   let auth;
   try {
     auth = await buildAuthContext(req);
