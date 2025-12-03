@@ -2,9 +2,9 @@ import * as crypto from "crypto";
 
 import { getEnv } from "@cliply/shared/env";
 import type { Database } from "@cliply/shared/types/supabase";
-import type { JobKind } from "@cliply/shared/job-kinds";
 import { createClient, type PostgrestError, type SupabaseClient } from "@supabase/supabase-js";
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
+type JobKind = string;
 type JobPayload = Record<string, unknown>;
 
 export interface EnqueueParams {

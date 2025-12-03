@@ -37,8 +37,8 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
 
   // ─── YouTube/Google OAuth (optional for test, required for production) ────────────────────────────
-  GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   YOUTUBE_OAUTH_REDIRECT_URL: z.string().url().optional(),
 
   // ─── TikTok OAuth (optional for test, required for production) ────────────────────────────
@@ -49,6 +49,7 @@ const EnvSchema = z.object({
   TIKTOK_ENCRYPTION_KEY: z
     .string()
     .min(1, "TIKTOK_ENCRYPTION_KEY is required for TikTok token encryption")
+    .optional()
     .describe("Base64-encoded 32-byte key for encrypting TikTok tokens at rest"),
 
   // ─── Cron & Automation ────────────────────────────────────────────────
@@ -62,7 +63,6 @@ const EnvSchema = z.object({
   NEXT_PUBLIC_TIKTOK_REDIRECT_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
-  NEXT_PUBLIC_YOUTUBE_REDIRECT_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -72,22 +72,34 @@ export { EnvSchema };
 
 let cached: Env | null = null;
 
-const DISABLE_ENV_CACHE =
-  process.env.NODE_ENV === "test" ||
-  process.env.DISABLE_ENV_CACHE === "1";
+/**
+ * Preprocess environment variables before validation.
+ * Handles fallbacks and transformations.
+ */
+function preprocessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const processed = { ...env };
+  
+  // Fallback: SUPABASE_URL can use NEXT_PUBLIC_SUPABASE_URL if not set
+  if (!processed.SUPABASE_URL && processed.NEXT_PUBLIC_SUPABASE_URL) {
+    processed.SUPABASE_URL = processed.NEXT_PUBLIC_SUPABASE_URL;
+  }
+  
+  // Fallback: SUPABASE_ANON_KEY can use NEXT_PUBLIC_SUPABASE_ANON_KEY if not set
+  if (!processed.SUPABASE_ANON_KEY && processed.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    processed.SUPABASE_ANON_KEY = processed.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  }
+  
+  return processed;
+}
 
 /**
- * Get the parsed environment variables.
- * This function parses and validates env vars on first call, then caches the result.
- * 
- * @throws {z.ZodError} If required env vars are missing or invalid
+ * Load and validate environment variables from process.env.
+ * This is the core parsing logic, extracted for reuse in test mode.
  */
-export function getEnv(): Env {
-  // ⛔ Disable caching during test mode
-  if (cached && !DISABLE_ENV_CACHE) return cached;
-  
+function loadEnvFromProcess(): Env {
   try {
-    cached = EnvSchema.parse(process.env);
+    const processed = preprocessEnv(process.env);
+    return EnvSchema.parse(processed);
   } catch (error) {
     if (error instanceof z.ZodError) {
       const issues = error.issues
@@ -103,7 +115,30 @@ export function getEnv(): Env {
     }
     throw error;
   }
+}
+
+/**
+ * Get the parsed environment variables.
+ * In test mode (NODE_ENV === "test"), this function always reads fresh from process.env
+ * without caching to allow tests to dynamically set env vars.
+ * In non-test environments, this function parses and validates env vars on first call,
+ * then caches the result for performance.
+ * 
+ * @throws {z.ZodError} If required env vars are missing or invalid
+ */
+export function getEnv(): Env {
+  const nodeEnv = process.env.NODE_ENV;
   
+  // In test mode, never cache - always read fresh from process.env
+  // This allows tests to set env vars dynamically and have them take effect immediately
+  if (nodeEnv === "test") {
+    return loadEnvFromProcess();
+  }
+  
+  // In non-test environments, use caching for performance
+  if (cached) return cached;
+  
+  cached = loadEnvFromProcess();
   return cached;
 }
 

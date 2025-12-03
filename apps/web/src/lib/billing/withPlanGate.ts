@@ -46,58 +46,59 @@ export function withPlanGate(
     // 1. Ensure auth context and plan are available before gating features.
     const plan = auth.plan;
     if (!plan) {
-      const payload = authErrorResponse(
-        AuthErrorCode.FORBIDDEN,
-        "No active plan found.",
-        403
-      );
-      res
-        .status(payload.status)
-        .json(err(payload.error.code, payload.error.message));
+      const payload = authErrorResponse(BILLING_PLAN_REQUIRED, "No active plan found.", 403);
+      res.status(payload.status).json({ ok: false, error: payload.error });
       return;
     }
 
     try {
       // 2. Check capability availability without mutating state.
-      const gate = checkPlanAccess(plan, feature);
+      // Extract planId from ResolvedPlan object (plan.planId is the PlanName string)
+      const planName = plan.planId;
+      const gate = checkPlanAccess(planName, feature);
       if (!gate.active) {
-        const status = gate.reason === "limit" ? 429 : 403;
+        const code = gate.reason === "limit" ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
+        const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
         const message =
           gate.message ?? `${String(feature)} not available on current plan.`;
-
-        const payload = authErrorResponse(
-          AuthErrorCode.FORBIDDEN,
-          message,
-          status
-        );
-
-        res
-          .status(payload.status)
-          .json(err(payload.error.code, payload.error.message));
+        const payload = authErrorResponse(code, message, status);
+        res.status(payload.status).json({ ok: false, error: payload.error });
         return;
       }
 
       // 3. Enforce plan access (no-op today for quotas, future support for limits).
-      enforcePlanAccess(plan, feature);
+      // Note: We've already checked with checkPlanAccess above, so enforcePlanAccess shouldn't throw.
+      // But we wrap it in try-catch just in case, since it throws plain objects, not Error instances.
+      try {
+        enforcePlanAccess(planName, feature);
+      } catch (enforceError: any) {
+        // If enforcePlanAccess throws (shouldn't happen since we checked above), handle it
+        if (enforceError && typeof enforceError === 'object' && 'code' in enforceError) {
+          const code = enforceError.code === BILLING_PLAN_LIMIT ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
+          const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
+          const message = enforceError.message ?? `${String(feature)} not available on current plan.`;
+          const payload = authErrorResponse(code, message, status);
+          res.status(payload.status).json({ ok: false, error: payload.error });
+          return;
+        }
+        // Re-throw if it's not a plan gating error
+        throw enforceError;
+      }
 
       // 4. Delegate to the downstream handler when gating succeeds.
       await handler(req, res);
     } catch (error) {
-      // 5. Normalize unexpected failures into an internal error response.
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Plan gate failed unexpectedly.";
-      const payload = authErrorResponse(
-        AuthErrorCode.INTERNAL_ERROR,
-        message,
-        500
-      );
-      res
-        .status(payload.status)
-        .json(err(payload.error.code, payload.error.message));
+      // 5. Normalize unexpected failures into a billing internal error response.
+      // Handle both Error instances and plain objects
+      let message = "Plan gate failed unexpectedly.";
+      if (error instanceof Error) {
+        message = error.message;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        message = String((error as any).message);
+      }
+      const payload = authErrorResponse(AuthErrorCode.INTERNAL_ERROR, message, 500);
+      res.status(payload.status).json({ ok: false, error: payload.error });
     }
   };
 }
-
 

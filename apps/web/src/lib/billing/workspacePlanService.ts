@@ -1,7 +1,6 @@
 // D1: Workspace plan service - manages workspace plan and billing status
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { BillingStatus } from "@cliply/shared/billing/status";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { logger } from "../logger";
 
@@ -51,7 +50,7 @@ export async function setWorkspacePlan(
   plan: PlanName,
   ctx: { supabase: SupabaseClient },
   options?: {
-    billingStatus?: BillingStatus;
+    billingStatus?: "active" | "trialing" | "past_due" | "canceled" | "incomplete";
     stripeCustomerId?: string;
     stripeSubscriptionId?: string;
   },

@@ -1,28 +1,42 @@
 {
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "dist",
-    "composite": true,
-    "module": "ESNext",
-    "moduleResolution": "Node",
-    "resolveJsonModule": true,
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "downlevelIteration": true,
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": {
+      "@cliply/shared": ["./src/index.ts"],
+      "@cliply/shared/*": ["./*", "./src/*"]
+    }
   },
   "include": [
-    "src/**/*",
-    "billing/**/*",
-    "types/**/*",
-    "logging/**/*",
-    "lib/**/*",
-    "pipeline/**/*",
-    "storage/**/*",
-    "*.ts"
+    "src/**/*.ts",
+    "types/**/*.ts",
+    "billing/**/*.ts",
+    "logging/**/*.ts",
+    "auth/**/*.ts",
+    "lib/**/*.ts",
+    "logger.ts",
+    "sentry.ts",
+    "env.ts"
   ],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test"
+  ]
 }
-
-
-
