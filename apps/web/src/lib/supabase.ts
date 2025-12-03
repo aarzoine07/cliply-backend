@@ -1,6 +1,5 @@
 ﻿import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getEnv } from "@cliply/shared/env";
-import type { Database } from "../../../../supabase/types.gen";
 
 const clients: Record<string, SupabaseClient> = {};
 
