@@ -81,7 +81,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       .eq('id', payload.projectId);
     const project = projectRows?.[0];
     if (project) {
-      setPipelineStage(project, 'analyzing');
+      setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'analyzing');
       await ctx.supabase
         .from('projects')
         .update({ pipeline_stage: project.pipeline_stage })
@@ -192,7 +192,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
 
     // Set pipeline_stage to 'clips_proposed' after creating clip proposals
     if (project) {
-      setPipelineStage(project, 'clips_proposed');
+      setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'clips_proposed');
       await ctx.supabase
         .from('projects')
         .update({ pipeline_stage: project.pipeline_stage })
@@ -218,7 +218,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
         .eq('id', payload.projectId);
       const failedProject = projectRows?.[0];
       if (failedProject) {
-        setPipelineStage(failedProject, 'failed');
+        setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'failed');
         await ctx.supabase
           .from('projects')
           .update({ pipeline_stage: failedProject.pipeline_stage })
