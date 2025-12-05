@@ -70,7 +70,10 @@ describe('buildYouTubeAuthUrl', () => {
       redirectUri: 'http://custom.com/callback',
     });
 
-    expect(url).toContain('http://custom.com/callback');
+    // Parse the URL to check redirect_uri parameter (URLSearchParams encodes the value)
+    const urlObj = new URL(url);
+    const redirectUri = urlObj.searchParams.get('redirect_uri');
+    expect(redirectUri).toBe('http://custom.com/callback');
   });
 });
 

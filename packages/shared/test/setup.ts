@@ -10,11 +10,8 @@ const __dirname = dirname(__filename);
 const envPath = resolve(__dirname, "../../../.env.test");
 dotenv.config({ path: envPath });
 
-// Ensure NODE_ENV is set to "test" for test environment
-// This must be set before any modules that cache env are imported
-if (!process.env.NODE_ENV) {
-  process.env.NODE_ENV = "test";
-}
+// Derive NODE_ENV for our test env config without mutating process.env.NODE_ENV
+const NODE_ENV = process.env.NODE_ENV ?? "test";
 
 // Set STRIPE_SECRET_KEY for tests (required by billing/checkout route)
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -25,7 +22,7 @@ console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
 
 export const env = {
-  NODE_ENV: process.env.NODE_ENV || "test",
+  NODE_ENV,
   SUPABASE_URL: process.env.SUPABASE_URL!,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY!,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -55,14 +52,15 @@ if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
         `  SUPABASE_ANON_KEY present? ${!!env.SUPABASE_ANON_KEY}`,
         "  Tests may be flaky when they depend on Supabase.",
         "  In CI (CI=true), these are required and will cause a hard failure.",
-      ].join("\n")
+      ].join("\n"),
     );
   }
 }
 
-export const supabaseTest = env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY
-  ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
-  : null;
+export const supabaseTest =
+  env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
+    : null;
 
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
@@ -84,19 +82,33 @@ export async function resetDatabase() {
   console.log("⚙️  resetDatabase() called (stubbed for local tests)");
 }
 
+// Import clearEnvCache for test reset functionality
+import { clearEnvCache } from "../src/env";
+
+/**
+ * Test helper: reset any cached env-related state between tests.
+ *
+ * Clears the shared env cache so the next getEnv() call re-parses
+ * from process.env. This allows tests to dynamically change env vars
+ * and have them take effect immediately.
+ */
+export function resetEnvForTesting(): void {
+  clearEnvCache();
+}
+
 /**
  * Checks if Supabase test client is configured and usable for real DB operations.
  * Returns false if:
  * - supabaseTest is null (missing credentials)
  * - SUPABASE_URL is a dashboard URL (contains '/dashboard/') instead of an API URL
- * 
+ *
  * @returns true if Supabase is properly configured for tests, false otherwise
  */
 export function isSupabaseTestConfigured(): boolean {
   if (!supabaseTest) {
     return false;
   }
-  
+
   // Check if URL is a dashboard URL (not a real API URL)
   // Dashboard URLs: https://supabase.com/dashboard/project/...
   // API URLs: https://xxx.supabase.co or https://xxx.supabase.io
@@ -104,12 +116,13 @@ export function isSupabaseTestConfigured(): boolean {
   if (url.includes("/dashboard/")) {
     return false;
   }
-  
+
   // Check if it looks like a real Supabase API URL
   // Real URLs typically end with .supabase.co or .supabase.io
   if (!url.match(/\.supabase\.(co|io)/)) {
     return false;
   }
-  
+
   return true;
 }
+
