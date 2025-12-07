@@ -25,7 +25,7 @@ const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROL
 /**
  * Usage metrics tracked per workspace per period.
  */
-export type UsageMetric = "source_minutes" | "clips" | "projects";
+export type UsageMetric = "source_minutes" | "clips" | "projects" | "posts";
 
 /**
  * Parameters for recording usage.
@@ -144,6 +144,8 @@ function getMetricLimit(planName: PlanName, metric: UsageMetric): number | null 
       return plan.limits.clips_per_month ?? null;
     case "projects":
       return plan.limits.projects_per_month ?? null;
+    case "posts":
+      return plan.limits.posts_per_month ?? null;
     default:
       return null;
   }
@@ -156,7 +158,13 @@ function getMetricLimit(planName: PlanName, metric: UsageMetric): number | null 
 export async function recordUsage(incr: UsageIncrement): Promise<void> {
   const periodStart = getPeriodStart(incr.at);
   const periodStartStr = formatPeriodStart(periodStart);
-  const metricColumn = incr.metric === "clips" ? "clips_count" : incr.metric === "projects" ? "projects_count" : "source_minutes";
+  
+  // Map usage metrics to DB column names
+  const metricColumn = 
+    incr.metric === "clips" ? "clips_count" :
+    incr.metric === "projects" ? "projects_count" :
+    incr.metric === "posts" ? "posts_count" :
+    "source_minutes";
 
   // Use PostgreSQL's ON CONFLICT to atomically increment
   const { error } = await supabase.rpc("increment_workspace_usage", {
@@ -199,6 +207,7 @@ export async function recordUsage(incr: UsageIncrement): Promise<void> {
         source_minutes: 0,
         clips_count: 0,
         projects_count: 0,
+        posts_count: 0,
       };
       initialValues[metricColumn] = incr.amount;
 
@@ -255,6 +264,7 @@ export async function getUsageSummary(workspaceId: string, at?: Date): Promise<U
   const sourceMinutes = usage?.source_minutes ?? 0;
   const clipsCount = usage?.clips_count ?? 0;
   const projectsCount = usage?.projects_count ?? 0;
+  const postsCount = usage?.posts_count ?? 0;
 
   metrics.source_minutes = {
     used: Number(sourceMinutes),
@@ -269,6 +279,11 @@ export async function getUsageSummary(workspaceId: string, at?: Date): Promise<U
   metrics.projects = {
     used: projectsCount,
     limit: getMetricLimit(planName, "projects"),
+  };
+
+  metrics.posts = {
+    used: postsCount,
+    limit: getMetricLimit(planName, "posts"),
   };
 
   return {

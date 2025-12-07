@@ -37,13 +37,13 @@ export * from "./crypto/encryptedSecretEnvelope";
 // ─────────────────────────────────────────────
 // Billing modules
 // ─────────────────────────────────────────────
-export * from "../billing/checkRateLimit";
-export * from "../billing/planGate";
-export * from "../billing/planMatrix";
-export * from "../billing/planResolution";
-export * from "../billing/rateLimitConfig";
-export * from "../billing/stripePlanMap";
-export * from "../billing/usageTracker";
+export * from "./billing/checkRateLimit";
+export * from "./billing/planGate";
+export * from "./billing/planMatrix";
+export * from "./billing/planResolution";
+export * from "./billing/rateLimitConfig";
+export * from "./billing/stripePlanMap";
+export * from "./billing/usageTracker";
 
 // ─────────────────────────────────────────────
 // Logging modules (full)
@@ -64,9 +64,8 @@ export * from "./health/readyChecks";
 // ─────────────────────────────────────────────
 export * from "./auth/context";
 export * from "./types/supabase";
-export * from "../types/auth";
-export * from "../types/billing";
-export * from "../types/rateLimit";
+export * from "./types/auth";
+export * from "./types/billing";
 
 // ─────────────────────────────────────────────
 // Database Types & Accessors

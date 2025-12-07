@@ -4,6 +4,18 @@ import type { ConnectedAccountRow } from "@cliply/shared/db/connected-account";
 import type { Job, WorkerContext } from "./types";
 import { TikTokClient, TikTokApiError } from "../services/tiktok/client";
 import * as variantPostsService from "../services/viral/variantPosts";
+import {
+  enforcePostLimits,
+  getDefaultPostingLimitsForPlan,
+  PostHistoryEvent,
+  PostingLimitExceededError,
+} from "@cliply/shared/engine/postingGuard";
+import {
+  assertWithinUsage,
+  recordUsage,
+  UsageLimitExceededError,
+} from "@cliply/shared/billing/usageTracker";
+import { cleanupTempFileSafe } from "../lib/tempCleanup";
 
 const PIPELINE = "PUBLISH_TIKTOK";
 
@@ -21,6 +33,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
   const startTime = Date.now();
   const jobId = job.id;
   const workspaceId = job.workspaceId;
+  let tempPath: string | null = null;
 
   try {
     const payload = PUBLISH_TIKTOK.parse(job.payload);
@@ -94,9 +107,89 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
    // Connected accounts table has no status column.
    // Presence of the row means the Tiktokaccount is active.
 
+    // Load posting history for anti-spam guard
+    const postingHistory = await fetchPostingHistory(ctx, workspaceId, payload.connectedAccountId, 'tiktok');
+    
+    // TODO (ME-I-04): integrate real plan-based limits using planMatrix
+    // For now, use default plan 'basic'
+    const planName = 'basic';
+    const postingLimits = getDefaultPostingLimitsForPlan(planName);
+
+    // Enforce posting limits (anti-spam guard)
+    const now = new Date();
+    try {
+      enforcePostLimits({
+        now,
+        history: postingHistory,
+        limits: postingLimits,
+        platform: 'tiktok',
+        accountId: payload.connectedAccountId,
+      });
+
+      ctx.logger.info('posting_guard_checked', {
+        pipeline: PIPELINE,
+        job_kind: PIPELINE,
+        jobId,
+        workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'tiktok',
+        historyCount: postingHistory.length,
+        limits: postingLimits,
+      });
+    } catch (error) {
+      if (error instanceof PostingLimitExceededError) {
+        ctx.logger.warn('posting_guard_limit_exceeded', {
+          pipeline: PIPELINE,
+          job_kind: PIPELINE,
+          jobId,
+          workspaceId,
+          accountId: payload.connectedAccountId,
+          platform: 'tiktok',
+          reason: error.reason,
+          remainingMs: error.remainingMs,
+        });
+        // Re-throw so surface code can handle it appropriately
+        throw error;
+      }
+      throw error;
+    }
+
+    // Check workspace-level posts usage (plan-based limit)
+    try {
+      await assertWithinUsage(workspaceId, 'posts', 1, now);
+      
+      ctx.logger.info('posting_usage_checked', {
+        pipeline: PIPELINE,
+        job_kind: PIPELINE,
+        jobId,
+        workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'tiktok',
+        metric: 'posts',
+        amount: 1,
+      });
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        ctx.logger.warn('posting_usage_limit_exceeded', {
+          pipeline: PIPELINE,
+          job_kind: PIPELINE,
+          jobId,
+          workspaceId,
+          accountId: payload.connectedAccountId,
+          platform: 'tiktok',
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+        });
+        // Re-throw so surface code can handle it appropriately
+        throw error;
+      }
+      throw error;
+    }
+
     // Download clip from storage
     const storagePath = clip.storage_path.replace(/^renders\//, "");
-    const tempPath = await ctx.storage.download("renders", storagePath, storagePath.split("/").pop() ?? "video.mp4");
+    tempPath = await ctx.storage.download("renders", storagePath, storagePath.split("/").pop() ?? "video.mp4");
 
     // Get fresh access token (refreshes if needed)
     let accessToken: string;
@@ -204,6 +297,37 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
     }
 
+    // Record posts usage after successful publish
+    try {
+      await recordUsage({
+        workspaceId,
+        metric: 'posts',
+        amount: 1,
+        at: now,
+      });
+      
+      ctx.logger.info('posting_usage_recorded', {
+        pipeline: PIPELINE,
+        job_kind: PIPELINE,
+        jobId,
+        workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'tiktok',
+        metric: 'posts',
+        amount: 1,
+      });
+    } catch (error) {
+      // Log but don't fail the publish if usage recording fails
+      ctx.logger.warn("posting_usage_record_failed", {
+        pipeline: PIPELINE,
+        job_kind: PIPELINE,
+        jobId,
+        workspaceId,
+        clipId: payload.clipId,
+        error: (error as Error)?.message ?? String(error),
+      });
+    }
+
     const durationMs = Date.now() - startTime;
     ctx.logger.info("publish_tiktok_completed", {
       pipeline: PIPELINE,
@@ -248,6 +372,11 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     });
 
     throw error;
+  } finally {
+    // Clean up temporary downloaded file on both success and failure
+    if (tempPath) {
+      await cleanupTempFileSafe(tempPath, ctx.logger);
+    }
   }
 }
 
@@ -274,6 +403,41 @@ async function fetchConnectedAccount(
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   return response.data as ConnectedAccountRow | null;
+}
+
+async function fetchPostingHistory(
+  ctx: WorkerContext,
+  workspaceId: string,
+  accountId: string,
+  platform: string,
+): Promise<PostHistoryEvent[]> {
+  // Query variant_posts for recent posts by this account
+  // We need to join with clips to get workspace_id since variant_posts doesn't have it directly
+  const { data: rows } = await ctx.supabase
+    .from("variant_posts")
+    .select("clip_id, posted_at, clips!inner(workspace_id)")
+    .eq("connected_account_id", accountId)
+    .eq("platform", platform)
+    .eq("status", "posted")
+    .not("posted_at", "is", null)
+    .gte("posted_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+    .order("posted_at", { ascending: false });
+
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  // Map DB rows to PostHistoryEvent
+  // Type assertion needed for Supabase join result
+  return rows
+    .filter((row: any) => row.posted_at && row.clips?.workspace_id === workspaceId)
+    .map((row: any) => ({
+      workspaceId,
+      accountId,
+      platform,
+      clipId: row.clip_id,
+      postedAt: new Date(row.posted_at),
+    }));
 }
 
 // Backwards compatibility for legacy imports.

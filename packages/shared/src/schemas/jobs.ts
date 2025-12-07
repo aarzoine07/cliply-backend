@@ -61,3 +61,11 @@ export const PUBLISH_TIKTOK = z
     variantId: z.string().uuid().optional(),
   })
   .strict();
+
+export const CLEANUP_STORAGE = z
+  .object({
+    workspaceId: z.string().uuid().optional(),
+    projectId: z.string().uuid().optional(),
+    retentionDays: z.number().int().min(1).max(365).optional(),
+  })
+  .strict();

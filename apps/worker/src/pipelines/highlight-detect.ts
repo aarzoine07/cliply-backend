@@ -8,6 +8,10 @@ import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply
 import type { ClipStatus } from '@cliply/shared';
 import { setPipelineStage } from '@cliply/shared/pipeline/stages';
 import { PIPELINE_HIGHLIGHT_DETECT } from '@cliply/shared/pipeline/names';
+import { PLAN_MATRIX } from '@cliply/shared/billing/planMatrix';
+import { computeMaxClipsForVideo } from '@cliply/shared/engine/clipCount';
+import { consolidateClipCandidates, type ClipCandidate as OverlapClipCandidate } from '@cliply/shared/engine/clipOverlap';
+import type { PlanName } from '@cliply/shared/types/auth';
 
 import type { Job, WorkerContext } from './types';
 
@@ -18,6 +22,11 @@ interface TranscriptSegment {
   end: number;
   text: string;
   confidence?: number;
+}
+
+interface TranscriptJson {
+  segments?: TranscriptSegment[];
+  durationSec?: number;
 }
 
 // ClipCandidate represents potential highlights detected from transcript segments.
@@ -37,29 +46,21 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const payload = HIGHLIGHT_DETECT.parse(job.payload);
     const workspaceId = job.workspaceId;
 
-    // Check usage limits before processing highlights
-    // We check for at least maxClips remaining (conservative, actual count will be recorded after processing)
-    try {
-      await assertWithinUsage(workspaceId, 'clips', payload.maxClips);
-    } catch (error) {
-      if (error instanceof UsageLimitExceededError) {
-        ctx.logger.warn('highlight_detect_usage_limit_exceeded', {
-          pipeline: PIPELINE_HIGHLIGHT_DETECT,
-          jobKind: job.type,
-          jobId: job.id,
-          workspaceId,
-          projectId: payload.projectId,
-          metric: error.metric,
-          used: error.used,
-          limit: error.limit,
-          requestedClips: payload.maxClips,
-        });
-        // Mark job as failed but don't crash - let the job system handle retries/backoff
-        throw error;
-      }
-      throw error;
-    }
+    // Fetch workspace plan to compute smart max clips
+    const { data: workspace } = await ctx.supabase
+      .from('workspaces')
+      .select('plan')
+      .eq('id', workspaceId)
+      .maybeSingle();
+    
+    const planName: PlanName = 
+      workspace?.plan === 'basic' || workspace?.plan === 'pro' || workspace?.plan === 'premium'
+        ? workspace.plan
+        : 'basic';
+    
+    const planLimits = PLAN_MATRIX[planName].limits;
 
+    // Download and parse transcript JSON to get duration
     const transcriptKey = `${workspaceId}/${payload.projectId}/transcript.json`;
 
     const exists = await ctx.storage.exists(BUCKET_TRANSCRIPTS, transcriptKey);
@@ -71,8 +72,55 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const localPath = join(tempDir, 'transcript.json');
     await ctx.storage.download(BUCKET_TRANSCRIPTS, transcriptKey, localPath);
     const raw = await fs.readFile(localPath, 'utf8');
-    const parsed = JSON.parse(raw) as { segments?: TranscriptSegment[] };
+    const parsed = JSON.parse(raw) as TranscriptJson;
     const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+
+    // Compute smart max clips based on duration and plan
+    // Use transcript duration if available, otherwise fallback to 3 minutes (180 seconds)
+    const durationSec = parsed.durationSec ?? 180;
+    const durationMs = durationSec * 1000;
+
+    const maxClips = computeMaxClipsForVideo({
+      durationMs,
+      planName,
+      planLimits,
+      requestedMaxClips: payload.maxClips,
+    });
+
+    ctx.logger.info('highlight_detect_max_clips_computed', {
+      pipeline: PIPELINE_HIGHLIGHT_DETECT,
+      jobKind: job.type,
+      jobId: job.id,
+      workspaceId,
+      projectId: payload.projectId,
+      durationSec,
+      planName,
+      requestedMaxClips: payload.maxClips,
+      computedMaxClips: maxClips,
+    });
+
+    // Check usage limits before processing highlights
+    // We check for at least maxClips remaining (conservative, actual count will be recorded after processing)
+    try {
+      await assertWithinUsage(workspaceId, 'clips', maxClips);
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        ctx.logger.warn('highlight_detect_usage_limit_exceeded', {
+          pipeline: PIPELINE_HIGHLIGHT_DETECT,
+          jobKind: job.type,
+          jobId: job.id,
+          workspaceId,
+          projectId: payload.projectId,
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+          requestedClips: maxClips,
+        });
+        // Mark job as failed but don't crash - let the job system handle retries/backoff
+        throw error;
+      }
+      throw error;
+    }
 
     // Set pipeline_stage to 'analyzing' when starting highlight detection
     const { data: projectRows } = await ctx.supabase
@@ -116,26 +164,63 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       return;
     }
 
-    candidates.sort((a, b) => b.score - a.score || a.start - b.start);
-    const topCandidates = candidates.slice(0, payload.maxClips);
-
+    // Fetch existing clips to avoid creating duplicates
     const existing = await fetchExistingClips(ctx, payload.projectId);
-    const existingKeys = new Set(existing.map((clip) => `${clip.start_s.toFixed(3)}:${clip.end_s.toFixed(3)}`));
 
-    const inserts = topCandidates
-      .filter((candidate) => !existingKeys.has(`${candidate.start.toFixed(3)}:${candidate.end.toFixed(3)}`))
-      .map((candidate) => {
-        existingKeys.add(`${candidate.start.toFixed(3)}:${candidate.end.toFixed(3)}`);
-        return {
-          project_id: payload.projectId,
-          workspace_id: workspaceId,
-          start_s: Number(candidate.start.toFixed(3)),
-          end_s: Number(candidate.end.toFixed(3)),
-          title: candidate.title,
-          confidence: Number(candidate.confidence.toFixed(3)),
-          status: 'proposed' as ClipStatus,
-        };
-      });
+    // Map candidates to overlap-detection format
+    const candidatesForConsolidation: OverlapClipCandidate[] = candidates.map((c) => ({
+      start_s: c.start,
+      end_s: c.end,
+      score: c.score,
+    }));
+
+    // Map existing clips to overlap-detection format
+    const existingForConsolidation: OverlapClipCandidate[] = existing.map((clip) => ({
+      id: clip.id,
+      start_s: clip.start_s,
+      end_s: clip.end_s,
+      score: clip.score ?? 0,
+    }));
+
+    // Consolidate: remove overlaps, near-duplicates, and respect maxClips
+    const consolidated = consolidateClipCandidates({
+      candidates: candidatesForConsolidation,
+      existingClips: existingForConsolidation,
+      maxClips,
+      // Use default nearDuplicateThresholdSec (1.5s)
+    });
+
+    // Log consolidation summary for observability
+    ctx.logger.info('highlight_detect_consolidation', {
+      pipeline: PIPELINE_HIGHLIGHT_DETECT,
+      jobKind: job.type,
+      jobId: job.id,
+      workspaceId,
+      projectId: payload.projectId,
+      rawCandidates: candidates.length,
+      existingClips: existing.length,
+      maxClips,
+      consolidatedClips: consolidated.length,
+    });
+
+    // Map consolidated clips back to original candidates to preserve metadata
+    const consolidatedSet = new Set(
+      consolidated.map((c) => `${c.start_s.toFixed(3)}:${c.end_s.toFixed(3)}`)
+    );
+    const topCandidates = candidates.filter((c) =>
+      consolidatedSet.has(`${c.start.toFixed(3)}:${c.end.toFixed(3)}`)
+    );
+
+    // Prepare inserts for DB
+    const inserts = topCandidates.map((candidate) => ({
+      project_id: payload.projectId,
+      workspace_id: workspaceId,
+      start_s: Number(candidate.start.toFixed(3)),
+      end_s: Number(candidate.end.toFixed(3)),
+      title: candidate.title,
+      confidence: Number(candidate.confidence.toFixed(3)),
+      status: 'proposed' as ClipStatus,
+    }));
 
     if (inserts.length > 0) {
       const { data: insertedClips, error: insertError } = await ctx.supabase
@@ -341,10 +426,21 @@ function deriveTitle(text: string): string {
 async function fetchExistingClips(
   ctx: WorkerContext,
   projectId: string,
-): Promise<Array<{ start_s: number; end_s: number }>> {
-  const response = await ctx.supabase.from('clips').select('start_s,end_s').eq('project_id', projectId);
-  const rows = response.data as Array<{ start_s: number; end_s: number }> | null;
-  return rows ?? [];
+): Promise<Array<{ id?: string; start_s: number; end_s: number; score?: number }>> {
+  // Fetch all clips for this project (regardless of status) to avoid any duplicates
+  const response = await ctx.supabase
+    .from('clips')
+    .select('id,start_s,end_s,confidence')
+    .eq('project_id', projectId);
+  const rows = response.data as Array<{ id: string; start_s: number; end_s: number; confidence?: number }> | null;
+  
+  // Map confidence to score for overlap detection
+  return (rows ?? []).map((clip) => ({
+    id: clip.id,
+    start_s: clip.start_s,
+    end_s: clip.end_s,
+    score: clip.confidence ?? 0,
+  }));
 }
 
 async function ensureProjectStatus(ctx: WorkerContext, projectId: string, status: string): Promise<void> {

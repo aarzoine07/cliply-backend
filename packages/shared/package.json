@@ -44,29 +44,59 @@
       "types": "./dist/lib/*.d.ts"
     },
     "./billing/*": {
-      "import": "./dist/billing/*.js",
-      "require": "./dist/billing/*.js",
-      "types": "./dist/billing/*.d.ts"
+      "import": "./dist/src/billing/*.js",
+      "require": "./dist/src/billing/*.js",
+      "types": "./dist/src/billing/*.d.ts"
     },
     "./types/*": {
-      "import": "./dist/types/*.js",
-      "require": "./dist/types/*.js",
-      "types": "./dist/types/*.d.ts"
+      "import": "./dist/src/types/*.js",
+      "require": "./dist/src/types/*.js",
+      "types": "./dist/src/types/*.d.ts"
     },
     "./pipeline/*": {
-      "import": "./dist/pipeline/*.js",
-      "require": "./dist/pipeline/*.js",
-      "types": "./dist/pipeline/*.d.ts"
+      "import": "./dist/src/pipeline/*.js",
+      "require": "./dist/src/pipeline/*.js",
+      "types": "./dist/src/pipeline/*.d.ts"
     },
     "./storage/*": {
-      "import": "./dist/storage/*.js",
-      "require": "./dist/storage/*.js",
-      "types": "./dist/storage/*.d.ts"
+      "import": "./dist/src/storage/*.js",
+      "require": "./dist/src/storage/*.js",
+      "types": "./dist/src/storage/*.d.ts"
+    },
+    "./schemas": {
+      "import": "./dist/src/schemas.js",
+      "require": "./dist/src/schemas.js",
+      "types": "./dist/src/schemas.d.ts"
+    },
+    "./schemas/*": {
+      "import": "./dist/src/schemas/*.js",
+      "require": "./dist/src/schemas/*.js",
+      "types": "./dist/src/schemas/*.d.ts"
+    },
+    "./health/*": {
+      "import": "./dist/src/health/*.js",
+      "require": "./dist/src/health/*.js",
+      "types": "./dist/src/health/*.d.ts"
+    },
+    "./readiness/*": {
+      "import": "./dist/src/readiness/*.js",
+      "require": "./dist/src/readiness/*.js",
+      "types": "./dist/src/readiness/*.d.ts"
+    },
+    "./resilience/*": {
+      "import": "./dist/src/resilience/*.js",
+      "require": "./dist/src/resilience/*.js",
+      "types": "./dist/src/resilience/*.d.ts"
+    },
+    "./engine/*": {
+      "import": "./dist/src/engine/*.js",
+      "require": "./dist/src/engine/*.js",
+      "types": "./dist/src/engine/*.d.ts"
     }
   },
 
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts"
   },

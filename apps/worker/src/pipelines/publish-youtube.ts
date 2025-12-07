@@ -3,6 +3,18 @@ import { getFreshYouTubeAccessToken } from "@cliply/shared/services/youtubeAuth"
 import type { Job, WorkerContext } from "./types";
 import { YouTubeClient } from "../services/youtube/client";
 import * as variantPostsService from "../services/viral/variantPosts";
+import {
+  enforcePostLimits,
+  getDefaultPostingLimitsForPlan,
+  PostHistoryEvent,
+  PostingLimitExceededError,
+} from "@cliply/shared/engine/postingGuard";
+import {
+  assertWithinUsage,
+  recordUsage,
+  UsageLimitExceededError,
+} from "@cliply/shared/billing/usageTracker";
+import { cleanupTempFileSafe } from "../lib/tempCleanup";
 
 const PIPELINE = "PUBLISH_YOUTUBE";
 
@@ -24,8 +36,11 @@ interface ScheduleRow {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  let tempPath: string | null = null;
+
   try {
     const payload = PUBLISH_YOUTUBE.parse(job.payload);
+    const workspaceId = job.workspaceId;
 
     const clip = await fetchClip(ctx, payload.clipId);
     if (!clip) {
@@ -61,6 +76,82 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       // For non-experiment posts, check clip.external_id (legacy behavior)
       ctx.logger.info("publish_skip_existing", { pipeline: PIPELINE, clipId: payload.clipId });
       return;
+    }
+
+    // Load posting history for anti-spam guard
+    const postingHistory = await fetchPostingHistory(ctx, workspaceId, payload.connectedAccountId, 'youtube_shorts');
+    
+    // TODO (ME-I-04): integrate real plan-based limits using planMatrix
+    // For now, use default plan 'basic'
+    const planName = 'basic';
+    const postingLimits = getDefaultPostingLimitsForPlan(planName);
+
+    // Enforce posting limits (anti-spam guard)
+    const now = new Date();
+    try {
+      enforcePostLimits({
+        now,
+        history: postingHistory,
+        limits: postingLimits,
+        platform: 'youtube_shorts',
+        accountId: payload.connectedAccountId,
+      });
+
+      ctx.logger.info('posting_guard_checked', {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'youtube_shorts',
+        historyCount: postingHistory.length,
+        limits: postingLimits,
+      });
+    } catch (error) {
+      if (error instanceof PostingLimitExceededError) {
+        ctx.logger.warn('posting_guard_limit_exceeded', {
+          pipeline: PIPELINE,
+          clipId: payload.clipId,
+          workspaceId,
+          accountId: payload.connectedAccountId,
+          platform: 'youtube_shorts',
+          reason: error.reason,
+          remainingMs: error.remainingMs,
+        });
+        // Re-throw so surface code can handle it appropriately
+        throw error;
+      }
+      throw error;
+    }
+
+    // Check workspace-level posts usage (plan-based limit)
+    try {
+      await assertWithinUsage(workspaceId, 'posts', 1, now);
+      
+      ctx.logger.info('posting_usage_checked', {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'youtube_shorts',
+        metric: 'posts',
+        amount: 1,
+      });
+    } catch (error) {
+      if (error instanceof UsageLimitExceededError) {
+        ctx.logger.warn('posting_usage_limit_exceeded', {
+          pipeline: PIPELINE,
+          clipId: payload.clipId,
+          workspaceId,
+          accountId: payload.connectedAccountId,
+          platform: 'youtube_shorts',
+          metric: error.metric,
+          used: error.used,
+          limit: error.limit,
+        });
+        // Re-throw so surface code can handle it appropriately
+        throw error;
+      }
+      throw error;
     }
 
     const downloadPath = clip.storage_path.replace(/^renders\//, "");
@@ -125,6 +216,34 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
     }
 
+    // Record posts usage after successful publish
+    try {
+      await recordUsage({
+        workspaceId: job.workspaceId,
+        metric: 'posts',
+        amount: 1,
+        at: now,
+      });
+      
+      ctx.logger.info('posting_usage_recorded', {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId: job.workspaceId,
+        accountId: payload.connectedAccountId,
+        platform: 'youtube_shorts',
+        metric: 'posts',
+        amount: 1,
+      });
+    } catch (error) {
+      // Log but don't fail the publish if usage recording fails
+      ctx.logger.warn("posting_usage_record_failed", {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId: job.workspaceId,
+        error: (error as Error)?.message ?? String(error),
+      });
+    }
+
     await markScheduleSent(ctx, payload.clipId);
 
     ctx.logger.info("pipeline_completed", {
@@ -146,6 +265,11 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       error: (error as Error)?.message ?? String(error),
     });
     throw error;
+  } finally {
+    // Clean up temporary downloaded file on both success and failure
+    if (tempPath) {
+      await cleanupTempFileSafe(tempPath, ctx.logger);
+    }
   }
 }
 
@@ -177,6 +301,41 @@ async function markScheduleSent(ctx: WorkerContext, clipId: string): Promise<voi
     .from("schedules")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", schedule.id);
+}
+
+async function fetchPostingHistory(
+  ctx: WorkerContext,
+  workspaceId: string,
+  accountId: string,
+  platform: string,
+): Promise<PostHistoryEvent[]> {
+  // Query variant_posts for recent posts by this account
+  // We need to join with clips to get workspace_id since variant_posts doesn't have it directly
+  const { data: rows } = await ctx.supabase
+    .from("variant_posts")
+    .select("clip_id, posted_at, clips!inner(workspace_id)")
+    .eq("connected_account_id", accountId)
+    .eq("platform", platform)
+    .eq("status", "posted")
+    .not("posted_at", "is", null)
+    .gte("posted_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+    .order("posted_at", { ascending: false });
+
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  // Map DB rows to PostHistoryEvent
+  // Type assertion needed for Supabase join result
+  return rows
+    .filter((row: any) => row.posted_at && row.clips?.workspace_id === workspaceId)
+    .map((row: any) => ({
+      workspaceId,
+      accountId,
+      platform,
+      clipId: row.clip_id,
+      postedAt: new Date(row.posted_at),
+    }));
 }
 
 // Backwards compatibility for legacy imports.

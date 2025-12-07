@@ -1,5 +1,5 @@
-// packages/shared/src/types/auth.ts
 
+// packages/shared/src/types/auth.ts
 /**
  * Shared auth-related types used across backend and web.
  *
@@ -11,14 +11,25 @@ export type PlanName = string;
 
 /**
  * High-level auth error codes shared by API and web.
+ * 
+ * These are used as string-based codes (not enum) to allow
+ * property access like `AuthErrorCode.UNAUTHORIZED`.
  */
-export type AuthErrorCode =
-  | "UNAUTHENTICATED"
-  | "FORBIDDEN"
-  | "INVALID_TOKEN"
-  | "MISSING_WORKSPACE"
-  | "INTERNAL_ERROR"
-  | (string & {});
+export const AuthErrorCode = {
+  UNAUTHENTICATED: "UNAUTHENTICATED",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  FORBIDDEN: "FORBIDDEN",
+  INVALID_TOKEN: "INVALID_TOKEN",
+  MISSING_WORKSPACE: "MISSING_WORKSPACE",
+  MISSING_HEADER: "MISSING_HEADER",
+  WORKSPACE_MISMATCH: "WORKSPACE_MISMATCH",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+} as const;
+
+/**
+ * Type derived from AuthErrorCode constant for type-checking.
+ */
+export type AuthErrorCode = (typeof AuthErrorCode)[keyof typeof AuthErrorCode] | (string & {});
 
 /**
  * Standard auth error payload shape.
@@ -60,10 +71,16 @@ export function authErrorResponse(
  * Shared AuthContext – kept intentionally flexible.
  */
 export interface AuthContext {
+  // Snake case versions (from getAuthContext)
+  user_id?: string | null;
+  workspace_id?: string | null;
+  // Camel case versions (aliases)
   userId?: string | null;
   workspaceId?: string | null;
+  plan?: PlanName;
   email?: string | null;
   roles?: string[];
+  isAuthenticated?: boolean;
   // Allow additional fields without breaking callers
   [key: string]: unknown;
 }

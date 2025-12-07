@@ -35,6 +35,13 @@ export interface PlanLimits extends PlanFeature {
   clips_per_month?: number;
   /** Maximum projects created per month. */
   projects_per_month?: number;
+  /**
+   * Maximum posts (published clips) per month across all platforms.
+   * NOTE (ME-I-04): posts_per_month limits are initial engine defaults and can be tuned later
+   * without affecting the rest of the billing system. They should be kept comfortably above
+   * the daily limits enforced by postingGuard (which are per-account, not per-workspace).
+   */
+  posts_per_month?: number;
 }
 
 /** Aggregate plan configuration combining feature flags and limits. */
@@ -64,6 +71,7 @@ export const PLAN_MATRIX: PlanMatrix = {
       source_minutes_per_month: 150, // 5 uploads/day * 30 days * ~1 min avg
       clips_per_month: 450, // 5 uploads/day * 30 days * 3 clips/project
       projects_per_month: 150, // 5 uploads/day * 30 days
+      posts_per_month: 300, // ~10 posts/day * 30 days (comfortably above postingGuard daily limit of 10)
     },
   },
   /** Pro — small teams scaling their content workflows. */
@@ -82,6 +90,7 @@ export const PLAN_MATRIX: PlanMatrix = {
       source_minutes_per_month: 900, // 30 uploads/day * 30 days * ~1 min avg
       clips_per_month: 10800, // 30 uploads/day * 30 days * 12 clips/project
       projects_per_month: 900, // 30 uploads/day * 30 days
+      posts_per_month: 900, // ~30 posts/day * 30 days (comfortably above postingGuard daily limit of 30)
     },
   },
   /** Premium — agencies managing multiple clients with high volume demands. */
@@ -100,6 +109,7 @@ export const PLAN_MATRIX: PlanMatrix = {
       source_minutes_per_month: 4500, // 150 uploads/day * 30 days * ~1 min avg
       clips_per_month: 180000, // 150 uploads/day * 30 days * 40 clips/project
       projects_per_month: 4500, // 150 uploads/day * 30 days
+      posts_per_month: 1500, // ~50 posts/day * 30 days (comfortably above postingGuard daily limit of 50)
     },
   },
 } as const;

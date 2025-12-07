@@ -12,6 +12,10 @@ export interface StorageAdapter {
   list(bucket: string, prefix: string): Promise<string[]>;
   download(bucket: string, path: string, destination: string): Promise<string>;
   upload(bucket: string, path: string, localFile: string, contentType?: string): Promise<void>;
+  /** Delete a file from storage. Returns true if deleted, false if not found. */
+  remove(bucket: string, path: string): Promise<boolean>;
+  /** Delete multiple files from storage. Returns count of successfully deleted files. */
+  removeBatch(bucket: string, paths: string[]): Promise<number>;
 }
 
 export interface SentryAdapter {

@@ -1,9 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { AuthContext, AuthErrorCode, PlanName } from "../../types/auth.js";
+import { AuthContext, AuthErrorCode, PlanName } from "../types/auth.js";
 import { getEnv } from "../env";
 
-export type { AuthContext } from "../../types/auth";
+export type { AuthContext } from "../types/auth";
 
 interface AuthError extends Error {
   code: AuthErrorCode;
@@ -177,10 +177,10 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
   const supabase = loadSupabaseClient();
 
   // IMPORTANT FIX: correct dynamic path resolution
-  const { resolveWorkspacePlan } = await import("../../billing/planResolution.js");
+  const { resolveWorkspacePlan } = await import("../billing/planResolution.js");
 
   const resolvedPlan = await resolveWorkspacePlan(workspaceId, { supabase });
-  const plan = resolvedPlan.planId;
+  const plan = resolvedPlan.planId as PlanName;
 
   return {
     user_id: userId,

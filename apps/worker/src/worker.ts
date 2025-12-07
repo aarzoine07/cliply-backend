@@ -13,6 +13,7 @@ import { run as runThumbnail } from "./pipelines/thumbnail";
 import { run as runPublishYouTube } from "./pipelines/publish-youtube";
 import { run as runPublishTikTok } from "./pipelines/publish-tiktok";
 import { run as runYouTubeDownload } from "./pipelines/youtube-download";
+import { run as runCleanupStorage } from "./pipelines/cleanup-storage";
 import type { Job, WorkerContext } from "./pipelines/types";
 import { createStorageAdapter } from "./services/storage";
 import { createQueueAdapter } from "./services/queue";
@@ -216,6 +217,15 @@ const handlers: Record<string, Handler> = {
     await runPublishTikTok(pipelineJob, ctx);
     const result = { ok: true, message: "tiktok published" };
     log({ event: "handler_done", kind: "PUBLISH_TIKTOK", job_id: job.id, workspace_id: job.workspace_id }, result);
+    return { result };
+  },
+  CLEANUP_STORAGE: async ({ job, supabase, log }) => {
+    log({ event: "handler_start", kind: "CLEANUP_STORAGE", job_id: job.id, workspace_id: job.workspace_id });
+    const ctx = createWorkerContext(supabase);
+    const pipelineJob = jobClaimToJob(job);
+    await runCleanupStorage(pipelineJob, ctx);
+    const result = { ok: true, message: "storage cleaned up" };
+    log({ event: "handler_done", kind: "CLEANUP_STORAGE", job_id: job.id, workspace_id: job.workspace_id }, result);
     return { result };
   },
 };

@@ -9,12 +9,15 @@ import { logPipelineStep } from '@cliply/shared/observability/logging';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
+import { cleanupTempDirSafe } from '../lib/tempCleanup';
 
 const PIPELINE = 'TRANSCRIBE';
 const TRANSCRIPT_SRT = 'transcript.srt';
 const TRANSCRIPT_JSON = 'transcript.json';
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  let tempDir: string | null = null;
+
   try {
     const payload = TRANSCRIBE.parse(job.payload);
     const workspaceId = job.workspaceId;
@@ -48,7 +51,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       { sourceKey },
     );
 
-    const tempDir = await fs.mkdtemp(join(tmpdir(), 'cliply-transcribe-'));
+    tempDir = await fs.mkdtemp(join(tmpdir(), 'cliply-transcribe-'));
     const localSource = join(tempDir, 'source');
     const downloadedPath = await ctx.storage.download(BUCKET_VIDEOS, sourceKey, localSource);
 
@@ -126,6 +129,11 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       error: (error as Error)?.message ?? String(error),
     });
     throw error;
+  } finally {
+    // Clean up temp directory on both success and failure
+    if (tempDir) {
+      await cleanupTempDirSafe(tempDir, ctx.logger);
+    }
   }
 }
 

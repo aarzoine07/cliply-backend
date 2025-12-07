@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
 import { getEnv } from "@cliply/shared/env";
-import { STRIPE_PLAN_MAP } from "../../billing/stripePlanMap";
+import { STRIPE_PLAN_MAP } from "../billing/stripePlanMap";
 
 // WorkerEnvStatus type (duplicated to avoid circular dependency)
 export type WorkerEnvStatus = {

@@ -24,6 +24,7 @@ import { PIPELINE_CLIP_RENDER } from '@cliply/shared/pipeline/names';
 import { buildRenderCommand } from "../services/ffmpeg/build-commands";
 import { runFFmpeg } from "../services/ffmpeg/run";
 import type { Job, WorkerContext } from "./types";
+import { cleanupTempDirSafe } from "../lib/tempCleanup";
 
 const PIPELINE = "CLIP_RENDER";
 
@@ -44,6 +45,8 @@ interface ProjectRow {
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
+  let tempDir: string | null = null;
+
   try {
     const payload = CLIP_RENDER.parse(job.payload);
 
@@ -109,7 +112,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       return;
     }
 
-    const tempDir = await fs.mkdtemp(join(tmpdir(), "cliply-render-"));
+    tempDir = await fs.mkdtemp(join(tmpdir(), "cliply-render-"));
     const tempVideo = join(tempDir, `${clipId}.mp4`);
     const tempThumb = join(tempDir, `${clipId}.jpg`);
 
@@ -239,6 +242,11 @@ await ensureFileExists(tempThumb);
       error: (error as Error)?.message ?? String(error),
     });
     throw error;
+  } finally {
+    // Clean up temp directory on both success and failure
+    if (tempDir) {
+      await cleanupTempDirSafe(tempDir, ctx.logger);
+    }
   }
 }
 

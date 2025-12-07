@@ -98,6 +98,52 @@ export function createStorageAdapter(supabase: SupabaseClient): StorageAdapter {
         throw new Error(`Failed to upload ${bucket}/${path}: ${error.message}`);
       }
     },
+
+    async remove(bucket: string, path: string): Promise<boolean> {
+      const { data, error } = await supabase.storage.from(bucket).remove([path]);
+
+      // If bucket doesn't exist or file not found, treat as success
+      if (error) {
+        if (error.message?.includes("not found") || error.message?.includes("does not exist")) {
+          return false;
+        }
+        throw new Error(`Failed to remove ${bucket}/${path}: ${error.message}`);
+      }
+
+      // Supabase returns array of successfully deleted files
+      return (data && data.length > 0) ?? false;
+    },
+
+    async removeBatch(bucket: string, paths: string[]): Promise<number> {
+      if (paths.length === 0) {
+        return 0;
+      }
+
+      // Supabase storage remove() accepts up to 1000 paths at once
+      // Batch in chunks of 500 to be safe
+      const BATCH_SIZE = 500;
+      let totalDeleted = 0;
+
+      for (let i = 0; i < paths.length; i += BATCH_SIZE) {
+        const batch = paths.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase.storage.from(bucket).remove(batch);
+
+        if (error) {
+          // If bucket doesn't exist, treat as success
+          if (error.message?.includes("not found") || error.message?.includes("does not exist")) {
+            continue;
+          }
+          // Log error but continue with next batch (best effort)
+          console.warn(`Failed to remove batch from ${bucket}:`, error.message);
+          continue;
+        }
+
+        // Count successfully deleted files
+        totalDeleted += data?.length ?? 0;
+      }
+
+      return totalDeleted;
+    },
   };
 }
 

@@ -123,7 +123,7 @@ export async function syncSubscriptionsJob(): Promise<void> {
         processed += 1;
 
         const price = sub.items.data[0]?.price;
-        const plan = (price?.id ? getPlanFromPriceId(price.id) : null) ?? "basic";
+        const plan = ((price?.id ? getPlanFromPriceId(price.id) : null) ?? "basic") as PlanName;
 
         const workspaceId =
           typeof sub.metadata?.workspace_id === "string" && UUID_PATTERN.test(sub.metadata.workspace_id)

@@ -26,7 +26,6 @@
   "include": [
     "src/**/*.ts",
     "types/**/*.ts",
-    "billing/**/*.ts",
     "logging/**/*.ts",
     "auth/**/*.ts",
     "lib/**/*.ts",
@@ -37,6 +36,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "test"
+    "test",
+    "billing"
   ]
 }
