@@ -26,6 +26,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       return;
     }
 
+    // ✅ New: make sure userId is present and narrow its type to `string`
+    if (!userId) {
+      logger.warn('oauth_google_start_missing_user', {
+        workspaceId,
+        durationMs: Date.now() - started,
+      });
+
+      res.status(401).json(err('missing_user', 'user required'));
+      return;
+    }
+
     await checkRateLimit(userId, 'oauth:google:start');
 
     const redirectUri = req.query.redirect_uri as string | undefined;

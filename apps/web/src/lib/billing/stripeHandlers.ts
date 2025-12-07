@@ -5,7 +5,6 @@ import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { logStripeEvent } from "@cliply/shared/observability/logging";
 import * as workspacePlanService from "./workspacePlanService";
-import { withRetry } from "@cliply/shared/resilience/externalServiceResilience";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,18 +17,21 @@ const UUID_PATTERN =
 function shouldRetryStripeCall(error: unknown): boolean {
   // Network errors and timeouts
   if (error instanceof Error) {
-    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+    if (error.name === "AbortError" || error.message.includes("timeout")) {
       return true;
     }
-    if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+    if (
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("ENOTFOUND")
+    ) {
       return true;
     }
   }
 
   // Stripe errors
-  if (error && typeof error === 'object' && 'type' in error) {
+  if (error && typeof error === "object" && "type" in error) {
     const stripeError = error as { type?: string; statusCode?: number };
-    
+
     // Retry on 5xx server errors
     if (stripeError.statusCode && stripeError.statusCode >= 500) {
       return true;
@@ -41,9 +43,9 @@ function shouldRetryStripeCall(error: unknown): boolean {
     // - authentication_error
     if (stripeError.type) {
       const nonRetryableTypes = [
-        'card_error',
-        'invalid_request_error',
-        'authentication_error',
+        "card_error",
+        "invalid_request_error",
+        "authentication_error",
       ];
       if (nonRetryableTypes.includes(stripeError.type)) {
         return false;
@@ -55,12 +57,57 @@ function shouldRetryStripeCall(error: unknown): boolean {
   return false;
 }
 
-type SupportedSubscriptionStatus = "active" | "trialing" | "canceled" | "incomplete" | "past_due";
+/**
+ * Local helper to retrieve a Stripe subscription with retry logic.
+ * Uses shouldRetryStripeCall() to decide whether to retry.
+ */
+async function retrieveSubscriptionWithRetry(
+  stripe: Stripe,
+  subscriptionId: string,
+): Promise<Stripe.Subscription> {
+  const maxAttempts = 2;
+  const baseDelayMs = 300;
+  const maxDelayMs = 2000;
+
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    try {
+      return await stripe.subscriptions.retrieve(subscriptionId);
+    } catch (error) {
+      lastError = error;
+
+      if (!shouldRetryStripeCall(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = Math.min(baseDelayMs * attempt, maxDelayMs);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error("Failed to retrieve subscription after retries");
+}
+
+type SupportedSubscriptionStatus =
+  | "active"
+  | "trialing"
+  | "canceled"
+  | "incomplete"
+  | "past_due";
 
 /**
  * Extracts workspace_id from Stripe metadata, supporting multiple key formats.
  */
-function extractWorkspaceId(metadata: Stripe.Metadata | null | undefined): string | null {
+function extractWorkspaceId(
+  metadata: Stripe.Metadata | null | undefined,
+): string | null {
   const candidate =
     metadata?.workspace_id ??
     metadata?.workspaceId ??
@@ -75,7 +122,9 @@ function extractWorkspaceId(metadata: Stripe.Metadata | null | undefined): strin
 /**
  * Maps Stripe subscription status to our internal status enum.
  */
-function mapSubscriptionStatus(status: Stripe.Subscription.Status): SupportedSubscriptionStatus {
+function mapSubscriptionStatus(
+  status: Stripe.Subscription.Status,
+): SupportedSubscriptionStatus {
   switch (status) {
     case "active":
       return "active";
@@ -196,23 +245,23 @@ export async function upsertBillingFromCheckout(
   try {
     // If session has a subscription, retrieve and process it
     if (session.subscription && typeof session.subscription === "string") {
-      const subscription = await withRetry(
-        'stripe.subscriptions.retrieve',
-        async () => {
-          return await stripe.subscriptions.retrieve(session.subscription as string);
-        },
-        (error) => shouldRetryStripeCall(error),
-        {
-          maxAttempts: 2,
-          baseDelayMs: 300,
-          maxDelayMs: 2000,
-        },
+      const subscription = await retrieveSubscriptionWithRetry(
+        stripe,
+        session.subscription as string,
       );
-      await upsertSubscriptionRecord(subscription, workspaceId, supabase, "checkout.session.completed");
+
+      await upsertSubscriptionRecord(
+        subscription,
+        workspaceId,
+        supabase,
+        "checkout.session.completed",
+      );
     } else {
       // No subscription yet - this might be a one-time payment or incomplete checkout
       // Log but don't fail - subscription will be created when customer.subscription.created fires
-      console.warn(`Checkout session ${session.id} completed but no subscription ID present`);
+      console.warn(
+        `Checkout session ${session.id} completed but no subscription ID present`,
+      );
     }
   } catch (error) {
     logStripeEvent("checkout.session.completed", {
@@ -232,7 +281,12 @@ export async function handleSubscriptionEvent(
   subscription: Stripe.Subscription,
   eventType: string,
   supabase: SupabaseClient,
-  logAudit?: (workspaceId: string, eventType: string, eventId: string, payload: Record<string, unknown>) => Promise<void>,
+  logAudit?: (
+    workspaceId: string,
+    eventType: string,
+    eventId: string,
+    payload: Record<string, unknown>,
+  ) => Promise<void>,
 ): Promise<string> {
   const customerId =
     typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
@@ -333,11 +387,16 @@ async function upsertSubscriptionRecord(
 
   // Update workspace plan and billing status
   try {
-    await workspacePlanService.setWorkspacePlan(workspaceId, plan, { supabase }, {
-      billingStatus: status,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: sub.id,
-    });
+    await workspacePlanService.setWorkspacePlan(
+      workspaceId,
+      plan,
+      { supabase },
+      {
+        billingStatus: status,
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: sub.id,
+      },
+    );
   } catch (error) {
     // Log but don't fail webhook if workspace update fails
     console.error(`Failed to update workspace plan for ${workspaceId}:`, error);
@@ -389,7 +448,9 @@ export async function handleInvoiceEvent(
 ): Promise<string> {
   // Resolve workspace from subscription
   const subscriptionId =
-    typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+    typeof invoice.subscription === "string"
+      ? invoice.subscription
+      : invoice.subscription?.id;
   if (!subscriptionId) {
     throw new Error(`Invoice ${invoice.id} does not include a subscription reference`);
   }
@@ -401,7 +462,9 @@ export async function handleInvoiceEvent(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to resolve workspace for invoice ${invoice.id}: ${error.message}`);
+    throw new Error(
+      `Failed to resolve workspace for invoice ${invoice.id}: ${error.message}`,
+    );
   }
   if (!data?.workspace_id) {
     throw new Error(`Workspace ID not found for invoice ${invoice.id}`);
@@ -442,4 +505,3 @@ export async function handleInvoiceEvent(
 
   return workspaceId;
 }
-

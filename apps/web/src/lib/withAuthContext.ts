@@ -1,22 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildAuthContext, type AuthContext } from "@cliply/shared/auth/context";
-import { AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
+import { authErrorResponse } from "@cliply/shared/types/auth";
+import type { AuthErrorCode } from "@cliply/shared/types/auth";
 
 type ApiHandler = (req: NextRequest & { context: AuthContext }) => Promise<NextResponse>;
 
+// Narrow set of auth error codes we expect from the shared layer
 type KnownAuthErrorCode =
-  | AuthErrorCode.UNAUTHORIZED
-  | AuthErrorCode.FORBIDDEN
-  | AuthErrorCode.WORKSPACE_MISMATCH
-  | AuthErrorCode.MISSING_HEADER
-  | AuthErrorCode.INTERNAL_ERROR;
+  | "UNAUTHENTICATED"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "WORKSPACE_MISMATCH"
+  | "MISSING_HEADER"
+  | "INTERNAL_ERROR";
 
 type AuthError = { code: KnownAuthErrorCode; message: string; status: number };
 
-const AUTH_ERROR_CODES = new Set(Object.values(AuthErrorCode));
+const KNOWN_AUTH_ERROR_CODES: readonly KnownAuthErrorCode[] = [
+  "UNAUTHENTICATED",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "WORKSPACE_MISMATCH",
+  "MISSING_HEADER",
+  "INTERNAL_ERROR",
+];
 
-function jsonError(code: AuthErrorCode, message: string, status: number): NextResponse {
-  const payload = authErrorResponse(code, message, status);
+const AUTH_ERROR_CODE_SET = new Set<string>(KNOWN_AUTH_ERROR_CODES);
+
+function jsonError(code: KnownAuthErrorCode, message: string, status: number): NextResponse {
+  // Cast to shared AuthErrorCode type for the helper
+  const payload = authErrorResponse(code as AuthErrorCode, message, status);
   return NextResponse.json(payload, { status: payload.status });
 }
 
@@ -40,7 +53,7 @@ export function withAuthContext(handler: ApiHandler): ApiHandler {
 
       // 5. Handle unexpected exceptions with a generic internal error response.
       return jsonError(
-        AuthErrorCode.INTERNAL_ERROR,
+        "INTERNAL_ERROR",
         "Authentication middleware failed unexpectedly.",
         500,
       );
@@ -53,7 +66,7 @@ function isAuthError(value: unknown): value is AuthError {
   const cast = value as Partial<AuthError>;
   return (
     typeof cast.code === "string" &&
-    AUTH_ERROR_CODES.has(cast.code as AuthErrorCode) &&
+    AUTH_ERROR_CODE_SET.has(cast.code) &&
     typeof cast.message === "string" &&
     typeof cast.status === "number"
   );
@@ -61,6 +74,6 @@ function isAuthError(value: unknown): value is AuthError {
 
 function mapStatus(status: number, code: KnownAuthErrorCode): number {
   if (status >= 400) return status;
-  if (code === AuthErrorCode.FORBIDDEN || code === AuthErrorCode.WORKSPACE_MISMATCH) return 403;
+  if (code === "FORBIDDEN" || code === "WORKSPACE_MISMATCH") return 403;
   return 401;
 }

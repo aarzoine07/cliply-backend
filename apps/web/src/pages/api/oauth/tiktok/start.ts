@@ -19,7 +19,14 @@ import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   // Fence: Disable in production
   if (process.env.NODE_ENV === 'production') {
-    return res.status(410).json(err('legacy_route_removed', 'This legacy route is no longer available in production. Use /api/auth/tiktok/connect instead.'));
+    return res
+      .status(410)
+      .json(
+        err(
+          'legacy_route_removed',
+          'This legacy route is no longer available in production. Use /api/auth/tiktok/connect instead.',
+        ),
+      );
   }
 
   if (req.method !== 'GET') {
@@ -32,8 +39,15 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   try {
     const auth = await buildAuthContext(req);
-    const userId = auth.userId || auth.user_id;
-    const workspaceId = auth.workspaceId || auth.workspace_id;
+
+    // Explicitly handle possible null/undefined values, then narrow to string
+    const userId: string | null = auth.userId ?? auth.user_id ?? null;
+    const workspaceId: string | null = auth.workspaceId ?? auth.workspace_id ?? null;
+
+    if (!userId) {
+      res.status(401).json(err('unauthorized', 'user id required'));
+      return;
+    }
 
     if (!workspaceId) {
       res.status(400).json(err('invalid_request', 'workspace required'));
@@ -76,4 +90,3 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to start OAuth flow'));
   }
 });
-
