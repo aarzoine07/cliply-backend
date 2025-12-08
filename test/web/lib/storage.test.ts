@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@cliply/shared', () => ({
   BUCKET_VIDEOS: 'videos',
-  SIGNED_URL_TTL_SEC: 600,
+  SIGNED_URL_TTL_SEC: 300,
 }));
 
 const { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC } = await import('@cliply/shared');
@@ -25,9 +25,11 @@ describe('storage.getSignedUploadUrl', () => {
     resetEnvForTesting();
     Object.assign(process.env, {
       NODE_ENV: 'test',
+      SUPABASE_URL: 'https://example.supabase.co',
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+      SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9test',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9test',
+      SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9service_role_key_test',
     });
   });
 
@@ -72,6 +74,6 @@ describe('storage.getSignedUploadUrl', () => {
     expect(requestUrl.toString()).toBe(
       'https://example.supabase.co/storage/v1/object/upload/sign/videos/workspace-123/project-456/source.mp4',
     );
-    expect(options?.body).toBe(JSON.stringify({ expiresIn: SIGNED_URL_TTL_SEC }));
+    expect(options?.body).toBe(JSON.stringify({ expiresIn: 300 }));
   });
 });

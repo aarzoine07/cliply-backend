@@ -4,6 +4,16 @@ This document describes all environment variables used by the Cliply backend.
 
 **Single Source of Truth**: All environment variables are defined in `packages/shared/src/env.ts`. Server-side code should use the shared env module or app-specific adapters instead of accessing `process.env` directly.
 
+## Getting Started
+
+**New to the project?** Follow these steps to configure your local environment:
+
+1. **Copy the template**: `cp .env.example .env.local`
+2. **Fill in required values** using this document as a reference
+3. **For tests**: Create `.env.test` following the guide in `TEST_ENV_SETUP.md`
+
+The `.env.example` file in the repo root contains all environment variables with helpful comments and organization.
+
 ## Quick Reference
 
 - **Server-side code (web/worker)**: Import from `@cliply/shared/env` or use app adapters (`apps/web/src/lib/env.ts`, `apps/worker/src/env.ts`)
@@ -110,30 +120,21 @@ These variables are exposed to the browser and must be prefixed with `NEXT_PUBLI
 
 ### Development
 
-Create a `.env.local` file in the repository root (or in `apps/web/` for Next.js):
+The easiest way to get started is to use the provided template:
 
 ```bash
-# Required
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=eyJhbGc...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
-TIKTOK_ENCRYPTION_KEY=<generate with command below>
+# Copy the template
+cp .env.example .env.local
 
-# Optional but recommended
-NODE_ENV=development
-SENTRY_DSN=
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-TIKTOK_CLIENT_ID=xxx
-TIKTOK_CLIENT_SECRET=xxx
-CRON_SECRET=xxx
-
-# Next.js Public (for client-side)
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGc...
-NEXT_PUBLIC_TIKTOK_REDIRECT_URL=http://localhost:3000/api/auth/tiktok/connect/callback
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+# Edit .env.local and fill in the required values
+# Required minimum for local development:
+# - SUPABASE_URL
+# - SUPABASE_ANON_KEY
+# - SUPABASE_SERVICE_ROLE_KEY
+# - TIKTOK_ENCRYPTION_KEY (if using TikTok features)
 ```
+
+The `.env.example` file contains all available environment variables organized by category with helpful comments. You don't need to set all of them for local development—start with the required Supabase credentials and add others as needed.
 
 ### Generate TikTok Encryption Key
 
@@ -218,10 +219,14 @@ Please check your .env file or environment configuration.
 
 ## Environment-Specific Files
 
+- `.env.example` - **Template with all variables** (committed to git) ✅
+  - Start here! Copy this to `.env.local` for development
 - `.env.local` - Local development (git-ignored)
-- `.env.production` - Production environment (git-ignored)
+  - Your personal dev environment—not committed
 - `.env.test` - Test environment (git-ignored)
-- `.env.example` - Template with all variables (committed to git)
+  - See `TEST_ENV_SETUP.md` for test-specific setup
+- `.env.production` - Production environment (git-ignored, typically not used)
+  - Production uses platform env vars (Vercel, etc.)
 
 ## Testing
 

@@ -20,26 +20,22 @@ function safeErrorMessage(error: unknown): string {
   return String(error);
 }
 
-/**
- * Gets the Sentry addBreadcrumb function at runtime.
- * This ensures Vitest mocks are applied when require is called.
- */
-function getSentryAddBreadcrumb(): typeof import("@sentry/node").addBreadcrumb | undefined {
+// Dynamic Sentry import for better testability  
+// Using a getter function so tests can mock it more easily
+function getSentryModule(): typeof import("@sentry/node") | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sentry = require("@sentry/node");
-    if (sentry && typeof sentry.addBreadcrumb === "function") {
-      return sentry.addBreadcrumb;
-    }
+    return require("@sentry/node");
   } catch {
-    // Sentry not available
+    return undefined;
   }
-  return undefined;
 }
 
 /**
  * Adds a Sentry breadcrumb if Sentry is available.
  * Silently fails if Sentry is not configured.
+ * 
+ * Internal helper - calls through to Sentry's addBreadcrumb.
  */
 function addBreadcrumb(
   category: string,
@@ -47,9 +43,9 @@ function addBreadcrumb(
   level: "info" | "warning" | "error",
   data?: Record<string, unknown>,
 ): void {
-  const sentryAddBreadcrumb = getSentryAddBreadcrumb();
-  if (sentryAddBreadcrumb) {
-    sentryAddBreadcrumb({
+  const sentry = getSentryModule();
+  if (sentry && typeof sentry.addBreadcrumb === "function") {
+    sentry.addBreadcrumb({
       category,
       message,
       level,

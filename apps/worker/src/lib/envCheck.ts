@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { getEnv } from "@cliply/shared/env";
-import { logger } from "@cliply/shared/logging/logger";
+import envModule from "../../../../packages/shared/dist/src/env.js";
+import loggerModule from "../../../../packages/shared/dist/logging/logger.js";
+
+const { getEnv } = envModule;
+const { logger } = loggerModule;
 
 const execFileAsync = promisify(execFile);
 

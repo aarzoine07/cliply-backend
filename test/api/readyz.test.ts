@@ -2,8 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import readyzRoute from '../../apps/web/src/pages/api/readyz';
 import { supertestHandler } from '../utils/supertest-next';
-import * as readyChecks from '../../packages/shared/src/health/readyChecks';
-import * as supabaseLib from '../../apps/web/src/lib/supabase';
+
+// Mock the modules before importing them
+vi.mock('@cliply/shared/health/readyChecks.js', () => ({
+  checkEnvForApi: vi.fn(),
+  checkSupabaseConnection: vi.fn(),
+}));
+
+vi.mock('../../apps/web/src/lib/supabase', () => ({
+  getAdminClient: vi.fn(),
+}));
+
+import { checkEnvForApi, checkSupabaseConnection } from '@cliply/shared/health/readyChecks.js';
+import { getAdminClient } from '../../apps/web/src/lib/supabase';
 
 const toApiHandler = (handler: typeof readyzRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
@@ -13,9 +24,9 @@ describe('GET /api/readyz', () => {
   });
 
   it('returns 200 when all checks pass', async () => {
-    vi.spyOn(readyChecks, 'checkEnvForApi').mockReturnValue({ ok: true });
-    vi.spyOn(readyChecks, 'checkSupabaseConnection').mockResolvedValue({ ok: true });
-    vi.spyOn(supabaseLib, 'getAdminClient').mockReturnValue({
+    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
+    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
+    vi.mocked(getAdminClient).mockReturnValue({
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue({ error: null }),
@@ -35,11 +46,11 @@ describe('GET /api/readyz', () => {
   });
 
   it('returns 503 when env check fails', async () => {
-    vi.spyOn(readyChecks, 'checkEnvForApi').mockReturnValue({
+    vi.mocked(checkEnvForApi).mockReturnValue({
       ok: false,
       missing: ['SUPABASE_URL'],
     });
-    vi.spyOn(readyChecks, 'checkSupabaseConnection').mockResolvedValue({ ok: true });
+    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
 
     const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
 
@@ -52,12 +63,12 @@ describe('GET /api/readyz', () => {
   });
 
   it('returns 503 when DB check fails', async () => {
-    vi.spyOn(readyChecks, 'checkEnvForApi').mockReturnValue({ ok: true });
-    vi.spyOn(readyChecks, 'checkSupabaseConnection').mockResolvedValue({
+    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
+    vi.mocked(checkSupabaseConnection).mockResolvedValue({
       ok: false,
       error: 'connection_timeout',
     });
-    vi.spyOn(supabaseLib, 'getAdminClient').mockReturnValue({
+    vi.mocked(getAdminClient).mockReturnValue({
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           limit: vi.fn().mockResolvedValue({ error: null }),
@@ -80,8 +91,8 @@ describe('GET /api/readyz', () => {
     const originalEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'test';
 
-    vi.spyOn(readyChecks, 'checkEnvForApi').mockReturnValue({ ok: true });
-    vi.spyOn(readyChecks, 'checkSupabaseConnection').mockResolvedValue({ ok: true });
+    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
+    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
 
     const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
 

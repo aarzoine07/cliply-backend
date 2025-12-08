@@ -66,6 +66,10 @@ describe('createVariantPostsForClip', () => {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
           };
         }
         return {
@@ -75,22 +79,7 @@ describe('createVariantPostsForClip', () => {
       }),
     } as any;
 
-    // Mock connected accounts to return empty
-    const accountsChain = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockImplementation((field: string, value: string) => {
-        if (field === 'platform' && value === 'youtube') {
-          return {
-            data: [],
-            error: null,
-          };
-        }
-        return accountsChain;
-      }),
-    };
-    mockSupabase.from('connected_accounts').select = vi.fn().mockReturnValue(accountsChain);
-
-    // Should not throw, just return early
+    // Should not throw, just return early (no accounts)
     await orchestrationService.createVariantPostsForClip(
       {
         workspaceId: 'ws-1',
@@ -109,6 +98,23 @@ describe('createVariantPostsForClip', () => {
   it('creates variant_posts for multiple accounts', async () => {
     const accountId1 = 'acc-1';
     const accountId2 = 'acc-2';
+    
+    // Create persistent mock objects for each table
+    const variantPostsInsert = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+    });
+    
+    const variantPostsMock = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [], // No existing posts
+        error: null,
+      }),
+      insert: variantPostsInsert,
+    };
+    
     const mockSupabase = {
       from: vi.fn().mockImplementation((table: string) => {
         if (table === 'clips') {
@@ -126,19 +132,19 @@ describe('createVariantPostsForClip', () => {
             }),
           };
         }
-        if (table === 'variant_posts') {
+        if (table === 'connected_accounts') {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
-            in: vi.fn().mockResolvedValue({
-              data: [], // No existing posts
-              error: null,
-            }),
-            insert: vi.fn().mockResolvedValue({
-              data: null,
+            in: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({
+              data: [],
               error: null,
             }),
           };
+        }
+        if (table === 'variant_posts') {
+          return variantPostsMock;
         }
         return {
           select: vi.fn().mockReturnThis(),
@@ -191,7 +197,7 @@ describe('createVariantPostsForClip', () => {
       { supabase: mockSupabase },
     );
 
-    expect(mockSupabase.from('variant_posts').insert).toHaveBeenCalledWith(
+    expect(variantPostsInsert).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           variant_id: 'var-1',
@@ -214,6 +220,25 @@ describe('createVariantPostsForClip', () => {
   it('skips creating duplicate variant_posts (idempotency)', async () => {
     const accountId1 = 'acc-1';
     const accountId2 = 'acc-2';
+    
+    // Create persistent mock objects for each table
+    const variantPostsInsert = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+    });
+    
+    const variantPostsMock = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockResolvedValue({
+        data: [
+          { connected_account_id: accountId1 }, // Already exists
+        ],
+        error: null,
+      }),
+      insert: variantPostsInsert,
+    };
+    
     const mockSupabase = {
       from: vi.fn().mockImplementation((table: string) => {
         if (table === 'clips') {
@@ -231,21 +256,19 @@ describe('createVariantPostsForClip', () => {
             }),
           };
         }
-        if (table === 'variant_posts') {
+        if (table === 'connected_accounts') {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
-            in: vi.fn().mockResolvedValue({
-              data: [
-                { connected_account_id: accountId1 }, // Already exists
-              ],
-              error: null,
-            }),
-            insert: vi.fn().mockResolvedValue({
-              data: null,
+            in: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({
+              data: [],
               error: null,
             }),
           };
+        }
+        if (table === 'variant_posts') {
+          return variantPostsMock;
         }
         return {
           select: vi.fn().mockReturnThis(),
@@ -298,7 +321,7 @@ describe('createVariantPostsForClip', () => {
     );
 
     // Should only insert for accountId2 (accountId1 already exists)
-    expect(mockSupabase.from('variant_posts').insert).toHaveBeenCalledWith([
+    expect(variantPostsInsert).toHaveBeenCalledWith([
       expect.objectContaining({
         connected_account_id: accountId2,
       }),

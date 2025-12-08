@@ -36,7 +36,7 @@ function createMockSupabase() {
                           : 0;
                         return options.ascending ? aTime - bTime : bTime - aTime;
                       });
-                      return { data: sorted.length > 0 ? [sorted[0]] : null, error: null };
+                      return { data: sorted.length > 0 ? sorted[0] : null, error: null };
                     }),
                   })),
                 })),
@@ -61,7 +61,7 @@ describe("resolveWorkspacePlan", () => {
   });
 
   it("returns free plan when workspace has no subscription", async () => {
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, supabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: supabase as any });
 
     expect(result.planId).toBe("basic");
     expect(result.status).toBe("free");
@@ -79,7 +79,7 @@ describe("resolveWorkspacePlan", () => {
       stripe_subscription_id: "sub_test123",
     });
 
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, supabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: supabase as any });
 
     expect(result.planId).toBe("pro");
     expect(result.status).toBe("active");
@@ -97,7 +97,7 @@ describe("resolveWorkspacePlan", () => {
       stripe_subscription_id: "sub_trial123",
     });
 
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, supabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: supabase as any });
 
     expect(result.planId).toBe("premium");
     expect(result.status).toBe("trialing");
@@ -124,7 +124,7 @@ describe("resolveWorkspacePlan", () => {
       stripe_subscription_id: "sub_active123",
     });
 
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, supabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: supabase as any });
 
     // Should return the active one, not the canceled one
     expect(result.planId).toBe("pro");
@@ -152,7 +152,7 @@ describe("resolveWorkspacePlan", () => {
       stripe_subscription_id: "sub_new123",
     });
 
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, supabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: supabase as any });
 
     // Should return the one with latest current_period_end
     expect(result.planId).toBe("premium");
@@ -181,7 +181,7 @@ describe("resolveWorkspacePlan", () => {
       })),
     };
 
-    const result = await resolveWorkspacePlan(WORKSPACE_ID, errorSupabase as any);
+    const result = await resolveWorkspacePlan(WORKSPACE_ID, { supabase: errorSupabase as any });
 
     // Should return default plan on error
     expect(result.planId).toBe("basic");

@@ -1,6 +1,8 @@
 import "dotenv/config";
-import { buildBackendReadinessReport } from "../packages/shared/src/readiness/backendReadiness";
-import { verifyWorkerEnvironment } from "../apps/worker/src/lib/envCheck";
+import backendReadinessModule from "../packages/shared/dist/src/readiness/backendReadiness.js";
+import { verifyWorkerEnvironment } from "../apps/worker/src/lib/envCheck.js";
+
+const { buildBackendReadinessReport } = backendReadinessModule;
 
 async function main() {
   try {
