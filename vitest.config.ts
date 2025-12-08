@@ -9,10 +9,11 @@ const __dirname = dirname(__filename);
 export default defineConfig({
   plugins: [tsconfigPaths()],
   resolve: {
-    alias: {
-      "@": resolve(__dirname, "apps/web/src"),
-      "@cliply/shared": resolve(__dirname, "packages/shared/src"),
-    },
+    alias: [
+      { find: "@", replacement: resolve(__dirname, "apps/web/src") },
+      { find: /^@cliply\/shared\/logging/, replacement: resolve(__dirname, "packages/shared/logging") },
+      { find: /^@cliply\/shared/, replacement: resolve(__dirname, "packages/shared/src") },
+    ],
   },
   test: {
     environment: "node",

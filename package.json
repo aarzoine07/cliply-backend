@@ -26,7 +26,14 @@
     "web": "pnpm --filter @cliply/web dev",
     "db:gen": "ts-node ./scripts/gen-types.ts",
     "db:apply:sql": "tsx scripts/db/apply-sql.ts",
-    "dev:web": "tsx apps/web/src/server.ts"
+    "dev:web": "tsx apps/web/src/server.ts",
+    "dlq:list": "tsx scripts/dlq/list.ts",
+    "dlq:inspect": "tsx scripts/dlq/inspect.ts",
+    "dlq:requeue": "tsx scripts/dlq/requeue.ts",
+    "jobs:stats": "tsx scripts/jobs/stats.ts",
+    "jobs:status": "tsx scripts/jobs/status.ts",
+    "workers:status": "tsx scripts/workers/status.ts",
+    "test:engine:e2e": "vitest run test/engine/pipeline-flow-simple.e2e.test.ts"
   },
   "workspaces": [
     "apps/*",

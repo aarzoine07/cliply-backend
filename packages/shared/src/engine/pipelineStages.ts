@@ -111,3 +111,31 @@ export function isValidStage(stage: string | null | undefined): stage is Project
   return STAGE_ORDER.includes(stage as ProjectPipelineStage);
 }
 
+/**
+ * Determines if a pipeline should skip work based on current stage.
+ * This is a convenience wrapper around isStageAtLeast for clearer intent.
+ * 
+ * @param currentStage - Current pipeline stage from DB (may be null)
+ * @param requiredStage - Stage that must be completed for work to be skipped
+ * @returns true if work should be skipped (stage already at or beyond required)
+ * 
+ * @example
+ * // Transcribe pipeline checks if transcription already done
+ * if (shouldSkipStage(projectStage, 'TRANSCRIBED')) {
+ *   logger.info('pipeline_stage_skipped', ...);
+ *   return;
+ * }
+ * 
+ * // Render pipeline checks if rendering already done
+ * if (shouldSkipStage(projectStage, 'RENDERED')) {
+ *   logger.info('pipeline_stage_skipped', ...);
+ *   return;
+ * }
+ */
+export function shouldSkipStage(
+  currentStage: string | null | undefined,
+  requiredStage: ProjectPipelineStage,
+): boolean {
+  return isStageAtLeast(currentStage, requiredStage);
+}
+

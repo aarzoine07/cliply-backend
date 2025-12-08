@@ -404,11 +404,17 @@ async function checkAndUpdateProjectStatus(
       updates.pipeline_stage = 'RENDERED';
     }
 
-    const { error: updateError } = await ctx.supabase
+    // Conditional update: only advance if not already at RENDERED or beyond
+    // This prevents concurrent clip-render jobs from causing race conditions
+    const { data: updatedProject, error: updateError } = await ctx.supabase
       .from("projects")
       .update(updates)
       .eq("id", projectId)
-      .eq("workspace_id", workspaceId);
+      .eq("workspace_id", workspaceId)
+      // Only update if stage is less than RENDERED (atomic check)
+      .not('pipeline_stage', 'in', '(RENDERED,PUBLISHED)')
+      .select('id, pipeline_stage')
+      .maybeSingle();
 
     if (updateError) {
       ctx.logger.warn("clip_render_project_status_update_failed", {
@@ -417,7 +423,8 @@ async function checkAndUpdateProjectStatus(
         workspaceId,
         error: updateError.message,
       });
-    } else {
+    } else if (updatedProject) {
+      // Only log if we actually updated (not already at RENDERED)
       if (nextStage === 'RENDERED') {
         ctx.logger.info("pipeline_stage_advanced", {
           pipeline: PIPELINE_CLIP_RENDER,
@@ -434,6 +441,15 @@ async function checkAndUpdateProjectStatus(
         workspaceId,
         totalClips: clips.length,
       });
+    } else {
+      // No rows updated - stage was already at RENDERED or beyond
+      ctx.logger.info("clip_render_project_already_ready", {
+        pipeline: PIPELINE_CLIP_RENDER,
+        projectId,
+        workspaceId,
+        totalClips: clips.length,
+        currentStage: currentStage ?? 'unknown',
+      });
     }
   } else if (anyFailed && clips.every((clip) => clip.status === "ready" || clip.status === "failed")) {
     // All clips are either ready or failed - mark project as ready (with some failed clips)
@@ -448,11 +464,16 @@ async function checkAndUpdateProjectStatus(
       updates.pipeline_stage = 'RENDERED';
     }
 
-    const { error: updateError } = await ctx.supabase
+    // Conditional update: only advance if not already at RENDERED or beyond
+    const { data: updatedProject, error: updateError } = await ctx.supabase
       .from("projects")
       .update(updates)
       .eq("id", projectId)
-      .eq("workspace_id", workspaceId);
+      .eq("workspace_id", workspaceId)
+      // Only update if stage is less than RENDERED (atomic check)
+      .not('pipeline_stage', 'in', '(RENDERED,PUBLISHED)')
+      .select('id, pipeline_stage')
+      .maybeSingle();
 
     if (updateError) {
       ctx.logger.warn("clip_render_project_status_update_failed", {
@@ -461,7 +482,8 @@ async function checkAndUpdateProjectStatus(
         workspaceId,
         error: updateError.message,
       });
-    } else {
+    } else if (updatedProject) {
+      // Only log if we actually updated (not already at RENDERED)
       if (nextStage === 'RENDERED') {
         ctx.logger.info("pipeline_stage_advanced", {
           pipeline: PIPELINE_CLIP_RENDER,
@@ -479,6 +501,17 @@ async function checkAndUpdateProjectStatus(
         totalClips: clips.length,
         readyClips: clips.filter((c) => c.status === "ready").length,
         failedClips: clips.filter((c) => c.status === "failed").length,
+      });
+    } else {
+      // No rows updated - stage was already at RENDERED or beyond
+      ctx.logger.info("clip_render_project_already_ready_with_failures", {
+        pipeline: PIPELINE_CLIP_RENDER,
+        projectId,
+        workspaceId,
+        totalClips: clips.length,
+        readyClips: clips.filter((c) => c.status === "ready").length,
+        failedClips: clips.filter((c) => c.status === "failed").length,
+        currentStage: currentStage ?? 'unknown',
       });
     }
   }

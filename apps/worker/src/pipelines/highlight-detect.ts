@@ -232,6 +232,46 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       status: 'proposed' as ClipStatus,
     }));
 
+    // Advance pipeline stage to CLIPS_GENERATED BEFORE inserting clips for atomicity
+    // This prevents double-work on retries and ensures idempotent behavior
+    const nextStage = nextStageAfter(currentStage);
+    if (nextStage === 'CLIPS_GENERATED') {
+      // Conditional update: only advance if not already at CLIPS_GENERATED or beyond
+      const { data: updatedProject, error: stageError } = await ctx.supabase
+        .from('projects')
+        .update({ 
+          pipeline_stage: 'CLIPS_GENERATED',
+          status: 'clips_proposed' // Update legacy status for backward compatibility
+        })
+        .eq('id', payload.projectId)
+        // Only update if stage is less than CLIPS_GENERATED (prevents concurrent updates)
+        .not('pipeline_stage', 'in', '(CLIPS_GENERATED,RENDERED,PUBLISHED)')
+        .select('id, pipeline_stage')
+        .maybeSingle();
+
+      if (stageError) {
+        ctx.logger.warn('highlight_detect_stage_advancement_failed', {
+          pipeline: PIPELINE_HIGHLIGHT_DETECT,
+          jobKind: job.type,
+          jobId: job.id,
+          workspaceId,
+          projectId: payload.projectId,
+          error: stageError.message,
+        });
+        // Don't fail the pipeline - stage advancement is best-effort
+      } else if (updatedProject) {
+        ctx.logger.info('pipeline_stage_advanced', {
+          pipeline: PIPELINE_HIGHLIGHT_DETECT,
+          jobKind: job.type,
+          jobId: job.id,
+          workspaceId,
+          projectId: payload.projectId,
+          from: currentStage ?? 'TRANSCRIBED',
+          to: 'CLIPS_GENERATED',
+        });
+      }
+    }
+
     if (inserts.length > 0) {
       const { data: insertedClips, error: insertError } = await ctx.supabase
         .from('clips')
@@ -281,27 +321,9 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
           });
         }
       }
-    }
-
-    await ensureProjectStatus(ctx, payload.projectId, 'clips_proposed');
-
-    // Advance pipeline stage to CLIPS_GENERATED
-    const nextStage = nextStageAfter(currentStage);
-    if (nextStage === 'CLIPS_GENERATED') {
-      await ctx.supabase
-        .from('projects')
-        .update({ pipeline_stage: 'CLIPS_GENERATED' })
-        .eq('id', payload.projectId);
-
-      ctx.logger.info('pipeline_stage_advanced', {
-        pipeline: PIPELINE_HIGHLIGHT_DETECT,
-        jobKind: job.type,
-        jobId: job.id,
-        workspaceId,
-        projectId: payload.projectId,
-        from: currentStage ?? 'TRANSCRIBED',
-        to: 'CLIPS_GENERATED',
-      });
+    } else {
+      // No clips to insert, but still update legacy status for backward compatibility
+      await ensureProjectStatus(ctx, payload.projectId, 'clips_proposed');
     }
 
     ctx.logger.info('pipeline_completed', {

@@ -356,23 +356,41 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     }
 
     // Advance project pipeline stage to PUBLISHED after successful publish
-    // Only advance if not already at PUBLISHED
+    // Only advance if not already at PUBLISHED (atomic conditional update)
     if (!isStageAtLeast(projectStage, 'PUBLISHED')) {
-      await ctx.supabase
+      const { data: updatedProject, error: stageError } = await ctx.supabase
         .from('projects')
         .update({ pipeline_stage: 'PUBLISHED' })
-        .eq('id', clip.project_id);
+        .eq('id', clip.project_id)
+        // Conditional update: only if stage is not already PUBLISHED
+        .neq('pipeline_stage', 'PUBLISHED')
+        .select('id, pipeline_stage')
+        .maybeSingle();
 
-      ctx.logger.info('pipeline_stage_advanced', {
-        pipeline: PIPELINE,
-        job_kind: PIPELINE,
-        jobId,
-        workspaceId,
-        projectId: clip.project_id,
-        clipId: payload.clipId,
-        from: projectStage ?? 'RENDERED',
-        to: 'PUBLISHED',
-      });
+      if (stageError) {
+        ctx.logger.warn('publish_tiktok_stage_advancement_failed', {
+          pipeline: PIPELINE,
+          job_kind: PIPELINE,
+          jobId,
+          workspaceId,
+          projectId: clip.project_id,
+          clipId: payload.clipId,
+          error: stageError.message,
+        });
+        // Don't fail the publish - stage advancement is best-effort
+      } else if (updatedProject) {
+        // Only log if we actually updated (not already PUBLISHED)
+        ctx.logger.info('pipeline_stage_advanced', {
+          pipeline: PIPELINE,
+          job_kind: PIPELINE,
+          jobId,
+          workspaceId,
+          projectId: clip.project_id,
+          clipId: payload.clipId,
+          from: projectStage ?? 'RENDERED',
+          to: 'PUBLISHED',
+        });
+      }
     }
 
     const durationMs = Date.now() - startTime;
