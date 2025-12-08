@@ -13,16 +13,17 @@ import { CLIP_RENDER } from "@cliply/shared/schemas/jobs";
 import type { ClipStatus, ProjectStatus } from "@cliply/shared";
 import { incrementUsage } from "@cliply/shared/billing/usage";
 import { logEvent } from "@cliply/shared/logging/logger";
-import { setPipelineStage } from '@cliply/shared/pipeline/stages';
 import { 
   transcriptSrtPath, 
   clipRenderPath, 
   clipThumbnailPath 
 } from '@cliply/shared/storage/paths';
 import { PIPELINE_CLIP_RENDER } from '@cliply/shared/pipeline/names';
+import { isStageAtLeast, nextStageAfter } from '@cliply/shared/engine/pipelineStages';
 
 import { buildRenderCommand } from "../services/ffmpeg/build-commands";
-import { runFFmpeg } from "../services/ffmpeg/run";
+import { runFfmpegSafely } from "../lib/ffmpegSafe";
+import { FfmpegTimeoutError, FfmpegExecutionError } from "@cliply/shared/errors/video";
 import type { Job, WorkerContext } from "./types";
 import { cleanupTempDirSafe } from "../lib/tempCleanup";
 
@@ -42,6 +43,7 @@ interface ClipRow {
 interface ProjectRow {
   id: string;
   workspace_id: string;
+  pipeline_stage?: string | null;
 }
 
 export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> {
@@ -64,22 +66,35 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const projectId = clip.project_id;
     const clipId = clip.id;
 
+    // Load project pipeline stage to check if rendering is already done
+    const projectStage = project.pipeline_stage ?? null;
+    
+    // If project is already at RENDERED or beyond, check if this specific clip is already rendered
+    if (isStageAtLeast(projectStage, 'RENDERED')) {
+      const videoKey = clipRenderPath(workspaceId, projectId, clipId, 'mp4');
+      const videoExists = await ctx.storage.exists(BUCKET_RENDERS, videoKey);
+      if (videoExists && clip.status === "ready") {
+        ctx.logger.info("pipeline_stage_skipped", {
+          pipeline: PIPELINE_CLIP_RENDER,
+          jobKind: job.type,
+          jobId: String(job.id),
+          workspaceId,
+          projectId,
+          clipId,
+          stage: 'RENDERED',
+          currentStage: projectStage,
+          reason: 'already_completed',
+        });
+        return;
+      }
+    }
+
     // Set clip status to 'rendering' when render job starts
     // After rendering, this becomes a generated_clip with status='ready' (see docs/machine-mapping.md)
-    const { data: clipRows } = await ctx.supabase
+    await ctx.supabase
       .from("clips")
       .update({ status: "rendering" as ClipStatus })
-      .eq("id", clipId)
-      .select();
-    
-    const clipForStage = clipRows?.[0];
-    if (clipForStage) {
-      setPipelineStage(clipForStage, 'rendering');
-      await ctx.supabase
-        .from("clips")
-        .update({ pipeline_stage: clipForStage.pipeline_stage })
-        .eq("id", clipId);
-    }
+      .eq("id", clipId);
 
     logEvent({
       service: 'worker',
@@ -99,15 +114,19 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const videoKey = clipRenderPath(workspaceId, projectId, clipId, 'mp4');
     const thumbKey = clipThumbnailPath(workspaceId, projectId, clipId, 'jpg');
 
+    // Double-check: if video already exists and clip is ready, skip rendering
     const videoExists = await ctx.storage.exists(BUCKET_RENDERS, videoKey);
     if (videoExists && clip.status === "ready") {
-      ctx.logger.info("render_skip_ready", { 
-        pipeline: PIPELINE_CLIP_RENDER, 
+      ctx.logger.info("pipeline_stage_skipped", {
+        pipeline: PIPELINE_CLIP_RENDER,
         jobKind: job.type,
         jobId: String(job.id),
-        clipId,
+        workspaceId,
         projectId,
-        workspaceId 
+        clipId,
+        stage: 'RENDERED',
+        currentStage: projectStage,
+        reason: 'clip_already_rendered',
       });
       return;
     }
@@ -132,7 +151,50 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       },
     });
 
-await runFFmpeg(render.args, ctx.logger);
+    // Use safe FFmpeg wrapper with timeout and error handling
+    const ffmpegResult = await runFfmpegSafely({
+      inputPath: sourcePath,
+      outputPath: tempVideo,
+      args: render.args,
+      timeoutMs: 10 * 60 * 1000, // 10 minutes for clip rendering
+      logger: ctx.logger,
+    });
+
+    if (!ffmpegResult.ok) {
+      if (ffmpegResult.kind === "TIMEOUT") {
+        ctx.logger.error("ffmpeg_timeout", {
+          pipeline: PIPELINE_CLIP_RENDER,
+          jobId: String(job.id),
+          workspaceId,
+          projectId,
+          clipId,
+          timeoutMs: 10 * 60 * 1000,
+        });
+        throw new FfmpegTimeoutError(
+          `FFmpeg timed out after 10 minutes`,
+          10 * 60 * 1000,
+          sourcePath,
+        );
+      }
+
+      ctx.logger.error("ffmpeg_failed", {
+        pipeline: PIPELINE_CLIP_RENDER,
+        jobId: String(job.id),
+        workspaceId,
+        projectId,
+        clipId,
+        exitCode: ffmpegResult.exitCode,
+        signal: ffmpegResult.signal,
+        stderrSummary: ffmpegResult.stderrSummary,
+      });
+      throw new FfmpegExecutionError(
+        `FFmpeg failed with exit code ${ffmpegResult.exitCode ?? "unknown"}: ${ffmpegResult.stderrSummary ?? "no error details"}`,
+        ffmpegResult.exitCode,
+        ffmpegResult.signal,
+        sourcePath,
+        tempVideo,
+      );
+    }
 
 // Verify output files were created
 await ensureFileExists(tempVideo);
@@ -142,24 +204,14 @@ await ensureFileExists(tempThumb);
     await uploadIfMissing(ctx, BUCKET_THUMBS, thumbKey, tempThumb, "image/jpeg");
 
     // Update to generated_clip status='ready' after successful render
-    const { data: readyClipRows } = await ctx.supabase
+    await ctx.supabase
       .from("clips")
       .update({
         status: "ready" as ClipStatus,
         storage_path: `${BUCKET_RENDERS}/${videoKey}`,
         thumb_path: `${BUCKET_THUMBS}/${thumbKey}`,
       })
-      .eq("id", clipId)
-      .select();
-    
-    const readyClip = readyClipRows?.[0];
-    if (readyClip) {
-      setPipelineStage(readyClip, 'rendered');
-      await ctx.supabase
-        .from("clips")
-        .update({ pipeline_stage: readyClip.pipeline_stage })
-        .eq("id", clipId);
-    }
+      .eq("id", clipId);
 
     // Increment usage for successful clip render
     await incrementUsage(ctx.supabase, {
@@ -167,8 +219,8 @@ await ensureFileExists(tempThumb);
       clipRenders: 1,
     });
 
-    // Check if all clips for this project are now ready, and update project status accordingly
-    await checkAndUpdateProjectStatus(ctx, projectId, workspaceId);
+    // Check if all clips for this project are now ready, and update project status and stage accordingly
+    await checkAndUpdateProjectStatus(ctx, projectId, workspaceId, projectStage);
 
     logEvent({
       service: 'worker',
@@ -205,14 +257,7 @@ await ensureFileExists(tempThumb);
         .eq("id", payload.clipId)
         .select();
       
-      const failedClip = failedClipRows?.[0];
-      if (failedClip) {
-        setPipelineStage(failedClip, 'failed');
-        await ctx.supabase
-          .from("clips")
-          .update({ pipeline_stage: failedClip.pipeline_stage })
-          .eq("id", payload.clipId);
-      }
+      // Clip status is already set to 'failed' above
     } catch (updateError) {
       ctx.logger.warn("clip_render_failed_status_update_failed", {
         pipeline: PIPELINE_CLIP_RENDER,
@@ -279,7 +324,10 @@ async function fetchClip(ctx: WorkerContext, clipId: string): Promise<ClipRow | 
 }
 
 async function fetchProject(ctx: WorkerContext, projectId: string): Promise<ProjectRow | null> {
-  const response = await ctx.supabase.from("projects").select("id,workspace_id").eq("id", projectId);
+  const response = await ctx.supabase
+    .from("projects")
+    .select("id,workspace_id,pipeline_stage")
+    .eq("id", projectId);
   const rows = response.data as ProjectRow[] | null;
   return rows?.[0] ?? null;
 }
@@ -317,6 +365,7 @@ async function checkAndUpdateProjectStatus(
   ctx: WorkerContext,
   projectId: string,
   workspaceId: string,
+  currentStage: string | null,
 ): Promise<void> {
   // Fetch all clips for this project
   const { data: clips, error: clipsError } = await ctx.supabase
@@ -345,10 +394,19 @@ async function checkAndUpdateProjectStatus(
   const anyFailed = clips.some((clip) => clip.status === "failed");
 
   if (allReady) {
-    // All clips are ready - update project status to 'ready'
+    // All clips are ready - update project status and advance pipeline stage to RENDERED
+    const nextStage = nextStageAfter(currentStage);
+    const updates: { status: ProjectStatus; pipeline_stage?: string } = {
+      status: "ready" as ProjectStatus,
+    };
+    
+    if (nextStage === 'RENDERED') {
+      updates.pipeline_stage = 'RENDERED';
+    }
+
     const { error: updateError } = await ctx.supabase
       .from("projects")
-      .update({ status: "ready" as ProjectStatus })
+      .update(updates)
       .eq("id", projectId)
       .eq("workspace_id", workspaceId);
 
@@ -360,6 +418,16 @@ async function checkAndUpdateProjectStatus(
         error: updateError.message,
       });
     } else {
+      if (nextStage === 'RENDERED') {
+        ctx.logger.info("pipeline_stage_advanced", {
+          pipeline: PIPELINE_CLIP_RENDER,
+          jobKind: 'CLIP_RENDER',
+          workspaceId,
+          projectId,
+          from: currentStage ?? 'CLIPS_GENERATED',
+          to: 'RENDERED',
+        });
+      }
       ctx.logger.info("clip_render_project_ready", {
         pipeline: PIPELINE_CLIP_RENDER,
         projectId,
@@ -370,9 +438,19 @@ async function checkAndUpdateProjectStatus(
   } else if (anyFailed && clips.every((clip) => clip.status === "ready" || clip.status === "failed")) {
     // All clips are either ready or failed - mark project as ready (with some failed clips)
     // This allows the UI to show the project as ready even if some clips failed
+    // Also advance pipeline stage if appropriate
+    const nextStage = nextStageAfter(currentStage);
+    const updates: { status: ProjectStatus; pipeline_stage?: string } = {
+      status: "ready" as ProjectStatus,
+    };
+    
+    if (nextStage === 'RENDERED') {
+      updates.pipeline_stage = 'RENDERED';
+    }
+
     const { error: updateError } = await ctx.supabase
       .from("projects")
-      .update({ status: "ready" as ProjectStatus })
+      .update(updates)
       .eq("id", projectId)
       .eq("workspace_id", workspaceId);
 
@@ -384,6 +462,16 @@ async function checkAndUpdateProjectStatus(
         error: updateError.message,
       });
     } else {
+      if (nextStage === 'RENDERED') {
+        ctx.logger.info("pipeline_stage_advanced", {
+          pipeline: PIPELINE_CLIP_RENDER,
+          jobKind: 'CLIP_RENDER',
+          workspaceId,
+          projectId,
+          from: currentStage ?? 'CLIPS_GENERATED',
+          to: 'RENDERED',
+        });
+      }
       ctx.logger.info("clip_render_project_ready_with_failures", {
         pipeline: PIPELINE_CLIP_RENDER,
         projectId,

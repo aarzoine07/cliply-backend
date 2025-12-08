@@ -276,23 +276,40 @@ async function processJob(supabase: SupabaseClient, job: WorkerJobClaim): Promis
 
   const sendHeartbeat = async () => {
     try {
-      await supabase.rpc("worker_heartbeat", {
+      const { data, error } = await supabase.rpc("worker_heartbeat", {
         p_job_id: jobId,
         p_worker_id: WORKER_ID,
       });
-      logger.info("heartbeat_sent", {
+
+      if (error) {
+        logger.warn("job_heartbeat_failed", {
+          service: "worker",
+          worker_id: WORKER_ID,
+          job_id: jobId,
+          workspace_id: job.workspace_id,
+          kind,
+          error: error.message,
+        });
+      } else if (data) {
+        logger.info("job_heartbeat_sent", {
+          service: "worker",
+          worker_id: WORKER_ID,
+          job_id: jobId,
+          workspace_id: job.workspace_id,
+          kind,
+        });
+      }
+      // If data is null, job may have completed/failed - that's fine, no need to log
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn("job_heartbeat_exception", {
         service: "worker",
         worker_id: WORKER_ID,
         job_id: jobId,
         workspace_id: job.workspace_id,
+        kind,
+        error: message,
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        "heartbeat_error",
-        { service: "worker", worker_id: WORKER_ID, job_id: jobId, workspace_id: job.workspace_id },
-        { error: message },
-      );
     }
   };
 
@@ -393,12 +410,44 @@ async function processJob(supabase: SupabaseClient, job: WorkerJobClaim): Promis
     );
 
     try {
-      await supabase.rpc("worker_fail", {
+      const { data: failedJob, error: failError } = await supabase.rpc("worker_fail", {
         p_job_id: jobId,
         p_worker_id: WORKER_ID,
         p_error: message,
         p_backoff_seconds: backoffSeconds,
       });
+
+      if (failError) {
+        throw failError;
+      }
+
+      // Check if job was moved to dead_letter
+      if (failedJob && failedJob.state === "dead_letter") {
+        logger.error(
+          "job_marked_dead",
+          {
+            service: "worker",
+            worker_id: WORKER_ID,
+            job_id: jobId,
+            workspace_id: job.workspace_id,
+            kind,
+            attempts: failedJob.attempts,
+            max_attempts: failedJob.max_attempts,
+          },
+          { error: message },
+        );
+
+        logJobStatus(
+          { jobId, workspaceId: job.workspace_id, kind },
+          "failed",
+          { 
+            attempts: failedJob.attempts, 
+            max_attempts: failedJob.max_attempts, 
+            error: message,
+            dead_letter: true,  // Indicate this is a dead-letter failure
+          },
+        );
+      }
     } catch (rpcErr) {
       const rpcMessage = rpcErr instanceof Error ? rpcErr.message : String(rpcErr);
       logger.error(

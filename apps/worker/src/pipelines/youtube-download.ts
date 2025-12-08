@@ -7,7 +7,9 @@ import { YOUTUBE_DOWNLOAD } from "@cliply/shared/schemas/jobs";
 import { logPipelineStep } from "@cliply/shared/observability/logging";
 
 import type { Job, WorkerContext } from "./types";
-import { downloadYouTubeVideo, extractYouTubeVideoId } from "../services/youtube/download";
+import { downloadYouTubeVideo } from "../services/youtube/download";
+import { parseAndValidateVideoSource } from "@cliply/shared/engine/videoInput";
+import { InvalidVideoUrlError } from "@cliply/shared/errors/video";
 
 const PIPELINE = "YOUTUBE_DOWNLOAD";
 
@@ -25,11 +27,44 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const projectId = payload.projectId;
     const youtubeUrl = payload.youtubeUrl;
 
-    // Validate YouTube URL and extract video ID
-    const videoId = extractYouTubeVideoId(youtubeUrl);
-    if (!videoId) {
-      throw new Error(`Invalid YouTube URL: ${youtubeUrl}`);
+    // Validate and parse video source URL (with guardrails)
+    let videoSource;
+    try {
+      videoSource = parseAndValidateVideoSource(youtubeUrl);
+    } catch (error) {
+      if (error instanceof InvalidVideoUrlError) {
+        ctx.logger.error("invalid_video_url", {
+          pipeline: PIPELINE,
+          jobId: job.id,
+          workspaceId,
+          projectId,
+          url: youtubeUrl,
+          reason: error.reason,
+        });
+        throw error;
+      }
+      throw error;
     }
+
+    // Ensure it's a YouTube URL (for now, we only support YouTube)
+    if (videoSource.kind !== "YOUTUBE") {
+      ctx.logger.error("invalid_video_url", {
+        pipeline: PIPELINE,
+        jobId: job.id,
+        workspaceId,
+        projectId,
+        url: youtubeUrl,
+        reason: "not_youtube",
+        sourceKind: videoSource.kind,
+      });
+      throw new InvalidVideoUrlError(
+        `Only YouTube URLs are supported, got ${videoSource.kind}`,
+        youtubeUrl,
+        "not_youtube",
+      );
+    }
+
+    const videoId = videoSource.videoId;
 
     // Fetch project to verify it exists and get workspace
     const project = await fetchProject(ctx, projectId);
