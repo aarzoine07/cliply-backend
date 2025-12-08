@@ -6,11 +6,11 @@ import { BUCKET_TRANSCRIPTS } from '@cliply/shared/constants';
 import { HIGHLIGHT_DETECT } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import type { ClipStatus } from '@cliply/shared';
-import { setPipelineStage } from '@cliply/shared/pipeline/stages';
 import { PIPELINE_HIGHLIGHT_DETECT } from '@cliply/shared/pipeline/names';
 import { PLAN_MATRIX } from '@cliply/shared/billing/planMatrix';
 import { computeMaxClipsForVideo } from '@cliply/shared/engine/clipCount';
 import { consolidateClipCandidates, type ClipCandidate as OverlapClipCandidate } from '@cliply/shared/engine/clipOverlap';
+import { isStageAtLeast, nextStageAfter } from '@cliply/shared/engine/pipelineStages';
 import type { PlanName } from '@cliply/shared/types/auth';
 
 import type { Job, WorkerContext } from './types';
@@ -45,6 +45,29 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
   try {
     const payload = HIGHLIGHT_DETECT.parse(job.payload);
     const workspaceId = job.workspaceId;
+
+    // Load current pipeline stage to check if clips are already generated
+    const { data: projectRows } = await ctx.supabase
+      .from('projects')
+      .select('id,pipeline_stage')
+      .eq('id', payload.projectId);
+    const project = projectRows?.[0];
+    const currentStage = project?.pipeline_stage ?? null;
+
+    // Skip if already at CLIPS_GENERATED or beyond
+    if (isStageAtLeast(currentStage, 'CLIPS_GENERATED')) {
+      ctx.logger.info('pipeline_stage_skipped', {
+        pipeline: PIPELINE_HIGHLIGHT_DETECT,
+        jobKind: job.type,
+        jobId: job.id,
+        workspaceId,
+        projectId: payload.projectId,
+        stage: 'CLIPS_GENERATED',
+        currentStage,
+        reason: 'already_completed',
+      });
+      return;
+    }
 
     // Fetch workspace plan to compute smart max clips
     const { data: workspace } = await ctx.supabase
@@ -122,19 +145,6 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       throw error;
     }
 
-    // Set pipeline_stage to 'analyzing' when starting highlight detection
-    const { data: projectRows } = await ctx.supabase
-      .from('projects')
-      .select('id,pipeline_stage')
-      .eq('id', payload.projectId);
-    const project = projectRows?.[0];
-    if (project) {
-      setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'analyzing');
-      await ctx.supabase
-        .from('projects')
-        .update({ pipeline_stage: project.pipeline_stage })
-        .eq('id', payload.projectId);
-    }
 
     if (segments.length === 0) {
       ctx.logger.warn('highlight_no_segments', {
@@ -275,13 +285,23 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
 
     await ensureProjectStatus(ctx, payload.projectId, 'clips_proposed');
 
-    // Set pipeline_stage to 'clips_proposed' after creating clip proposals
-    if (project) {
-      setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'clips_proposed');
+    // Advance pipeline stage to CLIPS_GENERATED
+    const nextStage = nextStageAfter(currentStage);
+    if (nextStage === 'CLIPS_GENERATED') {
       await ctx.supabase
         .from('projects')
-        .update({ pipeline_stage: project.pipeline_stage })
+        .update({ pipeline_stage: 'CLIPS_GENERATED' })
         .eq('id', payload.projectId);
+
+      ctx.logger.info('pipeline_stage_advanced', {
+        pipeline: PIPELINE_HIGHLIGHT_DETECT,
+        jobKind: job.type,
+        jobId: job.id,
+        workspaceId,
+        projectId: payload.projectId,
+        from: currentStage ?? 'TRANSCRIBED',
+        to: 'CLIPS_GENERATED',
+      });
     }
 
     ctx.logger.info('pipeline_completed', {
@@ -294,24 +314,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       inserted: inserts.length,
     });
   } catch (error) {
-    // Set pipeline_stage to 'failed' on error
-    try {
-      const payload = HIGHLIGHT_DETECT.parse(job.payload);
-      const { data: projectRows } = await ctx.supabase
-        .from('projects')
-        .select('id,pipeline_stage')
-        .eq('id', payload.projectId);
-      const failedProject = projectRows?.[0];
-      if (failedProject) {
-        setPipelineStage(PIPELINE_HIGHLIGHT_DETECT, 'failed');
-        await ctx.supabase
-          .from('projects')
-          .update({ pipeline_stage: failedProject.pipeline_stage })
-          .eq('id', payload.projectId);
-      }
-    } catch (stageUpdateError) {
-      // Ignore stage update errors - don't prevent main error from being thrown
-    }
+    // Note: We don't update pipeline_stage on error - it stays at the previous stage
+    // so retries will resume from the correct checkpoint
 
     const payload = HIGHLIGHT_DETECT.parse(job.payload);
     ctx.sentry.captureException(error, {

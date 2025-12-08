@@ -6,6 +6,7 @@ import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/s
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import { logPipelineStep } from '@cliply/shared/observability/logging';
+import { isStageAtLeast, nextStageAfter } from '@cliply/shared/engine/pipelineStages';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
@@ -21,6 +22,24 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
   try {
     const payload = TRANSCRIBE.parse(job.payload);
     const workspaceId = job.workspaceId;
+
+    // Load current pipeline stage to check if transcription is already done
+    const project = await fetchProject(ctx, payload.projectId);
+    const currentStage = project?.pipeline_stage ?? null;
+
+    // Skip if already transcribed or beyond
+    if (isStageAtLeast(currentStage, 'TRANSCRIBED')) {
+      ctx.logger.info('pipeline_stage_skipped', {
+        pipeline: PIPELINE,
+        jobId: job.id,
+        workspaceId,
+        projectId: payload.projectId,
+        stage: 'TRANSCRIBED',
+        currentStage,
+        reason: 'already_completed',
+      });
+      return;
+    }
 
     // Check usage limits before heavy transcription work
     // We check for at least 1 minute remaining (conservative, actual duration will be recorded after transcription)
@@ -88,21 +107,37 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       ),
     ]);
 
-    const project = await fetchProject(ctx, payload.projectId);
-    const alreadyTranscribed = project?.status === 'transcribed' || project?.status === 'clips_proposed';
+    // Record actual source minutes usage (idempotent - only record once per project)
+    if (result.durationSec !== undefined && result.durationSec > 0) {
+      const minutes = Math.ceil(result.durationSec / 60);
+      await recordUsage({
+        workspaceId,
+        metric: 'source_minutes',
+        amount: minutes,
+      });
+    }
 
-    if (!alreadyTranscribed) {
-      // Record actual source minutes usage (idempotent - only record once per project)
-      if (result.durationSec !== undefined && result.durationSec > 0) {
-        const minutes = Math.ceil(result.durationSec / 60);
-        await recordUsage({
-          workspaceId,
-          metric: 'source_minutes',
-          amount: minutes,
-        });
-      }
+    // Advance pipeline stage to TRANSCRIBED
+    const nextStage = nextStageAfter(currentStage);
+    if (nextStage === 'TRANSCRIBED') {
+      await ctx.supabase
+        .from('projects')
+        .update({ 
+          pipeline_stage: 'TRANSCRIBED',
+          status: 'transcribed', // Keep legacy status for backward compatibility
+        })
+        .eq('id', payload.projectId);
 
-      await ctx.supabase.from('projects').update({ status: 'transcribed' }).eq('id', payload.projectId);
+      ctx.logger.info('pipeline_stage_advanced', {
+        pipeline: PIPELINE,
+        jobId: job.id,
+        workspaceId,
+        projectId: payload.projectId,
+        from: currentStage ?? 'UPLOADED',
+        to: 'TRANSCRIBED',
+      });
+
+      // Enqueue next pipeline stage
       await ctx.queue.enqueue({
         type: 'HIGHLIGHT_DETECT',
         workspaceId,
@@ -191,9 +226,12 @@ async function ensureTranscriptUploaded(
 async function fetchProject(
   ctx: WorkerContext,
   projectId: string,
-): Promise<{ id: string; status?: string; workspace_id?: string } | null> {
-  const response = await ctx.supabase.from('projects').select('id,status,workspace_id').eq('id', projectId);
-  const rows = response.data as Array<{ id: string; status?: string; workspace_id?: string }> | null;
+): Promise<{ id: string; status?: string; workspace_id?: string; pipeline_stage?: string | null } | null> {
+  const response = await ctx.supabase
+    .from('projects')
+    .select('id,status,workspace_id,pipeline_stage')
+    .eq('id', projectId);
+  const rows = response.data as Array<{ id: string; status?: string; workspace_id?: string; pipeline_stage?: string | null }> | null;
   return rows?.[0] ?? null;
 }
 

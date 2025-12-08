@@ -4,6 +4,7 @@
 export * from "./constants";
 export * from "./env";
 export * from "./errors";
+export * from "./errors/video";
 export * from "./events";
 export * from "./guards";
 export * from "./http";
@@ -72,6 +73,11 @@ export * from "./types/billing";
 // ─────────────────────────────────────────────
 export * from "./db/connected-account";
 export * from "./db/connected-account-access";
+
+// ─────────────────────────────────────────────
+// Engine modules
+// ─────────────────────────────────────────────
+export * from "./engine/videoInput";
 
 // ─────────────────────────────────────────────
 // Services

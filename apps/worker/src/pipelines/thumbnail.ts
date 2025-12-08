@@ -6,7 +6,8 @@ import { BUCKET_RENDERS, BUCKET_THUMBS, BUCKET_VIDEOS } from "@cliply/shared/con
 import { THUMBNAIL_GEN } from "@cliply/shared/schemas/jobs";
 
 import type { Job, WorkerContext } from "./types";
-import { runFFmpeg } from "../services/ffmpeg/run";
+import { runFfmpegSafely } from "../lib/ffmpegSafe";
+import { FfmpegTimeoutError, FfmpegExecutionError } from "@cliply/shared/errors/video";
 
 const PIPELINE = "THUMBNAIL_GEN";
 
@@ -51,22 +52,64 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const inputPath = await ctx.storage.download(inputBucket, inputPathKey, join(tempDir, "input.mp4"));
 
     const atSec = payload.atSec ?? Math.max(0, (clip.start_s + clip.end_s) / 2);
-    await runFFmpeg(
-      [
-        "-hide_banner",
-        "-y",
-        "-ss",
-        atSec.toFixed(3),
-        "-i",
+    const ffmpegArgs = [
+      "-hide_banner",
+      "-y",
+      "-ss",
+      atSec.toFixed(3),
+      "-i",
+      inputPath,
+      "-frames:v",
+      "1",
+      "-q:v",
+      "2",
+      tempThumb,
+    ];
+
+    // Use safe FFmpeg wrapper with timeout
+    const ffmpegResult = await runFfmpegSafely({
+      inputPath,
+      outputPath: tempThumb,
+      args: ffmpegArgs,
+      timeoutMs: 2 * 60 * 1000, // 2 minutes for thumbnail generation
+      logger: ctx.logger,
+    });
+
+    if (!ffmpegResult.ok) {
+      if (ffmpegResult.kind === "TIMEOUT") {
+        ctx.logger.error("ffmpeg_timeout", {
+          pipeline: PIPELINE,
+          jobId: String(job.id),
+          workspaceId,
+          projectId,
+          clipId,
+          timeoutMs: 2 * 60 * 1000,
+        });
+        throw new FfmpegTimeoutError(
+          `FFmpeg timed out after 2 minutes`,
+          2 * 60 * 1000,
+          inputPath,
+        );
+      }
+
+      ctx.logger.error("ffmpeg_failed", {
+        pipeline: PIPELINE,
+        jobId: String(job.id),
+        workspaceId,
+        projectId,
+        clipId,
+        exitCode: ffmpegResult.exitCode,
+        signal: ffmpegResult.signal,
+        stderrSummary: ffmpegResult.stderrSummary,
+      });
+      throw new FfmpegExecutionError(
+        `FFmpeg failed with exit code ${ffmpegResult.exitCode ?? "unknown"}: ${ffmpegResult.stderrSummary ?? "no error details"}`,
+        ffmpegResult.exitCode,
+        ffmpegResult.signal,
         inputPath,
-        "-frames:v",
-        "1",
-        "-q:v",
-        "2",
         tempThumb,
-      ],
-      ctx.logger,
-    );
+      );
+    }
 
     await ensureFileExists(tempThumb);
 

@@ -14,6 +14,8 @@ import {
   recordUsage,
   UsageLimitExceededError,
 } from "@cliply/shared/billing/usageTracker";
+import type { PlanName } from "@cliply/shared/types/auth";
+import { isStageAtLeast } from "@cliply/shared/engine/pipelineStages";
 import { cleanupTempFileSafe } from "../lib/tempCleanup";
 
 const PIPELINE = "PUBLISH_YOUTUBE";
@@ -51,6 +53,29 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       throw new Error(`clip not ready for publish: ${payload.clipId}`);
     }
 
+    // Load project pipeline stage to check if already published
+    const { data: projectRows } = await ctx.supabase
+      .from('projects')
+      .select('id,pipeline_stage')
+      .eq('id', clip.project_id)
+      .maybeSingle();
+    const projectStage = projectRows?.pipeline_stage ?? null;
+
+    // Skip if project is already at PUBLISHED stage (additional safeguard)
+    // Note: We still check variant_posts below for per-clip+account idempotency
+    if (isStageAtLeast(projectStage, 'PUBLISHED')) {
+      ctx.logger.info('pipeline_stage_skipped', {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId,
+        projectId: clip.project_id,
+        stage: 'PUBLISHED',
+        currentStage: projectStage,
+        reason: 'project_already_published',
+      });
+      return;
+    }
+
     // Check if already published for this specific account (idempotency per account)
     // Note: We check variant_posts to see if this account already posted this clip
     if (payload.experimentId && payload.variantId) {
@@ -81,9 +106,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     // Load posting history for anti-spam guard
     const postingHistory = await fetchPostingHistory(ctx, workspaceId, payload.connectedAccountId, 'youtube_shorts');
     
-    // TODO (ME-I-04): integrate real plan-based limits using planMatrix
-    // For now, use default plan 'basic'
-    const planName = 'basic';
+    // Fetch workspace plan to derive posting limits
+    const planName = await getWorkspacePlanForPosting(ctx, workspaceId);
     const postingLimits = getDefaultPostingLimitsForPlan(planName);
 
     // Enforce posting limits (anti-spam guard)
@@ -103,6 +127,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
         workspaceId,
         accountId: payload.connectedAccountId,
         platform: 'youtube_shorts',
+        planName,
         historyCount: postingHistory.length,
         limits: postingLimits,
       });
@@ -244,6 +269,24 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       });
     }
 
+    // Advance project pipeline stage to PUBLISHED after successful publish
+    // Only advance if not already at PUBLISHED
+    if (!isStageAtLeast(projectStage, 'PUBLISHED')) {
+      await ctx.supabase
+        .from('projects')
+        .update({ pipeline_stage: 'PUBLISHED' })
+        .eq('id', clip.project_id);
+
+      ctx.logger.info('pipeline_stage_advanced', {
+        pipeline: PIPELINE,
+        clipId: payload.clipId,
+        workspaceId: job.workspaceId,
+        projectId: clip.project_id,
+        from: projectStage ?? 'RENDERED',
+        to: 'PUBLISHED',
+      });
+    }
+
     await markScheduleSent(ctx, payload.clipId);
 
     ctx.logger.info("pipeline_completed", {
@@ -301,6 +344,58 @@ async function markScheduleSent(ctx: WorkerContext, clipId: string): Promise<voi
     .from("schedules")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", schedule.id);
+}
+
+/**
+ * Fetches the workspace plan for posting guard limits.
+ * Falls back to 'basic' if plan lookup fails or plan is invalid.
+ */
+async function getWorkspacePlanForPosting(
+  ctx: WorkerContext,
+  workspaceId: string,
+): Promise<PlanName> {
+  try {
+    const { data: workspace, error } = await ctx.supabase
+      .from('workspaces')
+      .select('plan')
+      .eq('id', workspaceId)
+      .maybeSingle();
+
+    if (error) {
+      ctx.logger.warn('posting_guard_plan_lookup_failed', {
+        pipeline: PIPELINE,
+        workspaceId,
+        error: error.message,
+      });
+      return 'basic';
+    }
+
+    const planName = workspace?.plan;
+    if (planName === 'basic' || planName === 'pro' || planName === 'premium') {
+      ctx.logger.info('posting_guard_plan_resolved', {
+        pipeline: PIPELINE,
+        workspaceId,
+        planName,
+      });
+      return planName;
+    }
+
+    // Invalid or missing plan - fallback to basic
+    ctx.logger.warn('posting_guard_plan_fallback', {
+      pipeline: PIPELINE,
+      workspaceId,
+      planName: planName ?? 'null',
+      reason: 'invalid_or_missing_plan',
+    });
+    return 'basic';
+  } catch (error) {
+    ctx.logger.warn('posting_guard_plan_lookup_exception', {
+      pipeline: PIPELINE,
+      workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'basic';
+  }
 }
 
 async function fetchPostingHistory(
