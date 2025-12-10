@@ -28,10 +28,10 @@
       "require": "./dist/sentry.js",
       "types": "./dist/sentry.d.ts"
     },
-    "./job-kinds": {
-      "import": "./dist/job-kinds.js",
-      "require": "./dist/job-kinds.js",
-      "types": "./dist/job-kinds.d.ts"
+    "./constants": {
+      "import": "./dist/constants.js",
+      "require": "./dist/constants.js",
+      "types": "./dist/constants.d.ts"
     },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
