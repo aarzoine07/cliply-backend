@@ -63,6 +63,11 @@
       "require": "./dist/src/storage/*.js",
       "types": "./dist/src/storage/*.d.ts"
     },
+    "./services/*": {
+      "import": "./dist/src/services/*.js",
+      "require": "./dist/src/services/*.js",
+      "types": "./dist/src/services/*.d.ts"
+    },
     "./schemas": {
       "import": "./dist/src/schemas.js",
       "require": "./dist/src/schemas.js",
@@ -116,6 +121,3 @@
     "stripe": "^19.2.0"
   }
 }
-
-
-
