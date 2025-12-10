@@ -102,6 +102,11 @@
       "import": "./dist/src/idempotency/*.js",
       "require": "./dist/src/idempotency/*.js",
       "types": "./dist/src/idempotency/*.d.ts"
+    },
+    "./services/*": {
+      "import": "./dist/src/services/*.js",
+      "require": "./dist/src/services/*.js",
+      "types": "./dist/src/services/*.d.ts"
     }
   },
 
