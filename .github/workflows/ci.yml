@@ -52,6 +52,10 @@ jobs:
   # May have failures related to Engine Surface features, not env readiness
   extended-tests:
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_TEST_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -84,3 +88,5 @@ jobs:
           path: coverage
           retention-days: 7
 
+
+          
