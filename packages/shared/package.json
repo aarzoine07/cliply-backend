@@ -18,6 +18,11 @@
       "require": "./dist/env.js",
       "types": "./dist/env.d.ts"
     },
+    "./sentry": {
+      "import": "./dist/sentry.js",
+      "require": "./dist/sentry.js",
+      "types": "./dist/sentry.d.ts"
+    },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
       "require": "./dist/src/auth/*.js",
@@ -62,11 +67,6 @@
       "import": "./dist/src/storage/*.js",
       "require": "./dist/src/storage/*.js",
       "types": "./dist/src/storage/*.d.ts"
-    },
-    "./services/*": {
-      "import": "./dist/src/services/*.js",
-      "require": "./dist/src/services/*.js",
-      "types": "./dist/src/services/*.d.ts"
     },
     "./schemas": {
       "import": "./dist/src/schemas.js",
