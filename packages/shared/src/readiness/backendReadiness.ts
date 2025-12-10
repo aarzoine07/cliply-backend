@@ -288,7 +288,7 @@ export function checkStripe(): StripeCheckResult {
     try {
       if (stripeSecretKey.startsWith("sk_")) {
         new Stripe(stripeSecretKey, {
-          apiVersion: "2022-11-15",
+          apiVersion: "2025-10-29.clover",
         });
         keyValid = true;
       }
