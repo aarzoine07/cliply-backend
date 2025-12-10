@@ -5,7 +5,8 @@
     "baseUrl": ".",
 
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@cliply/shared/errorCodes": ["../../packages/shared/dist/errorCodes"]
     },
 
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -45,6 +46,3 @@
     "**/.next/**"
   ]
 }
-
-
-
