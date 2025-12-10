@@ -28,6 +28,11 @@
       "require": "./dist/sentry.js",
       "types": "./dist/sentry.d.ts"
     },
+    "./job-kinds": {
+      "import": "./dist/job-kinds.js",
+      "require": "./dist/job-kinds.js",
+      "types": "./dist/job-kinds.d.ts"
+    },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
       "require": "./dist/src/auth/*.js",
