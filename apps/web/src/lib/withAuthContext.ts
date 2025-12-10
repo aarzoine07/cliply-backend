@@ -1,36 +1,62 @@
+// FILE: apps/web/src/lib/withAuthContext.ts
+// FINAL VERSION – App Router auth-context wrapper (looser typings to avoid cross-package mismatch)
+
 import { NextRequest, NextResponse } from "next/server";
-import { buildAuthContext, type AuthContext } from "@cliply/shared/auth/context";
-import { AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
 
-type ApiHandler = (req: NextRequest & { context: AuthContext }) => Promise<NextResponse>;
+import { buildAuthContext } from "@cliply/shared/auth/context";
+import {
+  type AuthErrorCode,
+  authErrorResponse,
+} from "@cliply/shared/types/auth";
 
-type KnownAuthErrorCode =
-  | AuthErrorCode.UNAUTHORIZED
-  | AuthErrorCode.FORBIDDEN
-  | AuthErrorCode.WORKSPACE_MISMATCH
-  | AuthErrorCode.MISSING_HEADER
-  | AuthErrorCode.INTERNAL_ERROR;
+// Request type that downstream handlers see: NextRequest + a `context` bag.
+// We keep this as `any` to avoid type incompatibilities between built/shared types.
+export type ApiRequestWithContext = NextRequest & { context: any };
 
-type AuthError = { code: KnownAuthErrorCode; message: string; status: number };
+// Handler type used by routes that want auth context.
+export type ApiHandler = (req: ApiRequestWithContext) => Promise<NextResponse>;
 
-const AUTH_ERROR_CODES = new Set(Object.values(AuthErrorCode));
+type AuthError = { code: AuthErrorCode; message: string; status: number };
 
-function jsonError(code: AuthErrorCode, message: string, status: number): NextResponse {
+const AUTH_ERROR_CODES = new Set<string>([
+  "UNAUTHENTICATED",
+  "FORBIDDEN",
+  "INVALID_TOKEN",
+  "MISSING_WORKSPACE",
+  "INTERNAL_ERROR",
+]);
+
+function jsonError(
+  code: AuthErrorCode,
+  message: string,
+  status: number,
+): NextResponse {
   const payload = authErrorResponse(code, message, status);
-  return NextResponse.json(payload, { status: payload.status });
+  return NextResponse.json(payload, { status: payload.status ?? status });
 }
 
-export function withAuthContext(handler: ApiHandler): ApiHandler {
-  return async function withContext(req: NextRequest & { context?: AuthContext }) {
+/**
+ * Wrap an App Router handler so it receives an auth `context` on the request.
+ *
+ * Usage in a route:
+ *   export const GET = withAuthContext(async (req) => {
+ *     const { workspace_id, user_id } = req.context;
+ *     ...
+ *   });
+ */
+export function withAuthContext(
+  handler: ApiHandler,
+): (req: NextRequest) => Promise<NextResponse> {
+  return async function withContext(req: NextRequest): Promise<NextResponse> {
     try {
-      // 1. Build auth context from incoming request (JWT + workspace membership).
-      const authContext = await buildAuthContext(req as Request);
+      // 1. Build auth context from the incoming request (JWT + workspace membership).
+      const authContext = await buildAuthContext(req as unknown as Request);
 
       // 2. Attach the derived context to the request object for downstream handlers.
-      req.context = authContext;
+      (req as any).context = authContext;
 
       // 3. Delegate to the wrapped handler with enriched request data.
-      return await handler(req as NextRequest & { context: AuthContext });
+      return await handler(req as ApiRequestWithContext);
     } catch (error: unknown) {
       // 4. Normalize known AUTH_* errors raised by context builder/middleware.
       if (isAuthError(error)) {
@@ -40,7 +66,7 @@ export function withAuthContext(handler: ApiHandler): ApiHandler {
 
       // 5. Handle unexpected exceptions with a generic internal error response.
       return jsonError(
-        AuthErrorCode.INTERNAL_ERROR,
+        "INTERNAL_ERROR",
         "Authentication middleware failed unexpectedly.",
         500,
       );
@@ -53,14 +79,14 @@ function isAuthError(value: unknown): value is AuthError {
   const cast = value as Partial<AuthError>;
   return (
     typeof cast.code === "string" &&
-    AUTH_ERROR_CODES.has(cast.code as AuthErrorCode) &&
+    AUTH_ERROR_CODES.has(cast.code) &&
     typeof cast.message === "string" &&
     typeof cast.status === "number"
   );
 }
 
-function mapStatus(status: number, code: KnownAuthErrorCode): number {
+function mapStatus(status: number, code: AuthErrorCode): number {
   if (status >= 400) return status;
-  if (code === AuthErrorCode.FORBIDDEN || code === AuthErrorCode.WORKSPACE_MISMATCH) return 403;
+  if (code === "FORBIDDEN" || code === "MISSING_WORKSPACE") return 403;
   return 401;
 }

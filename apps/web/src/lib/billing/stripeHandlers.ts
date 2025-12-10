@@ -1,3 +1,6 @@
+// FILE: apps/web/src/lib/billing/stripeHandlers.ts
+// FINAL VERSION – Stripe webhook helpers for subscriptions/invoices
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
@@ -18,18 +21,21 @@ const UUID_PATTERN =
 function shouldRetryStripeCall(error: unknown): boolean {
   // Network errors and timeouts
   if (error instanceof Error) {
-    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+    if (error.name === "AbortError" || error.message.includes("timeout")) {
       return true;
     }
-    if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+    if (
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("ENOTFOUND")
+    ) {
       return true;
     }
   }
 
   // Stripe errors
-  if (error && typeof error === 'object' && 'type' in error) {
+  if (error && typeof error === "object" && "type" in error) {
     const stripeError = error as { type?: string; statusCode?: number };
-    
+
     // Retry on 5xx server errors
     if (stripeError.statusCode && stripeError.statusCode >= 500) {
       return true;
@@ -41,9 +47,9 @@ function shouldRetryStripeCall(error: unknown): boolean {
     // - authentication_error
     if (stripeError.type) {
       const nonRetryableTypes = [
-        'card_error',
-        'invalid_request_error',
-        'authentication_error',
+        "card_error",
+        "invalid_request_error",
+        "authentication_error",
       ];
       if (nonRetryableTypes.includes(stripeError.type)) {
         return false;
@@ -55,12 +61,19 @@ function shouldRetryStripeCall(error: unknown): boolean {
   return false;
 }
 
-type SupportedSubscriptionStatus = "active" | "trialing" | "canceled" | "incomplete" | "past_due";
+type SupportedSubscriptionStatus =
+  | "active"
+  | "trialing"
+  | "canceled"
+  | "incomplete"
+  | "past_due";
 
 /**
  * Extracts workspace_id from Stripe metadata, supporting multiple key formats.
  */
-function extractWorkspaceId(metadata: Stripe.Metadata | null | undefined): string | null {
+function extractWorkspaceId(
+  metadata: Stripe.Metadata | null | undefined,
+): string | null {
   const candidate =
     metadata?.workspace_id ??
     metadata?.workspaceId ??
@@ -75,7 +88,9 @@ function extractWorkspaceId(metadata: Stripe.Metadata | null | undefined): strin
 /**
  * Maps Stripe subscription status to our internal status enum.
  */
-function mapSubscriptionStatus(status: Stripe.Subscription.Status): SupportedSubscriptionStatus {
+function mapSubscriptionStatus(
+  status: Stripe.Subscription.Status,
+): SupportedSubscriptionStatus {
   switch (status) {
     case "active":
       return "active";
@@ -131,7 +146,8 @@ async function resolveWorkspaceIdFromSubscription(
   if (subscriptionRow?.workspace_id) return subscriptionRow.workspace_id;
 
   // Third, try customer lookup via subscriptions table
-  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  const customerId =
+    typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
   if (customerId) {
     const { data: customerRow, error: customerError } = await supabase
       .from("subscriptions")
@@ -160,7 +176,6 @@ export async function upsertBillingFromCheckout(
   supabase: SupabaseClient,
   stripe: Stripe,
 ): Promise<void> {
-  // Extract workspace_id from session metadata
   const workspaceId = extractWorkspaceId(session.metadata);
   if (!workspaceId) {
     const error = new Error(
@@ -174,9 +189,10 @@ export async function upsertBillingFromCheckout(
     throw error;
   }
 
-  // Get customer ID
   const customerId =
-    typeof session.customer === "string" ? session.customer : session.customer?.id;
+    typeof session.customer === "string"
+      ? session.customer
+      : session.customer?.id;
   if (!customerId) {
     const error = new Error(`Checkout session ${session.id} missing customer ID`);
     logStripeEvent("checkout.session.completed", {
@@ -194,25 +210,30 @@ export async function upsertBillingFromCheckout(
   });
 
   try {
-    // If session has a subscription, retrieve and process it
     if (session.subscription && typeof session.subscription === "string") {
       const subscription = await withRetry(
-        'stripe.subscriptions.retrieve',
         async () => {
-          return await stripe.subscriptions.retrieve(session.subscription as string);
+          return await stripe.subscriptions.retrieve(
+            session.subscription as string,
+          );
         },
-        (error) => shouldRetryStripeCall(error),
         {
           maxAttempts: 2,
           baseDelayMs: 300,
-          maxDelayMs: 2000,
+          retryableError: (error) => shouldRetryStripeCall(error),
         },
       );
-      await upsertSubscriptionRecord(subscription, workspaceId, supabase, "checkout.session.completed");
+
+      await upsertSubscriptionRecord(
+        subscription,
+        workspaceId,
+        supabase,
+        "checkout.session.completed",
+      );
     } else {
-      // No subscription yet - this might be a one-time payment or incomplete checkout
-      // Log but don't fail - subscription will be created when customer.subscription.created fires
-      console.warn(`Checkout session ${session.id} completed but no subscription ID present`);
+      console.warn(
+        `Checkout session ${session.id} completed but no subscription ID present`,
+      );
     }
   } catch (error) {
     logStripeEvent("checkout.session.completed", {
@@ -232,10 +253,17 @@ export async function handleSubscriptionEvent(
   subscription: Stripe.Subscription,
   eventType: string,
   supabase: SupabaseClient,
-  logAudit?: (workspaceId: string, eventType: string, eventId: string, payload: Record<string, unknown>) => Promise<void>,
+  logAudit?: (
+    workspaceId: string,
+    eventType: string,
+    eventId: string,
+    payload: Record<string, unknown>,
+  ) => Promise<void>,
 ): Promise<string> {
   const customerId =
-    typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer?.id;
 
   logStripeEvent(eventType, {
     stripeCustomerId: customerId,
@@ -245,7 +273,10 @@ export async function handleSubscriptionEvent(
 
   let workspaceId: string;
   try {
-    workspaceId = await resolveWorkspaceIdFromSubscription(subscription, supabase);
+    workspaceId = await resolveWorkspaceIdFromSubscription(
+      subscription,
+      supabase,
+    );
 
     if (eventType === "customer.subscription.deleted") {
       await deleteSubscriptionRecord(subscription, workspaceId, supabase);
@@ -256,10 +287,16 @@ export async function handleSubscriptionEvent(
         });
       }
     } else {
-      await upsertSubscriptionRecord(subscription, workspaceId, supabase, eventType);
+      await upsertSubscriptionRecord(
+        subscription,
+        workspaceId,
+        supabase,
+        eventType,
+      );
       if (logAudit) {
         const price = subscription.items.data[0]?.price;
-        const plan = (getPlanFromPriceId(price?.id ?? "") ?? "basic") as PlanName;
+        const plan = (getPlanFromPriceId(price?.id ?? "") ??
+          "basic") as PlanName;
         const status = mapSubscriptionStatus(subscription.status);
         await logAudit(workspaceId, eventType, subscription.id, {
           stripe_subscription_id: subscription.id,
@@ -306,9 +343,9 @@ async function upsertSubscriptionRecord(
 
   const plan = (getPlanFromPriceId(price.id) ?? "basic") as PlanName;
   const status = mapSubscriptionStatus(sub.status);
-  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  const customerId =
+    typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
 
-  // Upsert subscription record
   const { error } = await supabase.from("subscriptions").upsert(
     {
       workspace_id: workspaceId,
@@ -331,16 +368,22 @@ async function upsertSubscriptionRecord(
     throw new Error(`Failed to upsert subscription ${sub.id}: ${error.message}`);
   }
 
-  // Update workspace plan and billing status
   try {
-    await workspacePlanService.setWorkspacePlan(workspaceId, plan, { supabase }, {
-      billingStatus: status,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: sub.id,
-    });
+    await workspacePlanService.setWorkspacePlan(
+      workspaceId,
+      plan,
+      { supabase },
+      {
+        billingStatus: status,
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: sub.id,
+      },
+    );
   } catch (error) {
-    // Log but don't fail webhook if workspace update fails
-    console.error(`Failed to update workspace plan for ${workspaceId}:`, error);
+    console.error(
+      `Failed to update workspace plan for ${workspaceId}:`,
+      error,
+    );
   }
 }
 
@@ -361,7 +404,6 @@ async function deleteSubscriptionRecord(
     throw new Error(`Failed to delete subscription ${sub.id}: ${error.message}`);
   }
 
-  // Reset workspace plan to basic when subscription is deleted
   try {
     await workspacePlanService.setWorkspacePlan(
       workspaceId,
@@ -374,8 +416,10 @@ async function deleteSubscriptionRecord(
       },
     );
   } catch (error) {
-    // Log but don't fail webhook if workspace update fails
-    console.error(`Failed to reset workspace plan for ${workspaceId}:`, error);
+    console.error(
+      `Failed to reset workspace plan for ${workspaceId}:`,
+      error,
+    );
   }
 }
 
@@ -387,11 +431,14 @@ export async function handleInvoiceEvent(
   eventType: string,
   supabase: SupabaseClient,
 ): Promise<string> {
-  // Resolve workspace from subscription
   const subscriptionId =
-    typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+    typeof invoice.subscription === "string"
+      ? invoice.subscription
+      : invoice.subscription?.id;
   if (!subscriptionId) {
-    throw new Error(`Invoice ${invoice.id} does not include a subscription reference`);
+    throw new Error(
+      `Invoice ${invoice.id} does not include a subscription reference`,
+    );
   }
 
   const { data, error } = await supabase
@@ -401,7 +448,9 @@ export async function handleInvoiceEvent(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to resolve workspace for invoice ${invoice.id}: ${error.message}`);
+    throw new Error(
+      `Failed to resolve workspace for invoice ${invoice.id}: ${error.message}`,
+    );
   }
   if (!data?.workspace_id) {
     throw new Error(`Workspace ID not found for invoice ${invoice.id}`);
@@ -409,7 +458,6 @@ export async function handleInvoiceEvent(
 
   const workspaceId = data.workspace_id;
 
-  // Update subscription status based on invoice event
   if (eventType === "invoice.payment_failed") {
     const { error: updateError } = await supabase
       .from("subscriptions")
@@ -442,4 +490,3 @@ export async function handleInvoiceEvent(
 
   return workspaceId;
 }
-

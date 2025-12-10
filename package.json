@@ -11,13 +11,16 @@
     "build": "pnpm -r build",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "test": "vitest run --reporter=verbose",
+
+    "test": "vitest run --reporter=verbose --config apps/web/vitest.config.ts",
     "test:coverage": "vitest run --coverage",
+    "test:snapshot": "RUN_SNAPSHOT_HEALTH=true pnpm test apps/web/test/snapshot.health.test.ts",
     "backend:readyz": "tsx scripts/backend.readiness.ts",
     "format": "prettier . --check",
     "format:write": "prettier . --write",
     "devcheck": "bash scripts/dev-check.sh",
-    "test:watch": "vitest",
+
+    "test:watch": "vitest --config apps/web/vitest.config.ts",
     "worker": "pnpm --filter @cliply/worker dev",
     "web": "pnpm --filter @cliply/web dev",
     "db:gen": "ts-node ./scripts/gen-types.ts",

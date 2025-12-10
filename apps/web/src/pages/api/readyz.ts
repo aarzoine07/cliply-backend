@@ -1,49 +1,40 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
-import { checkEnvForApi, checkSupabaseConnection } from "@cliply/shared/health/readyChecks";
-import { getAdminClient } from "@/lib/supabase";
+import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
 
 /**
- * Readiness check endpoint
- * Returns 200 if all critical dependencies are ready
- * Returns 503 if any dependency is not ready
+ * Main public readiness endpoint.
+ * Returns full readiness object with checks, queue, and ffmpeg status.
+ * 
+ * - 200: All checks pass
+ * - 503: One or more critical checks failed
+ * - 500: Unexpected internal error
  */
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
-  const checks: Record<string, boolean> = {};
-  const errors: Record<string, string> = {};
-  let allReady = true;
-
-  // Check environment variables
-  const envCheck = checkEnvForApi();
-  checks.env = envCheck.ok;
-  if (!envCheck.ok) {
-    allReady = false;
-    errors.env = `Missing: ${envCheck.missing?.join(", ") || "unknown"}`;
-  }
-
-  // Check Supabase connection
   try {
-    const supabase = getAdminClient();
-    const dbCheck = await checkSupabaseConnection(supabase, { timeoutMs: 3000, skipInTest: true });
-    checks.db = dbCheck.ok;
-    if (!dbCheck.ok) {
-      allReady = false;
-      errors.db = dbCheck.error || "connection_failed";
-    }
-  } catch (err: unknown) {
-    checks.db = false;
-    allReady = false;
-    errors.db = err instanceof Error ? err.message : String(err);
+    const readiness = await buildBackendReadinessReport();
+
+    console.log("readyz_check", {
+      ok: readiness.ok,
+      checks: readiness.checks,
+      queue: readiness.queue,
+      ffmpeg: readiness.ffmpeg,
+    });
+
+    const statusCode = readiness.ok ? 200 : 503;
+
+    // Return structured readiness response
+    res.status(statusCode).json({
+      ok: readiness.ok,
+      checks: readiness.checks,
+      queue: readiness.queue,
+      ffmpeg: readiness.ffmpeg,
+    });
+  } catch (error) {
+    console.error("readyz_check_error", error instanceof Error ? error.message : error);
+    res.status(500).json({
+      ok: false,
+      error: { message: "internal_error" },
+    });
   }
-
-  const body = {
-    ok: allReady,
-    service: "api",
-    checks,
-    ...(Object.keys(errors).length > 0 ? { errors } : {}),
-    ts: new Date().toISOString(),
-  };
-
-  res.status(allReady ? 200 : 503).json(body);
 }
-
