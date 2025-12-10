@@ -1,19 +1,52 @@
-﻿import type { NextApiRequest, NextApiResponse } from 'next';
+import type { NextApiRequest, NextApiResponse } from "next";
 
-import { captureException } from '@/lib/sentry';
+import { captureException } from "@/lib/sentry";
+import { HttpError } from "./errors";
+import { logger } from "./logger";
 
-import { HttpError } from './errors';
-import { logger } from './logger';
+// Success shape: both flat fields AND a nested `data` object
+export type JsonOk<T = Record<string, unknown>> = {
+  ok: true;
+  data: T;
+} & T;
 
-export type JsonOk<T = Record<string, unknown>> = { ok: true } & T;
-export type JsonErr = { ok: false; code: string; message: string; details?: unknown };
+// Error shape: flat `code` / `message` PLUS nested `error` object
+export type JsonErr = {
+  ok: false;
+  code: string;
+  message: string;
+  details?: unknown;
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+};
 
-export function ok<T extends Record<string, unknown> = Record<string, unknown>>(data?: T): JsonOk<T> {
-  return { ok: true, ...(data ?? ({} as T)) };
+export function ok<T extends Record<string, unknown> = Record<string, unknown>>(
+  data?: T,
+): JsonOk<T> {
+  const payload = (data ?? ({} as T));
+
+  return {
+    ok: true,
+    // spread all fields so callers can read `jsonBody.clipId`, etc.
+    ...(payload as Record<string, unknown>),
+    // but also keep the original nested object for any callers using `data.*`
+    data: payload,
+  } as JsonOk<T>;
 }
 
 export function err(code: string, message: string, details?: unknown): JsonErr {
-  return { ok: false, code, message, details };
+  const error = { code, message, details };
+
+  return {
+    ok: false,
+    code,
+    message,
+    details,
+    error,
+  };
 }
 
 export function handler(
@@ -24,16 +57,16 @@ export function handler(
       await fn(req, res);
     } catch (error) {
       if (error instanceof HttpError) {
+        const code = error.code ?? "unknown_error";
+
         logger.warn("http_error", {
           status: error.status,
-          code: error.code ?? "unknown_error",
+          code,
         });
 
         if (!res.headersSent) {
-          const code = error.code ?? "unknown_error";
-          const message = (error as any).expose
-            ? error.message
-            : "Something went wrong";
+          const message =
+            (error as any).expose ?? true ? error.message : "Something went wrong";
           const details = (error as any).details;
 
           res.status(error.status).json(err(code, message, details));
@@ -57,3 +90,4 @@ export function handler(
     }
   };
 }
+

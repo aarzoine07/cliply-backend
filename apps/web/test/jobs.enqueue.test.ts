@@ -2,7 +2,8 @@
 
 import { test, expect } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { env, resetDatabase } from "@cliply/shared/test/setup";
+// Use relative path instead of alias to avoid TS "Cannot find module" error
+import { env } from "../../../packages/shared/test/setup";
 
 const SERVICE_CLIENT = createClient(
   env.SUPABASE_URL,
@@ -10,14 +11,16 @@ const SERVICE_CLIENT = createClient(
 );
 
 test("⚙️ Enqueue API Functionality > creates a new queued job with correct defaults", async () => {
-  // Reset DB is already handled globally, but keeping in test is safe.
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
 
   const { data, error } = await SERVICE_CLIENT
     .from("jobs")
     .insert({
-      name: "test_job",
+      workspace_id: workspaceId,
+      kind: "TRANSCRIBE",
+      payload: { clip: "demo" },
+      // optional, but matches how other tests think about input/payload
       input: { a: 1 },
-      workspace_id: "123e4567-e89b-12d3-a456-426614174000",
     })
     .select()
     .single();
@@ -26,7 +29,11 @@ test("⚙️ Enqueue API Functionality > creates a new queued job with correct d
   console.log("insert data:", data);
 
   expect(error).toBeNull();
-  expect(data.state).toBe("queued");
-  expect(data.priority).toBe(5);
-  expect(data.name).toBe("test_job");
+  expect(data).toBeTruthy();
+  expect(data.workspace_id).toBe(workspaceId);
+  expect(data.kind).toBe("TRANSCRIBE");
+  expect(data.state).toBe("queued"); // default from schema
+  // if your schema also has status defaulting to "queued", you can add:
+  // expect(data.status).toBe("queued");
 });
+

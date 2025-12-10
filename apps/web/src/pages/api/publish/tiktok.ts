@@ -1,4 +1,5 @@
 import { PublishTikTokInput } from '@cliply/shared/schemas';
+import { ERROR_CODES } from '@cliply/shared/errorCodes';
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 import { HttpError } from '@/lib/errors';
@@ -11,7 +12,14 @@ import * as connectedAccountsService from '@/lib/accounts/connectedAccountsServi
 import * as experimentService from '@/lib/viral/experimentService';
 import * as orchestrationService from '@/lib/viral/orchestrationService';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
-import { withPlanGate } from '@/lib/billing/withPlanGate';
+
+// Inline plan gating for Pages API routes using shared billing helpers
+import {
+  BILLING_PLAN_LIMIT,
+  BILLING_PLAN_REQUIRED,
+  checkPlanAccess,
+  enforcePlanAccess,
+} from '@cliply/shared/billing/planGate';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -34,72 +42,151 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const userId = auth.userId || auth.user_id;
   const workspaceId = auth.workspaceId || auth.workspace_id;
 
-  // Apply plan gating for publishing (using concurrent_jobs as proxy for publishing capability)
-  return withPlanGate(auth, 'concurrent_jobs', async (req, res) => {
+  // ─────────────────────────────────────────────
+  // Plan gating: require plan + concurrent_jobs feature
+  // ─────────────────────────────────────────────
+  const plan = (auth as any)?.plan;
+  if (!plan) {
+    res
+      .status(403)
+      .json(err(BILLING_PLAN_REQUIRED, 'No active plan found.'));
+    return;
+  }
 
-    const rate = await checkRateLimit(userId, 'publish:tiktok');
-    if (!rate.allowed) {
-      res.status(429).json(err('too_many_requests', 'Rate limited'));
-      return;
-    }
+  const gate = checkPlanAccess(plan, 'concurrent_jobs');
+  if (!gate.active) {
+    const code =
+      gate.reason === 'limit' ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
+    const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
+    const message =
+      gate.message ?? 'Publishing is not available on the current plan.';
+    res.status(status).json(err(code, message));
+    return;
+  }
 
-    const parsed = PublishTikTokInput.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
-      return;
-    }
+  // Enforce usage (no-op today, future-proof for quotas)
+  enforcePlanAccess(plan, 'concurrent_jobs');
 
-    const admin = getAdminClient();
+  // ─────────────────────────────────────────────
+  // Rate limiting
+  // ─────────────────────────────────────────────
+  const rate = await checkRateLimit(userId, 'publish:tiktok');
+  if (!rate.allowed) {
+    res.status(429).json(err('too_many_requests', 'Rate limited'));
+    return;
+  }
 
-    // Verify workspaceId from auth context
-    if (!workspaceId) {
-      res.status(400).json(err('invalid_request', 'Workspace required'));
-      return;
-    }
+  // Validate request body
+  const parsed = PublishTikTokInput.safeParse(req.body);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json(
+        err(
+          'invalid_request',
+          'Invalid payload',
+          parsed.error.flatten(),
+        ),
+      );
+    return;
+  }
 
-    // Verify clip exists and belongs to workspace
-    const clipRecord = await admin.from('clips').select('workspace_id,status,storage_path').eq('id', parsed.data.clipId).maybeSingle();
-    if (clipRecord.error) {
-      logger.error('publish_tiktok_clip_lookup_failed', { message: clipRecord.error.message });
-      res.status(500).json(err('internal_error', 'Failed to load clip'));
-      return;
-    }
-    if (!clipRecord.data) {
-      res.status(404).json(err('not_found', 'Clip not found'));
-      return;
-    }
+  const admin = getAdminClient();
 
-    const clipWorkspaceId = clipRecord.data.workspace_id as string | null;
-    if (!clipWorkspaceId || clipWorkspaceId !== workspaceId) {
-      res.status(403).json(err('invalid_request', 'Clip does not belong to workspace'));
-      return;
-    }
+  // Verify workspaceId from auth context
+  if (!workspaceId) {
+    res.status(400).json(err('invalid_request', 'Workspace required'));
+    return;
+  }
+
+  // Verify clip exists and belongs to workspace
+  const clipRecord = await admin
+    .from('clips')
+    .select('workspace_id,status,storage_path')
+    .eq('id', parsed.data.clipId)
+    .maybeSingle();
+
+  if (clipRecord.error) {
+    logger.error('publish_tiktok_clip_lookup_failed', {
+      message: clipRecord.error.message,
+    });
+    res.status(500).json(err('internal_error', 'Failed to load clip'));
+    return;
+  }
+  if (!clipRecord.data) {
+    res.status(404).json(err('not_found', 'Clip not found'));
+    return;
+  }
+
+  const clipWorkspaceId = clipRecord.data.workspace_id as string | null;
+  if (!clipWorkspaceId || clipWorkspaceId !== workspaceId) {
+    res
+      .status(403)
+      .json(
+        err('invalid_request', 'Clip does not belong to workspace'),
+      );
+    return;
+  }
+
+  // Block already published clips
+  if (clipRecord.data.status === 'published') {
+    res
+      .status(400)
+      .json(
+        err(
+          ERROR_CODES.clip_already_published,
+          'Cannot publish an already published clip',
+        ),
+      );
+    return;
+  }
 
   // Verify clip is ready for publishing
   if (clipRecord.data.status !== 'ready') {
-    res.status(400).json(err('invalid_request', 'Clip is not ready for publishing'));
+    res
+      .status(400)
+      .json(
+        err(
+          ERROR_CODES.invalid_clip_state,
+          'Clip is not ready for publishing',
+        ),
+      );
     return;
   }
 
   if (!clipRecord.data.storage_path) {
-    res.status(400).json(err('invalid_request', 'Clip has no storage path'));
+    res
+      .status(400)
+      .json(
+        err('invalid_request', 'Clip has no storage path'),
+      );
     return;
   }
 
-  // Resolve connected accounts for publishing (multi-account support)
+  // ─────────────────────────────────────────────
+  // Resolve connected accounts for publishing (multi-account)
+  // ─────────────────────────────────────────────
   let resolvedAccountIds: string[] = [];
   try {
     // Determine which accounts to use
-    const requestedAccountIds = parsed.data.connectedAccountIds || (parsed.data.connectedAccountId ? [parsed.data.connectedAccountId] : []);
+    const requestedAccountIds =
+      parsed.data.connectedAccountIds ||
+      (parsed.data.connectedAccountId
+        ? [parsed.data.connectedAccountId]
+        : []);
 
-    const accounts = await connectedAccountsService.getConnectedAccountsForPublish(
-      {
-        workspaceId,
-        platform: 'tiktok',
-        connectedAccountIds: requestedAccountIds.length > 0 ? requestedAccountIds : undefined,
-      },
-      { supabase: admin },
-    );
+    const accounts =
+      await connectedAccountsService.getConnectedAccountsForPublish(
+        {
+          workspaceId,
+          platform: 'tiktok',
+          connectedAccountIds:
+            requestedAccountIds.length > 0
+              ? requestedAccountIds
+              : undefined,
+        },
+        { supabase: admin },
+      );
     resolvedAccountIds = accounts.map((a) => a.id);
 
     if (resolvedAccountIds.length === 0) {
@@ -107,24 +194,45 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         workspaceId,
         requestedIds: requestedAccountIds,
       });
-      res.status(400).json(err('invalid_request', 'No active TikTok accounts found for workspace'));
+      res
+        .status(400)
+        .json(
+          err(
+            ERROR_CODES.missing_connected_account,
+            'No active TikTok accounts found for workspace',
+          ),
+        );
       return;
     }
   } catch (error) {
     // Validation errors from getConnectedAccountsForPublish
-    if ((error as Error)?.message?.includes('not found') || (error as Error)?.message?.includes('inactive')) {
-      res.status(400).json(err('invalid_request', (error as Error).message));
+    if (
+      (error as Error)?.message?.includes('not found') ||
+      (error as Error)?.message?.includes('inactive')
+    ) {
+      res
+        .status(400)
+        .json(err('invalid_request', (error as Error).message));
       return;
     }
     logger.error('publish_tiktok_accounts_resolution_failed', {
       workspaceId,
       error: (error as Error)?.message ?? 'unknown',
     });
-    res.status(500).json(err('internal_error', 'Failed to resolve connected accounts'));
+    res
+      .status(500)
+      .json(
+        err(
+          'internal_error',
+          'Failed to resolve connected accounts',
+        ),
+      );
     return;
   }
 
-  // Viral experiment hooks: attach clip to variant if experiment info provided
+  // ─────────────────────────────────────────────
+  // Viral experiment hooks
+  // ─────────────────────────────────────────────
   if (parsed.data.experimentId && parsed.data.variantId) {
     try {
       await experimentService.attachClipToExperimentVariant(
@@ -167,7 +275,14 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
   }
 
-  const idempotencyKey = keyFromRequest({ method: req.method, url: '/api/publish/tiktok', body: parsed.data });
+  // ─────────────────────────────────────────────
+  // Idempotent job creation
+  // ─────────────────────────────────────────────
+  const idempotencyKey = keyFromRequest({
+    method: req.method,
+    url: '/api/publish/tiktok',
+    body: parsed.data,
+  });
 
   const result = await withIdempotency(idempotencyKey, async () => {
     // Create one job per account (multi-account publishing loop)
@@ -179,24 +294,44 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         clipId: parsed.data.clipId,
         connectedAccountId,
         caption: parsed.data.caption,
-        privacyLevel: parsed.data.privacyLevel || 'PUBLIC_TO_EVERYONE',
+        privacyLevel:
+          parsed.data.privacyLevel || 'PUBLIC_TO_EVERYONE',
         experimentId: parsed.data.experimentId ?? null,
         variantId: parsed.data.variantId ?? null,
       },
     }));
 
-    const jobInserts = await admin.from('jobs').insert(jobPayloads).select();
+    const jobInserts = await admin
+      .from('jobs')
+      .insert(jobPayloads)
+      .select();
 
-    if (jobInserts.error || !jobInserts.data || jobInserts.data.length === 0) {
-      throw new HttpError(500, 'Failed to enqueue publish jobs', 'job_insert_failed', jobInserts.error?.message);
+    if (
+      jobInserts.error ||
+      !jobInserts.data ||
+      jobInserts.data.length === 0
+    ) {
+      throw new HttpError(
+        500,
+        'Failed to enqueue publish jobs',
+        'job_insert_failed',
+        jobInserts.error?.message,
+      );
     }
 
-    return { jobIds: jobInserts.data.map((j) => j.id), accountCount: resolvedAccountIds.length } as const;
+    return {
+      jobIds: jobInserts.data.map((j) => j.id),
+      accountCount: resolvedAccountIds.length,
+    } as const;
   });
 
   const responsePayload = result.fresh
     ? result.value
-    : await resolveExistingPublishResult(admin, workspaceId, parsed.data.clipId);
+    : await resolveExistingPublishResult(
+        admin,
+        workspaceId,
+        parsed.data.clipId,
+      );
 
   logger.info('publish_tiktok_success', {
     userId,
@@ -208,12 +343,20 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   });
 
   // Normalize response: if single job, return jobId; if multiple, return jobIds
-  const normalizedPayload = result.fresh && 'jobIds' in result.value
-    ? { jobIds: result.value.jobIds, accountCount: result.value.accountCount }
-    : responsePayload;
+  const normalizedPayload =
+    result.fresh && 'jobIds' in result.value
+      ? {
+          jobIds: result.value.jobIds,
+          accountCount: result.value.accountCount,
+        }
+      : responsePayload;
 
-    res.status(200).json(ok({ ...(normalizedPayload ?? {}), idempotent: !result.fresh }));
-  })(req, res);
+  res.status(200).json(
+    ok({
+      ...(normalizedPayload ?? {}),
+      idempotent: !result.fresh,
+    }),
+  );
 });
 
 async function resolveExistingPublishResult(
@@ -233,10 +376,14 @@ async function resolveExistingPublishResult(
     if (jobs.data.length === 1) {
       return { jobId: jobs.data[0].id };
     } else {
-      return { jobIds: jobs.data.map((j) => j.id), accountCount: jobs.data.length };
+      return {
+        jobIds: jobs.data.map((j) => j.id),
+        accountCount: jobs.data.length,
+      };
     }
   }
 
   return {};
 }
+
 

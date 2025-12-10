@@ -1,4 +1,5 @@
-﻿import { ClipApproveInput } from "@cliply/shared/schemas";
+import { ClipApproveInput } from "@cliply/shared/schemas";
+import { ERROR_CODES } from "@cliply/shared/errorCodes";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 import { requireUser } from "@/lib/auth";
@@ -56,10 +57,21 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       .eq("id", clipId)
       .maybeSingle();
     if (clip.error) {
-      throw new HttpError(500, "Failed to fetch clip", "clip_fetch_failed", clip.error.message);
+      // HttpError(status, message, body?, code?) - code is 4th arg
+      throw new HttpError(500, "Failed to fetch clip", { details: clip.error.message }, "clip_fetch_failed");
     }
     if (!clip.data) {
-      throw new HttpError(404, "Clip not found", "clip_not_found");
+      throw new HttpError(404, "Clip not found", undefined, "clip_not_found");
+    }
+
+    // Block already published clips from modification
+    if (clip.data.status === "published") {
+      throw new HttpError(
+        400,
+        "Cannot modify a published clip",
+        undefined,
+        ERROR_CODES.clip_already_published,
+      );
     }
 
     const alreadyApproved = clip.data.status === "approved";
@@ -70,8 +82,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         throw new HttpError(
           500,
           "Failed to approve clip",
+          { details: update.error.message },
           "clip_update_failed",
-          update.error.message,
         );
       }
 
@@ -86,8 +98,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         throw new HttpError(
           500,
           "Failed to enqueue render job",
+          { details: jobInsert.error.message },
           "job_insert_failed",
-          jobInsert.error.message,
         );
       }
     }

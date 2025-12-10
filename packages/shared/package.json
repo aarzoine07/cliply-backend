@@ -92,6 +92,11 @@
       "import": "./dist/src/engine/*.js",
       "require": "./dist/src/engine/*.js",
       "types": "./dist/src/engine/*.d.ts"
+    },
+    "./idempotency/*": {
+      "import": "./dist/src/idempotency/*.js",
+      "require": "./dist/src/idempotency/*.js",
+      "types": "./dist/src/idempotency/*.d.ts"
     }
   },
 
@@ -111,5 +116,6 @@
     "stripe": "^19.2.0"
   }
 }
+
 
 

@@ -1,21 +1,32 @@
 ﻿import { randomUUID } from 'node:crypto';
 
-import { BUCKET_VIDEOS, SIGNED_URL_TTL_SEC, getExtension } from '@cliply/shared/constants';
-import { UploadInitFileOut, UploadInitInput, UploadInitYtOut } from '@cliply/shared/schemas';
+import {
+  BUCKET_VIDEOS,
+  SIGNED_URL_TTL_SEC,
+  getExtension,
+} from '@cliply/shared/constants';
+import {
+  UploadInitFileOut,
+  UploadInitInput,
+  UploadInitYtOut,
+} from '@cliply/shared/schemas';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { projectSourcePath } from '@cliply/shared/storage/paths';
 
-import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
+import {
+  assertWithinUsage,
+  recordUsage,
+  UsageLimitExceededError,
+} from '@cliply/shared/billing/usageTracker';
 import { logEvent } from '@cliply/shared/logging/logger';
+import { checkPlanAccess } from '@cliply/shared/billing/planGate';
 
-import { HttpError } from '@/lib/errors';
 import { handler, ok, err } from '@/lib/http';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getSignedUploadUrl } from '@/lib/storage';
 import { getAdminClient } from '@/lib/supabase';
-import { withPlanGate } from '@/lib/billing/withPlanGate';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -43,9 +54,20 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  // Apply plan gating for uploads
-  return withPlanGate(auth, 'uploads_per_day', async (req, res) => {
-    const rate = await checkRateLimit(userId, 'upload:init');
+  // Plan gate: uploads_per_day
+  const gate = checkPlanAccess(auth.plan, 'uploads_per_day');
+  if (!gate.active) {
+    const status = gate.reason === 'limit' ? 429 : 403;
+    res.status(status).json(
+      err(
+        gate.reason === 'limit' ? 'plan_limit' : 'plan_required',
+        gate.message ?? 'Your current plan does not allow new uploads.',
+      ),
+    );
+    return;
+  }
+
+  const rate = await checkRateLimit(userId, 'upload:init');
   if (!rate.allowed) {
     res.status(429).json(err('too_many_requests', 'Rate limited'));
     return;
@@ -63,32 +85,47 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const parsed = UploadInitInput.safeParse(body);
   if (!parsed.success) {
-    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+    res
+      .status(400)
+      .json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
     return;
   }
 
   const input = parsed.data;
   const admin = getAdminClient();
 
+  // FILE UPLOAD FLOW
   if (input.source === 'file') {
     const projectId = randomUUID();
     const extension = getExtension(input.filename) ?? '.mp4';
-    const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
-    const extensionWithoutDot = normalizedExtension.startsWith('.') 
-      ? normalizedExtension.slice(1) 
+    const normalizedExtension = extension.startsWith('.')
+      ? extension
+      : `.${extension}`;
+    const extensionWithoutDot = normalizedExtension.startsWith('.')
+      ? normalizedExtension.slice(1)
       : normalizedExtension;
-    const storageKey = projectSourcePath(workspaceId, projectId, extensionWithoutDot);
+    const storageKey = projectSourcePath(
+      workspaceId,
+      projectId,
+      extensionWithoutDot,
+    );
     const storagePath = `${BUCKET_VIDEOS}/${storageKey}`;
 
     try {
-      // Estimate minutes from file size (rough heuristic: ~1MB per minute for compressed video)
-      // This is conservative - actual duration will be recorded accurately in transcribe pipeline
-      const estimatedMinutes = Math.max(1, Math.ceil(input.size / (1024 * 1024))); // At least 1 minute
+      // Rough heuristic: ~1MB per minute for compressed video (conservative)
+      const estimatedMinutes = Math.max(
+        1,
+        Math.ceil(input.size / (1024 * 1024)),
+      );
 
       // Check usage limits before creating project
       try {
         await assertWithinUsage(workspaceId, 'projects', 1);
-        await assertWithinUsage(workspaceId, 'source_minutes', estimatedMinutes);
+        await assertWithinUsage(
+          workspaceId,
+          'source_minutes',
+          estimatedMinutes,
+        );
       } catch (error) {
         if (error instanceof UsageLimitExceededError) {
           logger.warn('upload_init_usage_limit_exceeded', {
@@ -112,7 +149,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         throw error;
       }
 
-      const signedUrl = await getSignedUploadUrl(storageKey, SIGNED_URL_TTL_SEC, BUCKET_VIDEOS);
+      const signedUrl = await getSignedUploadUrl(
+        storageKey,
+        SIGNED_URL_TTL_SEC,
+        BUCKET_VIDEOS,
+      );
 
       const title = deriveTitle(input.filename);
       const { data: project, error: insertError } = await admin
@@ -137,7 +178,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         return;
       }
 
-      // Record project creation usage (idempotent - if project already exists, this won't double-count)
+      // Record project creation usage
       await recordUsage({
         workspaceId,
         metric: 'projects',
@@ -184,12 +225,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
   }
 
+  // YOUTUBE IMPORT FLOW
   try {
-    // For YouTube, we don't know duration yet, so use conservative estimate
-    // Actual duration will be recorded in transcribe pipeline
-    const estimatedMinutes = 10; // Conservative default
+    // Conservative default; real duration recorded later in pipeline
+    const estimatedMinutes = 10;
 
-    // Check usage limits before creating project
     try {
       await assertWithinUsage(workspaceId, 'projects', 1);
       await assertWithinUsage(workspaceId, 'source_minutes', estimatedMinutes);
@@ -263,8 +303,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         projectId,
         message: jobError.message,
       });
-      // Don't fail the request - the job can be manually enqueued later
-      // But log the error for monitoring
+      // Don’t fail the request, just log
     }
 
     const payload = UploadInitYtOut.parse({ projectId });
@@ -292,16 +331,16 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     });
 
     res.status(200).json(ok(payload));
+    return;
   } catch (error) {
     logger.error('upload_init_youtube_flow_failed', {
       message: (error as Error)?.message ?? 'unknown',
       workspaceId,
     });
     res.status(500).json(err('internal_error', 'Failed to create project'));
-    }
-  })(req, res);
+    return;
+  }
 });
-
 
 function deriveTitle(filename: string): string {
   const trimmed = filename.trim();
@@ -312,3 +351,4 @@ function deriveTitle(filename: string): string {
   const base = trimmed.slice(0, lastDot).trim();
   return base || 'Untitled Project';
 }
+

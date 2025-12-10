@@ -2,7 +2,9 @@ import { HttpError } from './errors';
 import { getRlsClient } from "./supabase.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Relaxed UUID check: enforce shape + hex, but do not enforce version/variant.
+// This matches the shared auth context pattern.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type HeaderValue = string | string[] | undefined;
 type HeaderRecord = Record<string, HeaderValue>;
@@ -60,14 +62,14 @@ function parseAuthorization(value?: string): string | undefined {
   if (!value) return undefined;
   const [scheme, token] = value.split(/\s+/, 2);
   if (!token || scheme.toLowerCase() !== 'bearer') {
-    throw new HttpError(400, 'invalid authorization header', 'invalid_header');
+    throw new HttpError(400, 'invalid authorization header', undefined, 'invalid_header');
   }
   return token;
 }
 
 function ensureUuid(value: string, headerName: string): string {
   if (!UUID_PATTERN.test(value)) {
-    throw new HttpError(400, 'invalid ' + headerName, 'invalid_header');
+    throw new HttpError(400, 'invalid ' + headerName, undefined, 'invalid_header');
   }
   return value;
 }
@@ -86,14 +88,14 @@ export type AuthContext = {
 export function requireUser(req?: { headers?: HeadersInput }): AuthContext {
   // In production, block debug headers
   if (process.env.NODE_ENV === 'production') {
-    throw new HttpError(401, 'Debug headers are not allowed in production', 'production_only');
+    throw new HttpError(401, 'Debug headers are not allowed in production', undefined, 'production_only');
   }
 
   const normalized = normalizeHeaders(req?.headers);
 
   const userHeader = normalized['x-debug-user'];
   if (!userHeader) {
-    throw new HttpError(401, 'missing user', 'missing_user');
+    throw new HttpError(401, 'missing user', undefined, 'missing_user');
   }
 
   const userId = ensureUuid(userHeader, 'x-debug-user');

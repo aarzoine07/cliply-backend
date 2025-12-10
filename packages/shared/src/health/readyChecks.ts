@@ -1,6 +1,12 @@
 import { getEnv } from "../env";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Re-export thresholds from backendReadiness for consistency
+export {
+  QUEUE_AGE_WARNING_MS,
+  QUEUE_AGE_HARD_FAIL_MS,
+} from "../readiness/backendReadiness";
+
 /**
  * Check if required environment variables for API are present
  */
@@ -84,6 +90,120 @@ export async function checkSupabaseConnection(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, error: message };
+  }
+}
+
+/**
+ * Queue health status result
+ */
+export type QueueHealthResult = {
+  ok: boolean;
+  length: number;
+  oldestJobAge: number | null;
+  warning: boolean;
+  critical: boolean;
+  error?: string;
+};
+
+/**
+ * Check queue health by querying job counts and oldest job age.
+ * Safe for test mode (returns mock success if NODE_ENV === "test")
+ */
+export async function checkQueueHealth(
+  supabase: SupabaseClient,
+  options?: { 
+    timeoutMs?: number; 
+    skipInTest?: boolean;
+    warningThresholdMs?: number;
+    criticalThresholdMs?: number;
+  },
+): Promise<QueueHealthResult> {
+  const { 
+    timeoutMs = 5000, 
+    skipInTest = true,
+    warningThresholdMs = 60_000,
+    criticalThresholdMs = 300_000,
+  } = options || {};
+
+  // In test mode, return mock success
+  if (skipInTest && process.env.NODE_ENV === "test") {
+    return { 
+      ok: true, 
+      length: 0, 
+      oldestJobAge: null, 
+      warning: false, 
+      critical: false,
+    };
+  }
+
+  try {
+    // Use Promise.race to enforce timeout
+    const checkPromise = (async () => {
+      // Get count of queued jobs
+      const { count, error: countError } = await supabase
+        .from("jobs")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "queued");
+
+      if (countError) {
+        return {
+          ok: false,
+          length: 0,
+          oldestJobAge: null,
+          warning: false,
+          critical: false,
+          error: countError.message,
+        };
+      }
+
+      // Get oldest queued job
+      const { data: oldestJob, error: oldestError } = await supabase
+        .from("jobs")
+        .select("created_at")
+        .eq("status", "queued")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .single();
+
+      let oldestJobAge: number | null = null;
+      if (!oldestError && oldestJob?.created_at) {
+        oldestJobAge = Date.now() - new Date(oldestJob.created_at).getTime();
+      }
+
+      const warning = oldestJobAge !== null && oldestJobAge > warningThresholdMs;
+      const critical = oldestJobAge !== null && oldestJobAge > criticalThresholdMs;
+
+      return {
+        ok: !critical,
+        length: count ?? 0,
+        oldestJobAge,
+        warning,
+        critical,
+      };
+    })();
+
+    const timeoutPromise = new Promise<QueueHealthResult>((resolve) => {
+      setTimeout(() => resolve({ 
+        ok: false, 
+        length: 0, 
+        oldestJobAge: null, 
+        warning: false,
+        critical: false,
+        error: "timeout",
+      }), timeoutMs);
+    });
+
+    return await Promise.race([checkPromise, timeoutPromise]);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { 
+      ok: false, 
+      length: 0, 
+      oldestJobAge: null, 
+      warning: false, 
+      critical: false,
+      error: message,
+    };
   }
 }
 

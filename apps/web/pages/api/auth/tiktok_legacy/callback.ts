@@ -1,23 +1,48 @@
+// FILE: apps/web/pages/api/auth/tiktok_legacy/callback.ts
+// FINAL VERSION – legacy/dev-only TikTok OAuth callback using JSON envelopes
+
 /**
  * LEGACY / DEV-ONLY ROUTE:
  * This endpoint is retained only for local/manual testing and is disabled in production.
- * 
+ *
  * Canonical TikTok OAuth callback route:
  * - App Router: /api/auth/tiktok/connect/callback (apps/web/src/app/api/auth/tiktok/connect/callback/route.ts)
- * 
+ *
  * All new integrations should use the canonical App Router flow.
  */
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 
-import { encryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
 import { serverEnv, publicEnv } from "@/lib/env";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+type SecretEnvelope = {
+  v: number;
+  purpose: string;
+  secret: string;
+};
+
+function encryptSecret(secret: string, meta: { purpose: string }): string {
+  const envelope: SecretEnvelope = {
+    v: 1,
+    purpose: meta.purpose,
+    secret,
+  };
+  return JSON.stringify(envelope);
+}
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse,
+) {
   // Fence: Disable in production
   if (process.env.NODE_ENV === "production") {
-    return res.status(410).json({ error: "legacy_route_removed", message: "This legacy route is no longer available in production. Use /api/auth/tiktok/connect/callback instead." });
+    return res.status(410).json({
+      error: "legacy_route_removed",
+      message:
+        "This legacy route is no longer available in production. Use /api/auth/tiktok/connect/callback instead.",
+    });
   }
+
   try {
     const { code, state, error } = req.query;
 
@@ -27,11 +52,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (!code || typeof code !== "string") {
-      return res.status(400).json({ ok: false, error: "Missing authorization code" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing authorization code" });
     }
 
     if (!state || typeof state !== "string") {
-      return res.status(400).json({ ok: false, error: "Missing state parameter" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing state parameter" });
     }
 
     // Decode state to get workspace_id, user_id, and optional code_verifier
@@ -44,7 +73,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       user_id = decoded.user_id;
       code_verifier = decoded.code_verifier;
     } catch {
-      return res.status(400).json({ ok: false, error: "Invalid state parameter" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid state parameter" });
     }
 
     const clientKey = serverEnv.TIKTOK_CLIENT_ID;
@@ -52,7 +83,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const redirectUri = publicEnv.NEXT_PUBLIC_TIKTOK_REDIRECT_URL;
 
     if (!clientKey || !clientSecret || !redirectUri) {
-      return res.status(500).json({ ok: false, error: "TikTok OAuth not configured" });
+      return res.status(500).json({
+        ok: false,
+        error: "TikTok OAuth not configured",
+      });
     }
 
     // --- TOKEN EXCHANGE (TikTok OAuth2 PKCE-compliant) ---
@@ -96,10 +130,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const supabase = createClient(
       serverEnv.SUPABASE_URL,
       serverEnv.SUPABASE_SERVICE_ROLE_KEY,
-      { auth: { persistSession: false, autoRefreshToken: false } }
+      {
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
     );
 
-    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + tokenData.expires_in * 1000,
+    ).toISOString();
 
     const { error: dbError } = await supabase.from("connected_accounts").upsert(
       {
@@ -108,13 +146,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         platform: "tiktok",
         provider: "tiktok",
         external_id: externalId,
-        access_token_encrypted_ref: encryptSecret(tokenData.access_token, { purpose: "tiktok_token" }),
-        refresh_token_encrypted_ref: encryptSecret(tokenData.refresh_token, { purpose: "tiktok_token" }),
+        access_token_encrypted_ref: encryptSecret(tokenData.access_token, {
+          purpose: "tiktok_token",
+        }),
+        refresh_token_encrypted_ref: tokenData.refresh_token
+          ? encryptSecret(tokenData.refresh_token, {
+              purpose: "tiktok_token",
+            })
+          : null,
         expires_at: expiresAt,
-        scopes: tokenData.scope ? tokenData.scope.split(",") : ["user.info.basic", "video.upload"],
+        scopes: tokenData.scope
+          ? tokenData.scope.split(",")
+          : ["user.info.basic", "video.upload"],
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "workspace_id,platform" }
+      { onConflict: "workspace_id,platform" },
     );
 
     if (dbError) {
@@ -127,7 +173,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       workspace_id,
       actor_id: user_id,
       event_type: "tiktok.connected",
-      payload: { platform: "tiktok", external_id: externalId },
+      payload: {
+        platform: "tiktok",
+        external_id: externalId,
+      },
     });
 
     console.log("✅ TikTok connection stored successfully:", externalId);

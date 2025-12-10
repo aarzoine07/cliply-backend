@@ -8,7 +8,7 @@ import {
   enforcePlanAccess,
 } from "@cliply/shared/billing/planGate";
 import type { PlanLimits } from "@cliply/shared/billing/planMatrix";
-import { AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
+import { type AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
 
 type ApiRequest = NextRequest & { context: AuthContext };
 type ApiHandler = (req: ApiRequest) => Promise<NextResponse>;
@@ -53,10 +53,10 @@ export function withPlanGate(
     } catch (error) {
       // 5. Normalize unexpected failures into a billing internal error response.
       const message =
-        error instanceof Error
-          ? error.message
-          : "Plan gate failed unexpectedly.";
-      return jsonError(AuthErrorCode.INTERNAL_ERROR, message, 500);
+      error instanceof Error
+        ? error.message
+        : "Plan gate failed unexpectedly.";
+    return jsonError("INTERNAL_ERROR", message, 500);
     }
   };
 }
