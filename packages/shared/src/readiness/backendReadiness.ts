@@ -37,6 +37,11 @@ export type BackendReadinessReport = {
   };
 };
 
+// Queue staleness thresholds used for readiness / health checks
+// These are also re-exported in health/readyChecks.ts for consistency.
+export const QUEUE_AGE_WARNING_MS = 60_000; // 60 seconds
+export const QUEUE_AGE_HARD_FAIL_MS = 300_000; // 5 minutes
+
 const REQUIRED_ENV_VARS = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
@@ -75,14 +80,14 @@ function checkEnvironment(): {
     // Try to extract which specific vars are missing from the error message
     const errorMessage = error instanceof Error ? error.message : String(error);
     const missing: string[] = [];
-    
+
     // Check each required var to see if it's mentioned in the error
     for (const key of REQUIRED_ENV_VARS) {
       if (errorMessage.includes(key) || !process.env[key]) {
         missing.push(key);
       }
     }
-    
+
     // If we couldn't determine specific missing vars, assume all are missing
     if (missing.length === 0) {
       return {
@@ -91,7 +96,7 @@ function checkEnvironment(): {
         optionalMissing: [],
       };
     }
-    
+
     return {
       ok: false,
       missing,
@@ -105,7 +110,7 @@ function checkEnvironment(): {
   for (const key of REQUIRED_ENV_VARS) {
     // Use bracket notation to access potentially missing keys
     const value = (env as Record<string, unknown>)[key];
-    if (!value || (typeof value === 'string' && value.trim() === '')) {
+    if (!value || (typeof value === "string" && value.trim() === "")) {
       missing.push(key);
     }
   }
@@ -113,7 +118,7 @@ function checkEnvironment(): {
   const optionalMissing: string[] = [];
   for (const key of OPTIONAL_ENV_VARS) {
     const value = (env as Record<string, unknown>)[key];
-    if (!value || (typeof value === 'string' && value.trim() === '')) {
+    if (!value || (typeof value === "string" && value.trim() === "")) {
       optionalMissing.push(key);
     }
   }
@@ -149,7 +154,9 @@ async function checkDatabase(): Promise<{
   // Handle both real Env objects and mocked objects from tests
   const envRecord = env as Record<string, unknown>;
   const supabaseUrl = envRecord.SUPABASE_URL as string | undefined;
-  const supabaseServiceRoleKey = envRecord.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
+  const supabaseServiceRoleKey = envRecord.SUPABASE_SERVICE_ROLE_KEY as
+    | string
+    | undefined;
 
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     return {
@@ -175,8 +182,11 @@ async function checkDatabase(): Promise<{
 
     // Check each critical table exists by attempting a lightweight query
     for (const table of CRITICAL_TABLES) {
-      const { error: tableError } = await supabase.from(table).select("id").limit(1);
-      
+      const { error: tableError } = await supabase
+        .from(table)
+        .select("id")
+        .limit(1);
+
       if (tableError) {
         // Check if table doesn't exist
         if (
@@ -249,8 +259,9 @@ function checkStripe(): {
 
   // Check for required Stripe env vars (if billing is enabled)
   const stripeSecretKey = envRecord.STRIPE_SECRET_KEY as string | undefined;
-  const stripeWebhookSecret = envRecord.STRIPE_WEBHOOK_SECRET as string | undefined;
-  
+  const stripeWebhookSecret = envRecord
+    .STRIPE_WEBHOOK_SECRET as string | undefined;
+
   if (!stripeSecretKey) {
     missingEnv.push("STRIPE_SECRET_KEY");
   }
@@ -314,8 +325,9 @@ function checkSentry(): {
 
   // Sentry is optional, but log if DSNs are missing
   const sentryDsn = envRecord.SENTRY_DSN as string | undefined;
-  const publicSentryDsn = envRecord.NEXT_PUBLIC_SENTRY_DSN as string | undefined;
-  
+  const publicSentryDsn = envRecord
+    .NEXT_PUBLIC_SENTRY_DSN as string | undefined;
+
   if (!sentryDsn && !publicSentryDsn) {
     missingEnv.push("SENTRY_DSN or NEXT_PUBLIC_SENTRY_DSN");
   }
@@ -339,7 +351,8 @@ export async function buildBackendReadinessReport(options?: {
   includeWorkerEnv?: boolean;
   workerStatus?: WorkerEnvStatus;
 }): Promise<BackendReadinessReport> {
-  const { includeWorkerEnv = false, workerStatus: providedWorkerStatus } = options ?? {};
+  const { includeWorkerEnv = false, workerStatus: providedWorkerStatus } =
+    options ?? {};
 
   // Check environment
   const envCheck = checkEnvironment();
@@ -373,4 +386,5 @@ export async function buildBackendReadinessReport(options?: {
     sentry: sentryCheck,
   };
 }
+
 
