@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as usageTracker from '/shared/billing/usageTracker';
+import * as usageTracker from '@cliply/shared/billing/usageTracker';
 import usageRoute from '../../apps/web/src/pages/api/usage';
 import { supertestHandler } from '../utils/supertest-next';
 
