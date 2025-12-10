@@ -6,7 +6,8 @@
 
     "paths": {
       "@/*": ["src/*"],
-      "@cliply/shared/errorCodes": ["../../packages/shared/dist/errorCodes"]
+      "@cliply/shared": ["../../packages/shared/dist/index.js"],
+      "@cliply/shared/*": ["../../packages/shared/dist/*"]
     },
 
     "lib": ["dom", "dom.iterable", "esnext"],
