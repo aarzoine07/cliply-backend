@@ -30,7 +30,7 @@ export interface ScanResult {
  * This function is idempotent - it atomically claims schedules to avoid duplicates.
  */
 export async function scanSchedules(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
 ): Promise<ScanResult> {
   const runId = crypto.randomUUID();
   const startTime = Date.now();
@@ -40,16 +40,14 @@ export async function scanSchedules(
     timestamp: new Date().toISOString(),
   });
 
-  // Step 1: Atomically claim all due schedules
-  // Use UPDATE ... WHERE status = 'scheduled' AND run_at <= now() with RETURNING
-  // Note: PostgREST supports .update().eq().lte().select() which returns updated rows
-  // This is reasonably atomic, though for true atomicity a PostgreSQL function would be better
-  const now = new Date().toISOString();
+  const nowIso = new Date().toISOString();
+
+  // Step 1: Atomically claim all "due" schedules
   const { data: claimedSchedules, error: claimError } = await supabase
     .from("schedules")
-    .update({ status: "processing", updated_at: now })
+    .update({ status: "processing", updated_at: nowIso })
     .eq("status", "scheduled")
-    .lte("run_at", now)
+    .lte("run_at", nowIso)
     .select("id, workspace_id, clip_id, platform, run_at, status");
 
   if (claimError) {
@@ -60,33 +58,66 @@ export async function scanSchedules(
     throw new Error(`Failed to claim schedules: ${claimError.message}`);
   }
 
-  const claimed = (claimedSchedules as ScheduleRow[]) || [];
-  const scanned = claimed.length; // In a real implementation, you'd query total count separately
+  const claimedRaw = (claimedSchedules as ScheduleRow[]) ?? [];
+  const scanned = claimedRaw.length;
+
+  const now = new Date();
+
+  const dueSchedules: ScheduleRow[] = [];
+  const futureSchedules: ScheduleRow[] = [];
+
+  for (const schedule of claimedRaw) {
+    if (!schedule.run_at) {
+      // If run_at is missing or invalid, treat as due (better to process than stall)
+      dueSchedules.push(schedule);
+      continue;
+    }
+
+    const runAtDate = new Date(schedule.run_at);
+    if (!Number.isNaN(runAtDate.getTime()) && runAtDate > now) {
+      futureSchedules.push(schedule);
+    } else {
+      dueSchedules.push(schedule);
+    }
+  }
+
+  if (futureSchedules.length > 0) {
+    for (const schedule of futureSchedules) {
+      logger.info("cron_scan_schedules_skip_future_schedule", {
+        runId,
+        scheduleId: schedule.id,
+        clipId: schedule.clip_id,
+        run_at: schedule.run_at,
+      });
+    }
+  }
 
   logger.info("cron_scan_schedules_claimed", {
     runId,
-    claimed_count: claimed.length,
+    claimed_count: dueSchedules.length,
   });
 
-  if (claimed.length === 0) {
+  // If everything we touched is in the future, nothing should be "claimed"
+  if (dueSchedules.length === 0) {
     logger.info("cron_scan_schedules_complete", {
       runId,
-      scanned: 0,
+      scanned,
       claimed: 0,
       enqueued: 0,
       enqueued_tiktok: 0,
       enqueued_youtube: 0,
-      skipped: 0,
+      skipped: futureSchedules.length,
       failed: 0,
       durationMs: Date.now() - startTime,
     });
+
     return {
-      scanned: 0,
+      scanned,
       claimed: 0,
       enqueued: 0,
       enqueued_tiktok: 0,
       enqueued_youtube: 0,
-      skipped: 0,
+      skipped: futureSchedules.length,
       failed: 0,
     };
   }
@@ -98,7 +129,7 @@ export async function scanSchedules(
   let skipped = 0;
   let failed = 0;
 
-  for (const schedule of claimed) {
+  for (const schedule of dueSchedules) {
     try {
       // Skip schedules without platform (backward compatibility - should be rare)
       if (!schedule.platform) {
@@ -120,7 +151,7 @@ export async function scanSchedules(
             workspaceId: schedule.workspace_id,
             platform: schedule.platform as "tiktok" | "youtube",
           },
-          { supabase }
+          { supabase },
         );
 
         // Use default accounts from config if available
@@ -128,24 +159,27 @@ export async function scanSchedules(
           publishConfig.default_connected_account_ids &&
           publishConfig.default_connected_account_ids.length > 0
         ) {
-          const accounts = await connectedAccountsService.getConnectedAccountsForPublish(
-            {
-              workspaceId: schedule.workspace_id,
-              platform: schedule.platform as "tiktok" | "youtube",
-              connectedAccountIds: publishConfig.default_connected_account_ids,
-            },
-            { supabase }
-          );
+          const accounts =
+            await connectedAccountsService.getConnectedAccountsForPublish(
+              {
+                workspaceId: schedule.workspace_id,
+                platform: schedule.platform as "tiktok" | "youtube",
+                connectedAccountIds:
+                  publishConfig.default_connected_account_ids,
+              },
+              { supabase },
+            );
           accountIds = accounts.map((a) => a.id);
         } else {
           // Fall back to all active accounts for platform
-          const accounts = await connectedAccountsService.getConnectedAccountsForPublish(
-            {
-              workspaceId: schedule.workspace_id,
-              platform: schedule.platform as "tiktok" | "youtube",
-            },
-            { supabase }
-          );
+          const accounts =
+            await connectedAccountsService.getConnectedAccountsForPublish(
+              {
+                workspaceId: schedule.workspace_id,
+                platform: schedule.platform as "tiktok" | "youtube",
+              },
+              { supabase },
+            );
           accountIds = accounts.map((a) => a.id);
         }
       } catch (error) {
@@ -170,7 +204,8 @@ export async function scanSchedules(
       }
 
       // Determine job kind based on platform
-      const jobKind = schedule.platform === "tiktok" ? "PUBLISH_TIKTOK" : "PUBLISH_YOUTUBE";
+      const jobKind =
+        schedule.platform === "tiktok" ? "PUBLISH_TIKTOK" : "PUBLISH_YOUTUBE";
 
       // Enqueue one job per account
       for (const accountId of accountIds) {
@@ -185,7 +220,8 @@ export async function scanSchedules(
           // For now, we'll let the worker use defaults
         } else if (schedule.platform === "tiktok") {
           // Use defaults from publish_config if available
-          payload.privacyLevel = "PUBLIC_TO_EVERYONE";
+          (payload as { privacyLevel: string }).privacyLevel =
+            "PUBLIC_TO_EVERYONE";
         }
 
         const result = await enqueueJob({
@@ -226,7 +262,7 @@ export async function scanSchedules(
   logger.info("cron_scan_schedules_complete", {
     runId,
     scanned,
-    claimed: claimed.length,
+    claimed: dueSchedules.length,
     enqueued,
     enqueued_tiktok: enqueuedTiktok,
     enqueued_youtube: enqueuedYoutube,
@@ -237,7 +273,7 @@ export async function scanSchedules(
 
   return {
     scanned,
-    claimed: claimed.length,
+    claimed: dueSchedules.length,
     enqueued,
     enqueued_tiktok: enqueuedTiktok,
     enqueued_youtube: enqueuedYoutube,
@@ -245,4 +281,3 @@ export async function scanSchedules(
     failed,
   };
 }
-
