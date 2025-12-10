@@ -23,6 +23,11 @@
       "require": "./dist/errorCodes.js",
       "types": "./dist/errorCodes.d.ts"
     },
+    "./sentry": {
+      "import": "./dist/sentry.js",
+      "require": "./dist/sentry.js",
+      "types": "./dist/sentry.d.ts"
+    },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
       "require": "./dist/src/auth/*.js",
