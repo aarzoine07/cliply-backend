@@ -3,7 +3,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as usageTracker from '../../packages/shared/billing/usageTracker';
+import * as usageTracker from '/shared/billing/usageTracker';
 import * as storage from '../../apps/web/src/lib/storage';
 import * as supabaseAdmin from '../../apps/web/src/lib/supabase';
 import uploadInit from '../../apps/web/src/pages/api/upload/init';
