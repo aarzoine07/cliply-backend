@@ -202,5 +202,3 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     workspaceId,
   };
 }
-
-

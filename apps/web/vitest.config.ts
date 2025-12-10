@@ -18,12 +18,12 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      // Explicit aliases for @cliply/shared subpaths (all pointing to src/)
+      // Explicit aliases for @cliply/shared subpaths
       // These must come before the wildcard @cliply/shared alias
       "@cliply/shared/test": resolve(__dirname, "../../packages/shared/test"),
+      "@cliply/shared/logging": resolve(__dirname, "../../packages/shared/logging"), // ✅ Root-level logging dir
       "@cliply/shared/billing": resolve(__dirname, "../../packages/shared/src/billing"),
       "@cliply/shared/types": resolve(__dirname, "../../packages/shared/src/types"),
-      "@cliply/shared/logging": resolve(__dirname, "../../packages/shared/src/logging"),
       "@cliply/shared/health": resolve(__dirname, "../../packages/shared/src/health"),
       "@cliply/shared/readiness": resolve(__dirname, "../../packages/shared/src/readiness"),
       "@cliply/shared/resilience": resolve(__dirname, "../../packages/shared/src/resilience"),

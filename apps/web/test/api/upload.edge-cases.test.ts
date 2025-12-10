@@ -140,7 +140,9 @@ describe('🧩 Upload Edge Cases', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.ok).toBe(false);
-      expect(res.body.error.code).toBe(AuthErrorCode.MISSING_HEADER);
+      // The error response format from auth middleware is { ok: false, code, message, status }
+      // not { ok: false, error: { code } }
+      expect(res.body.code).toBe(AuthErrorCode.MISSING_HEADER);
     });
 
     it('returns usage_limit_exceeded when workspace exceeds limits', async () => {

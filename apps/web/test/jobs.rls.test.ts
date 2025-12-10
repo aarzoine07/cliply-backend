@@ -248,16 +248,33 @@ describe("Jobs RLS – Row Level Security", () => {
      */
     it("verifies RLS is enabled on jobs table", async () => {
       // This is a sanity check that RLS is actually configured
-      // The fact that anon client gets empty results proves RLS is working
+      // Insert a fresh test job to ensure we have something to query
+      const { data: freshJob } = await serviceClient
+        .from("jobs")
+        .insert({
+          workspace_id: WORKSPACE_ID,
+          kind: "TRANSCRIBE",
+          state: "queued",
+          payload: { testMarker, rlsVerification: true },
+        })
+        .select("id")
+        .single();
+
+      expect(freshJob).toBeTruthy();
+      if (freshJob) {
+        testJobIds.push(freshJob.id);
+      }
+
+      // Now verify RLS behavior
       const { data: anonResult } = await anonClient
         .from("jobs")
         .select("id")
-        .contains("payload", { testMarker });
+        .contains("payload", { testMarker, rlsVerification: true });
 
       const { data: serviceResult } = await serviceClient
         .from("jobs")
         .select("id")
-        .contains("payload", { testMarker });
+        .contains("payload", { testMarker, rlsVerification: true });
 
       // Service-role sees jobs, anon doesn't - proves RLS is active
       expect(anonResult ?? []).toEqual([]);
