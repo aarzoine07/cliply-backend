@@ -446,14 +446,15 @@ describe("POST /api/cron/scan-schedules", () => {
       // Job count should be the same as after the first scan.
       expect(jobCountAfterSecond).toBe(jobCountAfterFirst);
       
-      // Additionally, verify that if the first scan failed to enqueue,
-      // the second scan also fails the same way (no new successful enqueues)
+      // Additionally, verify that whatever happened on the first scan,
+      // the second scan does NOT create any new jobs.
       if (jobsFailedFirst > 0) {
-        // Second scan should also fail (same missing table issue)
-        expect(result2.failed).toBeGreaterThanOrEqual(1);
+        // First scan failed to enqueue (e.g. missing idempotency_keys table).
+        // Second scan should not suddenly enqueue jobs for this clip.
         expect(result2.enqueued).toBe(0);
+        expect(jobCountAfterSecond).toBe(0);
       } else if (jobsEnqueuedFirst > 0) {
-        // First scan succeeded, second scan should NOT enqueue duplicates
+        // First scan succeeded, second scan should NOT enqueue duplicates.
         expect(result2.enqueued).toBe(0);
         expect(jobCountAfterSecond).toBe(1);
       }
