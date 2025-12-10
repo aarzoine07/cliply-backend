@@ -11,7 +11,8 @@ import {
   buildAuthContext as buildAuthContextShared,
 } from "@cliply/shared/auth/context";
 import {
-  type AuthErrorCode,
+  AuthErrorCode,
+  type AuthErrorCode as AuthErrorCodeType,
   authErrorResponse,
 } from "@cliply/shared/types/auth";
 
@@ -65,7 +66,7 @@ export async function buildAuthContext(req: NextApiRequest) {
     // Wrap unexpected errors
     const message =
       error instanceof Error ? error.message : "Authentication failed";
-    const code: AuthErrorCode = "INTERNAL_ERROR";
+    const code: AuthErrorCodeType = AuthErrorCode.INTERNAL_ERROR;
     throw {
       code,
       message,
@@ -91,7 +92,7 @@ export function handleAuthError(error: unknown, res: NextApiResponse): void {
       message: string;
     };
     const payload = authErrorResponse(
-      authError.code as AuthErrorCode,
+      authError.code as AuthErrorCodeType,
       authError.message,
       authError.status,
     );
@@ -101,7 +102,7 @@ export function handleAuthError(error: unknown, res: NextApiResponse): void {
 
   // Fallback for unexpected errors
   const payload = authErrorResponse(
-    "INTERNAL_ERROR",
+    AuthErrorCode.INTERNAL_ERROR,
     "Authentication failed",
     500,
   );
