@@ -5,12 +5,7 @@
     "baseUrl": ".",
 
     "paths": {
-      "@/*": ["src/*"],
-
-      // --- IMPORTANT FIX FOR TESTS ONLY ---
-      // Force Vitest and Vite to load shared *source*, not dist.
-      "@cliply/shared": ["../../packages/shared/src/index.ts"],
-      "@cliply/shared/*": ["../../packages/shared/src/*"]
+      "@/*": ["src/*"]
     },
 
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -50,5 +45,6 @@
     "**/.next/**"
   ]
 }
+
 
 
