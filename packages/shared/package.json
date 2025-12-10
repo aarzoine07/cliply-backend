@@ -18,10 +18,10 @@
       "require": "./dist/env.js",
       "types": "./dist/env.d.ts"
     },
-    "./sentry": {
-      "import": "./dist/sentry.js",
-      "require": "./dist/sentry.js",
-      "types": "./dist/sentry.d.ts"
+    "./errorCodes": {
+      "import": "./dist/errorCodes.js",
+      "require": "./dist/errorCodes.js",
+      "types": "./dist/errorCodes.d.ts"
     },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
@@ -102,11 +102,6 @@
       "import": "./dist/src/idempotency/*.js",
       "require": "./dist/src/idempotency/*.js",
       "types": "./dist/src/idempotency/*.d.ts"
-    },
-    "./services/*": {
-      "import": "./dist/src/services/*.js",
-      "require": "./dist/src/services/*.js",
-      "types": "./dist/src/services/*.d.ts"
     }
   },
 
