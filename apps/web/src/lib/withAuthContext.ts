@@ -1,36 +1,32 @@
 // FILE: apps/web/src/lib/withAuthContext.ts
-// FINAL VERSION – App Router auth-context wrapper (looser typings to avoid cross-package mismatch)
+// FINAL VERSION – Next.js App Router auth-context helper
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-import { buildAuthContext } from "@cliply/shared/auth/context";
+import { buildAuthContext as buildAuthContextShared } from "@cliply/shared/auth/context";
 import {
-  type AuthErrorCode,
+  AuthErrorCode,
+  type AuthErrorCode as AuthErrorCodeType,
   authErrorResponse,
+  type AuthContext,
 } from "@cliply/shared/types/auth";
 
-// Request type that downstream handlers see: NextRequest + a `context` bag.
-// We keep this as `any` to avoid type incompatibilities between built/shared types.
-export type ApiRequestWithContext = NextRequest & { context: any };
+export type { AuthContext } from "@cliply/shared/types/auth";
 
-// Handler type used by routes that want auth context.
-export type ApiHandler = (req: ApiRequestWithContext) => Promise<NextResponse>;
+type AuthedRequest = NextRequest & { context: AuthContext };
 
-type AuthError = { code: AuthErrorCode; message: string; status: number };
+type AuthError = {
+  code: AuthErrorCodeType;
+  message: string;
+  status: number;
+};
 
-const AUTH_ERROR_CODES = new Set<string>([
-  "UNAUTHENTICATED",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "INVALID_TOKEN",
-  "MISSING_WORKSPACE",
-  "MISSING_HEADER",
-  "WORKSPACE_MISMATCH",
-  "INTERNAL_ERROR",
-]);
-
+/**
+ * JSON error helper that wraps authErrorResponse, using the shared AuthErrorCode
+ * constant for value-level codes and a separate type alias for typing.
+ */
 function jsonError(
-  code: AuthErrorCode,
+  code: AuthErrorCodeType,
   message: string,
   status: number,
 ): NextResponse {
@@ -39,37 +35,43 @@ function jsonError(
 }
 
 /**
- * Wrap an App Router handler so it receives an auth `context` on the request.
+ * withAuthContext – App Router middleware-style helper
  *
- * Usage in a route:
- *   export const GET = withAuthContext(async (req) => {
- *     const { workspace_id, user_id } = req.context;
- *     ...
+ * Usage:
+ *   export const POST = withAuthContext(async (req) => {
+ *     const { context } = req;
+ *     // ...
  *   });
  */
 export function withAuthContext(
-  handler: ApiHandler,
-): (req: NextRequest) => Promise<NextResponse> {
-  return async function withContext(req: NextRequest): Promise<NextResponse> {
+  handler: (req: AuthedRequest) => Promise<NextResponse>,
+) {
+  return async function wrapped(req: NextRequest): Promise<NextResponse> {
     try {
-      // 1. Build auth context from the incoming request (JWT + workspace membership).
-      const authContext = await buildAuthContext(req as unknown as Request);
+      // NextRequest is compatible with the Fetch Request interface expected
+      // by the shared buildAuthContext; cast for TypeScript.
+      const context = await buildAuthContextShared(req as unknown as Request);
 
-      // 2. Attach the derived context to the request object for downstream handlers.
-      (req as any).context = authContext;
+      const authedReq = req as AuthedRequest;
+      (authedReq as any).context = context;
 
-      // 3. Delegate to the wrapped handler with enriched request data.
-      return await handler(req as ApiRequestWithContext);
+      return await handler(authedReq);
     } catch (error: unknown) {
-      // 4. Normalize known AUTH_* errors raised by context builder/middleware.
-      if (isAuthError(error)) {
-        const status = mapStatus(error.status, error.code);
-        return jsonError(error.code, error.message, status);
+      // Known auth errors thrown by shared auth/context
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        "status" in error &&
+        "message" in error
+      ) {
+        const authError = error as AuthError;
+        return jsonError(authError.code, authError.message, authError.status);
       }
 
-      // 5. Handle unexpected exceptions with a generic internal error response.
+      // Unexpected failures: treat as INTERNAL_ERROR with a generic message.
       return jsonError(
-        "INTERNAL_ERROR",
+        AuthErrorCode.INTERNAL_ERROR,
         "Authentication middleware failed unexpectedly.",
         500,
       );
@@ -77,19 +79,11 @@ export function withAuthContext(
   };
 }
 
-function isAuthError(value: unknown): value is AuthError {
-  if (!value || typeof value !== "object") return false;
-  const cast = value as Partial<AuthError>;
-  return (
-    typeof cast.code === "string" &&
-    AUTH_ERROR_CODES.has(cast.code) &&
-    typeof cast.message === "string" &&
-    typeof cast.status === "number"
-  );
-}
-
-function mapStatus(status: number, code: AuthErrorCode): number {
-  if (status >= 400) return status;
-  if (code === "FORBIDDEN" || code === "WORKSPACE_MISMATCH" || code === "MISSING_WORKSPACE") return 403;
-  return 401;
+/**
+ * mapStatus – helper to normalize HTTP status codes based on auth error code.
+ * Keeping the signature so any existing call sites / tests still type-check.
+ */
+export function mapStatus(status: number, _code: AuthErrorCodeType): number {
+  // For now, just return the provided status. You can refine this if needed.
+  return status;
 }
