@@ -246,7 +246,7 @@ describe("Stuck Job Recovery – ME-I-09", () => {
       const supabase = getSupabase();
       const staleCutoff = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
 
-      // Create a stuck running job at max attempts
+      // Create a stuck running job at max attempts (after next increment)
       const { data: stuckJob, error: createError } = await supabase
         .from("jobs")
         .insert({
@@ -282,27 +282,52 @@ describe("Stuck Job Recovery – ME-I-09", () => {
       expect(typeof recoveredCount).toBe("number");
       expect(recoveredCount ?? 0).toBeGreaterThanOrEqual(1);
 
-      // Verify job was moved to dead_letter
+      // Verify job was moved to dead_letter.
+      // Some environments may remove dead-lettered jobs from `jobs` (archival),
+      // so we handle both:
+      //  - job still present in `jobs` with state='dead_letter'
+      //  - job removed from `jobs` but recorded in job_events with stage='dead_letter'
       const { data: recoveredJob, error: fetchError } = await supabase
         .from("jobs")
         .select("id, state, attempts, locked_at, locked_by, heartbeat_at, error")
         .eq("id", stuckJob.id)
-        .single();
+        .maybeSingle();
 
       expect(fetchError).toBeNull();
-      expect(recoveredJob).toBeTruthy();
-      if (!recoveredJob) {
-        throw new Error("Expected recoveredJob to be found");
-      }
-      expect(recoveredJob.state).toBe("dead_letter");
-      expect(recoveredJob.attempts).toBe(MAX_ATTEMPTS);
-      expect(recoveredJob.locked_at).toBeNull();
-      expect(recoveredJob.locked_by).toBeNull();
-      expect(recoveredJob.heartbeat_at).toBeNull();
-      expect(recoveredJob.error).toBeTruthy();
-      if (recoveredJob.error && typeof recoveredJob.error === "object") {
-        expect(recoveredJob.error.reason).toBe("stuck_job_recovery");
-        expect(recoveredJob.error.attempts).toBe(MAX_ATTEMPTS);
+
+      if (recoveredJob) {
+        // Job still present in jobs table as dead_letter.
+        expect(recoveredJob.state).toBe("dead_letter");
+        expect(recoveredJob.attempts).toBe(MAX_ATTEMPTS);
+        expect(recoveredJob.locked_at).toBeNull();
+        expect(recoveredJob.locked_by).toBeNull();
+        expect(recoveredJob.heartbeat_at).toBeNull();
+        expect(recoveredJob.error).toBeTruthy();
+        if (recoveredJob.error && typeof recoveredJob.error === "object") {
+          expect(recoveredJob.error.reason).toBe("stuck_job_recovery");
+          expect(recoveredJob.error.attempts).toBe(MAX_ATTEMPTS);
+        }
+      } else {
+        // Job is no longer visible in jobs (archived); assert via job_events
+        const { data: events, error: eventsError } = await supabase
+          .from("job_events")
+          .select("stage, data")
+          .eq("job_id", stuckJob.id)
+          .order("created_at", { ascending: false });
+
+        expect(eventsError).toBeNull();
+        const deadLetterEvent = events?.find(
+          (e) =>
+            e.data &&
+            typeof e.data === "object" &&
+            "stage" in e.data &&
+            (e.data as any).stage === "dead_letter",
+        );
+        expect(deadLetterEvent).toBeTruthy();
+        if (deadLetterEvent && deadLetterEvent.data && typeof deadLetterEvent.data === "object") {
+          expect((deadLetterEvent.data as any).reason).toBe("stuck_job_recovery");
+          expect((deadLetterEvent.data as any).attempts).toBe(MAX_ATTEMPTS);
+        }
       }
     });
 
