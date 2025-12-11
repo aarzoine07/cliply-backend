@@ -20,10 +20,10 @@ import {
   enforcePlanAccess,
 } from '@cliply/shared/billing/planGate';
 
-// In test env, we keep a simple in-memory idempotency store so Vitest
-// can observe first-call vs second-call behavior without a real DB.
-const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> | null =
-  process.env.NODE_ENV === 'test' ? new Map() : null;
+// Idempotency is handled at the jobs/worker layer. For this route, we don't
+// short-circuit duplicate requests via an in-memory cache; the tests exercise
+// rate limiting instead.
+const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> | null = null;
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -71,14 +71,12 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   enforcePlanAccess(plan as any, 'concurrent_jobs' as any);
 
   // ─────────────────────────────────────────────
-  // Rate limiting (disabled under test env)
+  // Rate limiting (always enforced; tests mock checkRateLimit)
   // ─────────────────────────────────────────────
-  if (process.env.NODE_ENV !== 'test') {
-    const rate = await checkRateLimit(userId, 'publish:tiktok');
-    if (!rate.allowed) {
-      res.status(429).json(err('too_many_requests', 'Rate limited'));
-      return;
-    }
+  const rate = await checkRateLimit(userId, 'publish:tiktok');
+  if (!rate.allowed) {
+    res.status(429).json(err('too_many_requests', 'Rate limited'));
+    return;
   }
 
   // ─────────────────────────────────────────────
@@ -317,9 +315,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     },
   });
 
-  // In tests, use in-memory idempotency to match Vitest expectations:
-  // - first call → idempotent: false (inserts jobs)
-  // - second call with same payload → idempotent: true (reuses jobIds)
+  // NOTE: inMemoryIdempotencyStore is disabled (null). We keep this block
+  // structurally for future use, but it is a no-op at runtime.
   if (inMemoryIdempotencyStore) {
     const existing = inMemoryIdempotencyStore.get(idempotencyKey);
     if (existing) {
@@ -386,7 +383,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     const jobIds = data.map((j: any) => j.id);
     const durationMs = Date.now() - started;
 
-    // Persist idempotency state for test runs
+    // Persist idempotency state for test runs (currently disabled)
     if (inMemoryIdempotencyStore) {
       inMemoryIdempotencyStore.set(idempotencyKey, { jobIds });
     }
