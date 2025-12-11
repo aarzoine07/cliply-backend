@@ -20,7 +20,8 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: mockSupabaseClientFactory,
 }));
 
-const toApiHandler = (handler: typeof publishYouTubeRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+const toApiHandler = (handler: typeof publishYouTubeRoute) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
 const userId = '123e4567-e89b-12d3-a456-426614174001';
 const workspaceId = '123e4567-e89b-12d3-a456-426614174000';
@@ -34,10 +35,15 @@ const mockClipId = '123e4567-e89b-12d3-a456-426614174000';
 const mockAccountId1 = '223e4567-e89b-12d3-a456-426614174001';
 
 function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic') {
-  const mockInsert = vi.fn().mockResolvedValue({
-    data: [{ id: 'job-123' }],
-    error: null,
-  });
+  // Shared jobs table spy so route + test see the same insert()
+  const jobsTable = {
+    insert: vi.fn().mockReturnValue({
+      select: vi.fn().mockResolvedValue({
+        data: [{ id: 'job-123' }],
+        error: null,
+      }),
+    }),
+  };
 
   const admin = {
     from: vi.fn().mockImplementation((table: string) => {
@@ -57,21 +63,33 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic') {
       }
 
       if (table === 'subscriptions') {
-        const chain = {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockReturnThis(),
+        const chain: any = {
+          select: vi.fn(),
+          eq: vi.fn(),
+          in: vi.fn(),
+          order: vi.fn(),
+          limit: vi.fn(),
           maybeSingle: vi.fn().mockResolvedValue({
-            data: plan === 'basic' ? null : { plan_name: plan }, // Basic plan = no subscription
+            data:
+              plan === 'basic'
+                ? null
+                : {
+                    plan_name: plan,
+                    status: 'active',
+                    current_period_end: new Date().toISOString(),
+                    stripe_subscription_id: 'sub_123',
+                  },
             error: null,
           }),
         };
-        // Support chaining
-        chain.select = vi.fn().mockReturnValue(chain);
-        chain.eq = vi.fn().mockReturnValue(chain);
-        chain.order = vi.fn().mockReturnValue(chain);
-        chain.limit = vi.fn().mockReturnValue(chain);
+
+        // Support chaining: every query method returns the same chain
+        chain.select.mockReturnValue(chain);
+        chain.eq.mockReturnValue(chain);
+        chain.in.mockReturnValue(chain);
+        chain.order.mockReturnValue(chain);
+        chain.limit.mockReturnValue(chain);
+
         return chain;
       }
 
@@ -92,14 +110,8 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic') {
       }
 
       if (table === 'jobs') {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockResolvedValue({
-              data: [{ id: 'job-123' }],
-              error: null,
-            }),
-          }),
-        };
+        // Always return the shared jobsTable so the insert spy is stable
+        return jobsTable;
       }
 
       if (table === 'schedules') {
@@ -137,7 +149,10 @@ function mockAdminClient(admin: ReturnType<typeof createAdminMock>) {
 }
 
 function mockConnectedAccounts() {
-  vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+  vi.spyOn(
+    connectedAccountsService,
+    'getConnectedAccountsForPublish',
+  ).mockResolvedValue([
     {
       id: mockAccountId1,
       workspace_id: workspaceId,
@@ -221,7 +236,7 @@ describe('Plan Gating - Publish Endpoints', () => {
       // Note: Since all plans have concurrent_jobs > 0, we can't easily test the block
       // But we verify the error structure would be correct
       // In a real scenario, this would be tested by mocking checkPlanAccess directly
-      
+
       // For now, test that successful requests have correct structure
       const admin = createAdminMock('basic');
       mockAdminClient(admin);
@@ -250,8 +265,11 @@ describe('Plan Gating - Publish Endpoints', () => {
     it('allows publish when plan includes concurrent_jobs feature', async () => {
       const admin = createAdminMock('pro');
       mockAdminClient(admin);
-      
-      vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+
+      vi.spyOn(
+        connectedAccountsService,
+        'getConnectedAccountsForPublish',
+      ).mockResolvedValue([
         {
           id: mockAccountId1,
           workspace_id: workspaceId,
@@ -285,8 +303,11 @@ describe('Plan Gating - Publish Endpoints', () => {
     it('allows publish for basic plan', async () => {
       const admin = createAdminMock('basic');
       mockAdminClient(admin);
-      
-      vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+
+      vi.spyOn(
+        connectedAccountsService,
+        'getConnectedAccountsForPublish',
+      ).mockResolvedValue([
         {
           id: mockAccountId1,
           workspace_id: workspaceId,
@@ -331,4 +352,3 @@ describe('Plan Gating - Publish Endpoints', () => {
     });
   });
 });
-

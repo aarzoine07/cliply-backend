@@ -1,59 +1,41 @@
--- Dev workspace seed data
--- Idempotent: safe to re-run
+-- ======================================================================
+--  Cliply Seed Data (Local Development Only)
+--  Idempotent: safe to re-run without errors
+-- ======================================================================
 
--- Insert main dev user
-insert into auth.users (id, email)
-values ('00000000-0000-0000-0000-000000000101', 'dev@cliply.ai')
-on conflict (id) do nothing;
+-- ---------------------------------------------------------
+-- 1. Seed main dev user
+-- ---------------------------------------------------------
+INSERT INTO auth.users (id, email)
+VALUES ('00000000-0000-0000-0000-000000000101', 'dev@cliply.ai')
+ON CONFLICT (id) DO NOTHING;
 
--- Insert test actor used by audit-logging tests
-insert into auth.users (id, email)
-values ('00000000-0000-0000-0000-000000000002', 'test-actor@cliply.ai')
-on conflict (id) do nothing;
-
--- Insert a dev workspace owned by main dev user
-insert into workspaces (id, name, owner_id)
-values (
-  '00000000-0000-0000-0000-000000000001',
+-- ---------------------------------------------------------
+-- 2. Workspace owned by dev user
+-- ---------------------------------------------------------
+INSERT INTO workspaces (id, name, owner_id)
+VALUES (
+  '00000000-0000-0000-0000-000000000101',
   'Dev Workspace',
   '00000000-0000-0000-0000-000000000101'
 )
-on conflict (id) do nothing;
+ON CONFLICT (id) DO NOTHING;
 
--- Add test actor user as a workspace member (REQUIRED for audit logging tests)
-insert into workspace_members (workspace_id, user_id, role)
-values (
-  '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000002',
-  'member'
+-- ---------------------------------------------------------
+-- 3. Add owner membership for dev user
+-- ---------------------------------------------------------
+INSERT INTO workspace_members (workspace_id, user_id, role)
+VALUES (
+  '00000000-0000-0000-0000-000000000101',
+  '00000000-0000-0000-0000-000000000101',
+  'owner'
 )
-on conflict do nothing;
+ON CONFLICT DO NOTHING;
 
--- Insert a test project
-insert into projects (
-  id,
-  workspace_id,
-  title,
-  source_type,
-  source_ext,
-  source_key,
-  status
-)
-values (
-  '00000000-0000-0000-0000-000000000201',
-  '00000000-0000-0000-0000-000000000001',
-  'Test Project',
-  'file',
-  'mp4',
-  'sample.mp4',
-  'uploaded'
-)
-on conflict (id) do nothing;
-
--- Remove ❌ invalid "plan" insert (it does not exist in schema)
--- Replace with a real subscription row matching the subscriptions table
-
-insert into subscriptions (
+-- ---------------------------------------------------------
+-- 4. Base subscription (basic, active)
+-- ---------------------------------------------------------
+INSERT INTO subscriptions (
   id,
   workspace_id,
   stripe_customer_id,
@@ -66,23 +48,25 @@ insert into subscriptions (
   cancel_at_period_end,
   trial_end
 )
-values (
+VALUES (
   '00000000-0000-0000-0000-000000000301',
-  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000101',
   'cus_seed001',
   'sub_seed001',
-  'pro',
+  'basic',
   'price_seed001',
   'active',
   now(),
   now() + interval '30 days',
   false,
-  null
+  NULL
 )
-on conflict (id) do nothing;
+ON CONFLICT (id) DO NOTHING;
 
--- Seed a demo subscription row for tests
-insert into subscriptions (
+-- ---------------------------------------------------------
+-- 5. Second subscription for test scenarios (growth, trialing)
+-- ---------------------------------------------------------
+INSERT INTO subscriptions (
   id,
   workspace_id,
   stripe_customer_id,
@@ -95,17 +79,21 @@ insert into subscriptions (
   cancel_at_period_end,
   trial_end
 )
-values (
-  '00000000-0000-0000-0000-000000000401',
-  '00000000-0000-0000-0000-000000000001',
-  'cus_test123',
-  'sub_test123',
-  'pro',
-  'price_test123',
-  'active',
+VALUES (
+  '00000000-0000-0000-0000-000000000302',
+  '00000000-0000-0000-0000-000000000101',
+  'cus_test_auto',
+  'sub_test_auto',
+  'growth',
+  'price_test_auto',
+  'trialing',
   now(),
-  now() + interval '30 days',
+  now() + interval '14 days',
   false,
-  null
+  NULL
 )
-on conflict (id) do nothing;
+ON CONFLICT (id) DO NOTHING;
+
+-- ======================================================================
+-- END OF SEED FILE
+-- ======================================================================

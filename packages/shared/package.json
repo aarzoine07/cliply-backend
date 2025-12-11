@@ -18,6 +18,21 @@
       "require": "./dist/env.js",
       "types": "./dist/env.d.ts"
     },
+    "./errorCodes": {
+      "import": "./dist/errorCodes.js",
+      "require": "./dist/errorCodes.js",
+      "types": "./dist/errorCodes.d.ts"
+    },
+    "./sentry": {
+      "import": "./dist/sentry.js",
+      "require": "./dist/sentry.js",
+      "types": "./dist/sentry.d.ts"
+    },
+    "./constants": {
+      "import": "./dist/constants.js",
+      "require": "./dist/constants.js",
+      "types": "./dist/constants.d.ts"
+    },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
       "require": "./dist/src/auth/*.js",
@@ -63,6 +78,11 @@
       "require": "./dist/src/storage/*.js",
       "types": "./dist/src/storage/*.d.ts"
     },
+    "./services/*": {
+      "import": "./dist/src/services/*.js",
+      "require": "./dist/src/services/*.js",
+      "types": "./dist/src/services/*.d.ts"
+    },
     "./schemas": {
       "import": "./dist/src/schemas.js",
       "require": "./dist/src/schemas.js",
@@ -92,6 +112,11 @@
       "import": "./dist/src/engine/*.js",
       "require": "./dist/src/engine/*.js",
       "types": "./dist/src/engine/*.d.ts"
+    },
+    "./idempotency/*": {
+      "import": "./dist/src/idempotency/*.js",
+      "require": "./dist/src/idempotency/*.js",
+      "types": "./dist/src/idempotency/*.d.ts"
     }
   },
 
@@ -111,5 +136,3 @@
     "stripe": "^19.2.0"
   }
 }
-
-

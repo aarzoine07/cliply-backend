@@ -1,9 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { ProductPerformanceQuery, ProductPerformanceQuery as ProductPerformanceQuerySchema } from '@cliply/shared/schemas/dropshipping';
+import {
+  ProductPerformanceQuery,
+  ProductPerformanceQuery as ProductPerformanceQuerySchema,
+} from '@cliply/shared/schemas/dropshipping';
 
 import { HttpError } from '@/lib/errors';
-import { handler, ok, err } from '@/lib/http';
+import { handler, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as analyticsService from '@/lib/dropshipping/analyticsService';
@@ -32,7 +35,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const productId = req.query.id as string;
-  if (!productId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId)) {
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  if (!productId || !uuidPattern.test(productId)) {
     res.status(400).json(err('invalid_request', 'Invalid product ID'));
     return;
   }
@@ -45,7 +51,9 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const parsed = ProductPerformanceQuerySchema.safeParse(queryParams);
   if (!parsed.success) {
-    res.status(400).json(err('invalid_request', 'Invalid query parameters', parsed.error.flatten()));
+    res
+      .status(400)
+      .json(err('invalid_request', 'Invalid query parameters', parsed.error.flatten()));
     return;
   }
 
@@ -65,7 +73,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       window: parsed.data.window,
     });
 
-    res.status(200).json(ok({ data: summary }));
+    // Explicitly match test expectations: { ok: true, data: summary }
+    res.status(200).json({
+      ok: true,
+      data: summary,
+    });
   } catch (error) {
     if (error instanceof HttpError) {
       if (error.status === 404) {
@@ -87,5 +99,3 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to get product performance'));
   }
 });
-
-

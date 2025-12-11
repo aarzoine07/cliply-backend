@@ -97,7 +97,8 @@ describe("GET /api/projects/[id] - Lifecycle Status Verification", () => {
       return {};
     });
 
-    requireUserMock.mockResolvedValue({
+    // requireUser is synchronous, so use mockReturnValue (not mockResolvedValue)
+    requireUserMock.mockReturnValue({
       userId: "user-123",
       workspaceId,
       supabase: { from: fromSpy } as any,
@@ -211,7 +212,8 @@ describe("GET /api/projects/[id] - Lifecycle Status Verification", () => {
       return {};
     });
 
-    requireUserMock.mockResolvedValue({
+    // requireUser is synchronous, so use mockReturnValue (not mockResolvedValue)
+    requireUserMock.mockReturnValue({
       userId: "user-123",
       workspaceId,
       supabase: { from: fromSpy } as any,

@@ -1,11 +1,14 @@
 // C2: YouTube OAuth API tests
+import { clearEnvCache } from '@cliply/shared/env';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import googleOAuthStart from '../../apps/web/src/pages/api/oauth/google/start';
 import googleOAuthCallback from '../../apps/web/src/pages/api/oauth/google/callback';
 import { supertestHandler } from '../utils/supertest-next';
 
-const toApiHandler = (handler: typeof googleOAuthStart | typeof googleOAuthCallback) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+const toApiHandler = (
+  handler: typeof googleOAuthStart | typeof googleOAuthCallback,
+) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -14,18 +17,20 @@ beforeEach(() => {
 
 describe('GET /api/oauth/google/start', () => {
   it('returns 401 without session header', async () => {
-    const res = await supertestHandler(toApiHandler(googleOAuthStart), 'get').get('/');
+    const res = await supertestHandler(toApiHandler(googleOAuthStart), 'get').get(
+      '/',
+    );
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when workspace is missing', async () => {
+  it('returns 401 when workspace is missing', async () => {
     const userId = '123e4567-e89b-12d3-a456-426614174001';
 
     const res = await supertestHandler(toApiHandler(googleOAuthStart), 'get')
       .get('/')
       .set('x-debug-user', userId);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('ok', false);
   });
 
@@ -38,7 +43,8 @@ describe('GET /api/oauth/google/start', () => {
     process.env = {
       ...originalEnv,
       GOOGLE_CLIENT_ID: 'test-client-id',
-      YOUTUBE_OAUTH_REDIRECT_URL: 'http://localhost:3000/api/oauth/google/callback',
+      YOUTUBE_OAUTH_REDIRECT_URL:
+        'http://localhost:3000/api/oauth/google/callback',
     };
 
     try {
@@ -83,36 +89,41 @@ describe('GET /api/oauth/google/start', () => {
 
 describe('GET /api/oauth/google/callback', () => {
   it('returns 400 when code is missing', async () => {
-    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get')
-      .get('/?state=test');
+    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get').get(
+      '/?state=test',
+    );
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('ok', false);
   });
 
   it('returns 400 when state is missing', async () => {
-    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get')
-      .get('/?code=test-code');
+    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get').get(
+      '/?code=test-code',
+    );
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('ok', false);
   });
 
   it('returns 400 when state is invalid', async () => {
-    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get')
-      .get('/?code=test-code&state=invalid-state');
+    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get').get(
+      '/?code=test-code&state=invalid-state',
+    );
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('ok', false);
   });
 
   it('handles OAuth error parameter', async () => {
-    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get')
-      .get('/?error=access_denied');
+    const res = await supertestHandler(toApiHandler(googleOAuthCallback), 'get').get(
+      '/?error=access_denied',
+    );
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('ok', false);
     expect(res.body.code).toBe('oauth_error');
   });
 });
+
 

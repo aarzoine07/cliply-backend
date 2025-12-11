@@ -8,7 +8,11 @@ import {
   enforcePlanAccess,
 } from "@cliply/shared/billing/planGate";
 import type { PlanLimits } from "@cliply/shared/billing/planMatrix";
-import { AuthErrorCode, authErrorResponse } from "@cliply/shared/types/auth";
+import {
+  type AuthErrorCode,
+  type PlanName,
+  authErrorResponse,
+} from "@cliply/shared/types/auth";
 
 type ApiRequest = NextRequest & { context: AuthContext };
 type ApiHandler = (req: ApiRequest) => Promise<NextResponse>;
@@ -29,14 +33,26 @@ export function withPlanGate(
 ): ApiHandler {
   return async function withPlan(req: ApiRequest): Promise<NextResponse> {
     // 1. Ensure auth context and plan are available before gating features.
-    const plan = req.context?.plan;
-    if (!plan) {
+    const rawPlan = (req.context as any)?.plan;
+
+    if (!rawPlan) {
+      return jsonError(BILLING_PLAN_REQUIRED, "No active plan found.", 403);
+    }
+
+    // Normalize plan to a PlanName.
+    // AuthContext.plan can be either a string PlanName or an object with planId.
+    const planName: PlanName =
+      typeof rawPlan === "string"
+        ? (rawPlan as PlanName)
+        : (rawPlan as any).planId;
+
+    if (!planName) {
       return jsonError(BILLING_PLAN_REQUIRED, "No active plan found.", 403);
     }
 
     try {
       // 2. Check capability availability without mutating state.
-      const gate = checkPlanAccess(plan, feature);
+      const gate = checkPlanAccess(planName, feature);
       if (!gate.active) {
         const code = gate.reason === "limit" ? BILLING_PLAN_LIMIT : BILLING_PLAN_REQUIRED;
         const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
@@ -46,7 +62,7 @@ export function withPlanGate(
       }
 
       // 3. Enforce plan access (no-op today for quotas, future support for limits).
-      enforcePlanAccess(plan, feature);
+      enforcePlanAccess(planName, feature);
 
       // 4. Delegate to the downstream handler when gating succeeds.
       return handler(req);
@@ -56,7 +72,7 @@ export function withPlanGate(
         error instanceof Error
           ? error.message
           : "Plan gate failed unexpectedly.";
-      return jsonError(AuthErrorCode.INTERNAL_ERROR, message, 500);
+      return jsonError("INTERNAL_ERROR", message, 500);
     }
   };
 }

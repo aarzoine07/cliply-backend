@@ -8,6 +8,8 @@ import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { STRIPE_PLAN_MAP } from "@cliply/shared/billing/stripePlanMap";
 import type { PlanName } from "@cliply/shared/types/auth";
+import { runIdempotent, extractIdempotencyKey } from "@cliply/shared/idempotency/idempotencyHelper";
+import { getAdminClient } from "@/lib/supabase";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 
@@ -38,7 +40,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
   logger.info("billing_checkout_start", { method: req.method ?? "GET" });
 
-  // ---- Security headers + CORS (inlined, replaces applySecurityAndCors) ----
+  // ---- Security headers + CORS ----
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
@@ -57,7 +59,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(204).end();
     return;
   }
-  // -------------------------------------------------------------------------  
 
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -67,6 +68,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const auth = requireUser(req);
   const { userId, workspaceId } = auth;
+  const workspaceIdStr = workspaceId ?? "";
 
   const rate = await checkRateLimit(userId, "billing:checkout");
   if (!rate.allowed) {
@@ -91,12 +93,16 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  // If client sends Idempotency-Key, forward it to Stripe so duplicates
-  // don't create multiple checkout sessions.
-  const idempotencyKeyHeader =
-    (req.headers["idempotency-key"] as string | undefined) ??
-    (req.headers["Idempotency-Key"] as string | undefined);
+  const admin = getAdminClient();
+  const requestBody = { priceId, successUrl, cancelUrl, workspaceId: workspaceIdStr };
 
+  // Extract idempotency key from header
+  const idempotencyKey = extractIdempotencyKey(req);
+
+  let result: { checkoutUrl: string | null; sessionId: string };
+  let isIdempotent = false;
+
+  // Create checkout session
   const createCheckoutSession = async (): Promise<{
     checkoutUrl: string | null;
     sessionId: string;
@@ -113,25 +119,19 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: {
-        // Ensure we never pass `undefined` into Stripe metadata
-        workspace_id: workspaceId ?? null,
+        // Force a string for Stripe metadata; fall back to empty string
+        workspace_id: workspaceIdStr,
       },
     };
 
-    const requestOptions: Stripe.RequestOptions = {};
-    if (idempotencyKeyHeader) {
-      requestOptions.idempotencyKey = idempotencyKeyHeader;
-    }
-
-    const session = await stripe.checkout.sessions.create(params, requestOptions);
-    return {
-      checkoutUrl: session.url,
-      sessionId: session.id,
-    };
+    const session = await stripe.checkout.sessions.create(params);
+    return { checkoutUrl: session.url, sessionId: session.id };
   };
 
   /**
    * Determine if a Stripe error should be retried
+   * (Kept for future use if we reintroduce withRetry here.)
+   *
    * Only retry on network errors and clearly transient Stripe errors (5xx)
    * Do NOT retry on card declines, validation errors, or auth errors
    */
@@ -141,7 +141,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       if (error.name === "AbortError" || error.message.includes("timeout")) {
         return true;
       }
-      if (error.message.includes("ECONNREFUSED") || error.message.includes("ENOTFOUND")) {
+      if (
+        error.message.includes("ECONNREFUSED") ||
+        error.message.includes("ENOTFOUND")
+      ) {
         return true;
       }
     }
@@ -176,14 +179,100 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   try {
-    const result = await createCheckoutSession();
+    if (idempotencyKey) {
+      // Use idempotency when header is present
+      try {
+        const idempotencyResult = await runIdempotent(
+          {
+            supabaseAdminClient: admin,
+            workspaceId: workspaceIdStr,
+            userId,
+            key: idempotencyKey,
+            endpoint: "billing/checkout",
+          },
+          requestBody,
+          createCheckoutSession,
+          { storeResponseJson: true }, // Store response JSON for replay
+        );
+
+        if (idempotencyResult.reused) {
+          // Retrieve stored response (stored as JSON in response_hash)
+          if (
+            idempotencyResult.storedResponse &&
+            typeof idempotencyResult.storedResponse === "object"
+          ) {
+            const stored = idempotencyResult.storedResponse as {
+              checkoutUrl?: string | null;
+              sessionId?: string;
+            };
+            if (stored.sessionId) {
+              result = {
+                checkoutUrl: stored.checkoutUrl ?? null,
+                sessionId: stored.sessionId,
+              };
+              isIdempotent = true;
+            } else {
+              // Invalid stored data
+              logger.warn("billing_checkout_idempotent_reuse_invalid_data", {
+                workspaceId: workspaceIdStr,
+                priceId,
+                idempotencyKey,
+              });
+              res
+                .status(500)
+                .json(err("internal_error", "Failed to retrieve stored checkout session"));
+              return;
+            }
+          } else {
+            // No stored response
+            logger.warn("billing_checkout_idempotent_reuse_no_stored_data", {
+              workspaceId: workspaceIdStr,
+              priceId,
+              idempotencyKey,
+            });
+            res
+              .status(500)
+              .json(err("internal_error", "Failed to retrieve stored checkout session"));
+            return;
+          }
+        } else {
+          // `response` is typed as unknown in the shared helper; assert the concrete shape here.
+          result = idempotencyResult.response as {
+            checkoutUrl: string | null;
+            sessionId: string;
+          };
+          isIdempotent = false;
+        }
+      } catch (error) {
+        const errorMessage = (error as Error)?.message ?? "Unknown error";
+        if (errorMessage.includes("conflict")) {
+          res.status(400).json(err("idempotency_conflict", errorMessage));
+          return;
+        } else if (errorMessage.includes("still processing")) {
+          res.status(409).json(err("request_pending", errorMessage));
+          return;
+        }
+        // For other errors, log and continue without idempotency
+        logger.warn("billing_checkout_idempotency_error", {
+          workspaceId: workspaceIdStr,
+          error: errorMessage,
+        });
+        // Fall through to execute without idempotency
+        result = await createCheckoutSession();
+        isIdempotent = false;
+      }
+    } else {
+      // No idempotency header - execute normally (backwards compatible)
+      result = await createCheckoutSession();
+      isIdempotent = false;
+    }
 
     logger.info("billing_checkout_success", {
       userId,
-      workspaceId,
+      workspaceId: workspaceIdStr,
       priceId,
       sessionId: result.sessionId,
-      idempotent: Boolean(idempotencyKeyHeader),
+      idempotent: isIdempotent,
       durationMs: Date.now() - started,
       remainingTokens: rate.remaining,
     });
@@ -192,13 +281,18 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       ok({
         checkoutUrl: result.checkoutUrl,
         sessionId: result.sessionId,
-        idempotent: Boolean(idempotencyKeyHeader),
+        idempotent: isIdempotent,
       }),
     );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to create checkout session";
-    logger.error("billing_checkout_error", { userId, workspaceId, priceId, error: message });
+    logger.error("billing_checkout_error", {
+      userId,
+      workspaceId: workspaceIdStr,
+      priceId,
+      error: message,
+    });
     res.status(500).json(err("checkout_error", message));
   }
 });

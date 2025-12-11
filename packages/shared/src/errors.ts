@@ -1,4 +1,6 @@
-﻿/** HTTP error helper types for API routes and worker surfaces */
+/** HTTP error helper types for API routes and worker surfaces */
+
+import type { ErrorCode } from "./errorCodes";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -40,3 +42,28 @@ export class StubError extends Error {
     super(message);
   }
 }
+
+/**
+ * Create an HttpError using a registered error code.
+ * Maps codes to appropriate HTTP status codes.
+ */
+export function httpErr(code: ErrorCode, message?: string, details?: unknown): HttpError {
+  const statusMap: Record<ErrorCode, number> = {
+    usage_limit_exceeded: 429,
+    posting_limit_exceeded: 429,
+    missing_connected_account: 400,
+    invalid_connected_account: 400,
+    invalid_clip_state: 400,
+    video_too_long_for_plan: 400,
+    video_too_short: 400,
+    workspace_not_configured: 400,
+    clip_already_published: 400,
+    plan_insufficient: 403,
+  };
+
+  const status = statusMap[code] ?? 400;
+  const msg = message ?? code.replace(/_/g, ' ');
+
+  return new HttpError(status, msg, code, details);
+}
+

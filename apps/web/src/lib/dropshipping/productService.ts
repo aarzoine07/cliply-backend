@@ -70,6 +70,8 @@ export async function createProductForWorkspace(
     status: parsed.status ?? "active",
     tags: parsed.tags ?? [],
     landing_url: parsed.landingUrl ?? null,
+    // Ensure NOT NULL url column is always populated
+    url: parsed.landingUrl ?? normalizedSlug,
     price_cents: parsed.priceCents ?? null,
     currency: parsed.currency ?? null,
     primary_benefit: parsed.primaryBenefit ?? null,
@@ -177,6 +179,10 @@ export async function updateProductForWorkspace(
   }
   if (parsed.landingUrl !== undefined) {
     updateData.landing_url = parsed.landingUrl;
+    // Keep url in sync when landingUrl is provided, without breaking NOT NULL
+    if (parsed.landingUrl !== null) {
+      updateData.url = parsed.landingUrl;
+    }
   }
   if (parsed.priceCents !== undefined) {
     updateData.price_cents = parsed.priceCents;
@@ -440,4 +446,5 @@ export async function getClipsForProduct(
     created_at: c.created_at,
   }));
 }
+
 
