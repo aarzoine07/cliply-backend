@@ -23,6 +23,8 @@ import {
 // Simple in-memory idempotency store so repeated calls with the same payload
 // within a single Node process are deduplicated. This is used by both
 // integration tests and E2E tests and is "best-effort" for production.
+// NOTE: We ALSO do a DB-level idempotency check (by idempotency_key) so
+// behavior is robust in CI and real environments.
 const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> = new Map();
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
@@ -317,8 +319,64 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     },
   });
 
-  // First, handle idempotent replays using the in-memory store: if we’ve
-  // already seen this key, reuse those jobIds and mark the call as idempotent.
+  // ─────────────────────────────────────────────
+  // First: DB-level idempotency check (jobs.idempotency_key)
+  // This makes behavior robust in CI / real envs, not just in-memory.
+  // ─────────────────────────────────────────────
+  let existingJobIds: string[] | null = null;
+
+  try {
+    const jobsTable: any =
+      typeof admin.from === 'function' ? admin.from('jobs') : null;
+
+    if (
+      jobsTable &&
+      typeof jobsTable.select === 'function' &&
+      typeof jobsTable.eq === 'function'
+    ) {
+      const { data: existingJobs, error: existingError } = await jobsTable
+        .select('id')
+        .eq('idempotency_key', idempotencyKey);
+
+      if (!existingError && existingJobs && existingJobs.length > 0) {
+        existingJobIds = existingJobs.map((j: any) => j.id);
+      }
+    }
+  } catch (error) {
+    logger.warn('publish_tiktok_idempotency_db_check_failed', {
+      workspaceId,
+      error: (error as Error)?.message ?? 'unknown',
+    });
+  }
+
+  if (existingJobIds && existingJobIds.length > 0) {
+    // Sync to in-memory store for any future calls in this process
+    inMemoryIdempotencyStore.set(idempotencyKey, { jobIds: existingJobIds });
+
+    const durationMs = Date.now() - started;
+
+    logger.info('publish_tiktok_enqueued', {
+      workspaceId,
+      clipId: payload.clipId,
+      jobIds: existingJobIds,
+      accountCount: resolvedAccountIds.length,
+      durationMs,
+      idempotent: true,
+    });
+
+    res.status(200).json(
+      ok({
+        accountCount: resolvedAccountIds.length,
+        jobIds: existingJobIds,
+        idempotent: true,
+      }),
+    );
+    return;
+  }
+
+  // ─────────────────────────────────────────────
+  // Second: in-memory idempotency for integration tests / same-process calls
+  // ─────────────────────────────────────────────
   const existing = inMemoryIdempotencyStore.get(idempotencyKey);
   if (existing) {
     const durationMs = Date.now() - started;
@@ -329,6 +387,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       jobIds: existing.jobIds,
       accountCount: resolvedAccountIds.length,
       durationMs,
+      idempotent: true,
     });
 
     res.status(200).json(
@@ -354,7 +413,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         clipId: payload.clipId,
         storagePath: clipRecord.data.storage_path,
         connectedAccountId: accountId,
-        // ✅ include these so the test’s toMatchObject passes
+        // include these so tests' toMatchObject expectations pass
         caption: payload.caption,
         privacyLevel: payload.privacyLevel,
         experimentId: payload.experimentId ?? null,
@@ -383,7 +442,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     const jobIds = data.map((j: any) => j.id);
     const durationMs = Date.now() - started;
 
-    // Persist idempotency state for subsequent calls in this process
+    // Persist idempotency state for future calls in this process
     inMemoryIdempotencyStore.set(idempotencyKey, { jobIds });
 
     logger.info('publish_tiktok_enqueued', {
@@ -392,6 +451,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       jobIds,
       accountCount: resolvedAccountIds.length,
       durationMs,
+      idempotent: false,
     });
 
     res.status(200).json(
