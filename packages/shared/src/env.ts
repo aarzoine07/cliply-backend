@@ -40,6 +40,12 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   YOUTUBE_OAUTH_REDIRECT_URL: z.string().url().optional(),
+  YOUTUBE_UPLOAD_MODE: z
+    .enum(["stub", "real"])
+    .default("stub")
+    .describe(
+      "Controls YouTube uploads: 'stub' to generate fake video IDs (no network), 'real' to call YouTube Data API.",
+    ),
 
   // ─── TikTok OAuth (optional for test, required for production) ────────────────────────────
   TIKTOK_CLIENT_ID: z.string().optional(),
