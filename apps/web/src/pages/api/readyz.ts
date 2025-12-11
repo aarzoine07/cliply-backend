@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
 import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
+import { getAdminClient } from "@/lib/supabase";
 
 /**
  * Main public readiness endpoint.
@@ -12,7 +13,19 @@ import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendRea
  */
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
   try {
-    const readiness = await buildBackendReadinessReport();
+    // Get Supabase client for queue metrics
+    let supabaseClient;
+    try {
+      supabaseClient = getAdminClient();
+    } catch {
+      // If Supabase client creation fails, continue without queue metrics
+      supabaseClient = undefined;
+    }
+
+    const readiness = await buildBackendReadinessReport({
+      includeDetailedHealth: true,
+      supabaseClient,
+    });
 
     console.log("readyz_check", {
       ok: readiness.ok,

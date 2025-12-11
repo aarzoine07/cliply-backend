@@ -35,6 +35,20 @@ export type BackendReadinessReport = {
     ok: boolean;
     missingEnv: string[];
   };
+  // Optional fields for readiness endpoints that provide detailed health info
+  checks?: {
+    db: { ok: boolean; message?: string };
+    worker: { ok: boolean; message?: string };
+  };
+  queue?: {
+    length: number;
+    oldestJobAge: number | null;
+    warning?: boolean;
+  };
+  ffmpeg?: {
+    ok: boolean;
+    message?: string;
+  };
 };
 
 const REQUIRED_ENV_VARS = [
@@ -333,13 +347,22 @@ function checkSentry(): {
  * @param options Configuration options
  * @param options.includeWorkerEnv Whether to include worker environment checks (requires child_process calls)
  * @param options.workerStatus Optional pre-computed worker status (to avoid importing worker code in shared package)
+ * @param options.includeDetailedHealth Whether to include detailed health fields (checks, queue, ffmpeg) for readiness endpoints
+ * @param options.supabaseClient Optional Supabase client for fetching queue metrics (required if includeDetailedHealth is true)
  * @returns Readiness report with all checks
  */
 export async function buildBackendReadinessReport(options?: {
   includeWorkerEnv?: boolean;
   workerStatus?: WorkerEnvStatus;
+  includeDetailedHealth?: boolean;
+  supabaseClient?: ReturnType<typeof createClient>;
 }): Promise<BackendReadinessReport> {
-  const { includeWorkerEnv = false, workerStatus: providedWorkerStatus } = options ?? {};
+  const {
+    includeWorkerEnv = false,
+    workerStatus: providedWorkerStatus,
+    includeDetailedHealth = false,
+    supabaseClient,
+  } = options ?? {};
 
   // Check environment
   const envCheck = checkEnvironment();
@@ -364,7 +387,8 @@ export async function buildBackendReadinessReport(options?: {
     sentryCheck.ok &&
     (workerStatus === undefined || workerStatus.ok);
 
-  return {
+  // Build base report
+  const report: BackendReadinessReport = {
     ok,
     env: envCheck,
     worker: workerStatus,
@@ -372,5 +396,88 @@ export async function buildBackendReadinessReport(options?: {
     stripe: stripeCheck,
     sentry: sentryCheck,
   };
+
+  // Populate detailed health fields if requested
+  if (includeDetailedHealth) {
+    // Derive checks from db and worker status
+    report.checks = {
+      db: {
+        ok: dbCheck.ok,
+        ...(dbCheck.error ? { message: dbCheck.error } : {}),
+      },
+      worker: {
+        ok: workerStatus?.ok ?? false,
+        ...(workerStatus && !workerStatus.ok
+          ? { message: `Worker env check failed: ${workerStatus.missingEnv.join(", ")}` }
+          : {}),
+      },
+    };
+
+    // Get queue info from health snapshot if Supabase client is available
+    if (supabaseClient) {
+      try {
+        const { getMachineHealthSnapshot } = await import(
+          "@cliply/shared/health/engineHealthSnapshot"
+        );
+        const healthSnapshot = await getMachineHealthSnapshot({
+          supabase: supabaseClient,
+          recentMinutes: 60,
+          maxRecentErrors: 10,
+        });
+
+        const allQueue = healthSnapshot.queues.ALL;
+        const totalPending = allQueue.pending + allQueue.running;
+        const oldestJobAgeSec = allQueue.oldestJobAgeSec;
+
+        report.queue = {
+          length: totalPending,
+          oldestJobAge: oldestJobAgeSec,
+          // Set warning if queue is backed up (more than 50 jobs or oldest job is > 1 hour)
+          ...(totalPending > 50 || (oldestJobAgeSec !== null && oldestJobAgeSec > 3600)
+            ? { warning: true }
+            : {}),
+        };
+      } catch (error) {
+        // If health snapshot fails, provide default queue info
+        report.queue = {
+          length: 0,
+          oldestJobAge: null,
+        };
+      }
+    } else {
+      // No Supabase client provided, use default queue info
+      report.queue = {
+        length: 0,
+        oldestJobAge: null,
+      };
+    }
+
+    // Get FFmpeg status from worker status or check separately
+    if (workerStatus) {
+      report.ffmpeg = {
+        ok: workerStatus.ffmpegOk,
+        ...(workerStatus.ffmpegOk
+          ? {}
+          : { message: "FFmpeg binary not found or unavailable" }),
+      };
+    } else {
+      // Check FFmpeg separately if worker status not provided
+      try {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFile);
+
+        await execFileAsync("ffmpeg", ["--version"], { timeout: 5000 });
+        report.ffmpeg = { ok: true };
+      } catch {
+        report.ffmpeg = {
+          ok: false,
+          message: "FFmpeg binary not found or unavailable",
+        };
+      }
+    }
+  }
+
+  return report;
 }
 

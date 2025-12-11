@@ -49,10 +49,8 @@ describe("Dead-Letter Queue (DLQ) – ME-I-07", () => {
         });
 
         expect(claimError).toBeNull();
-        // Don't assert which job was claimed - just verify the RPC works
-        if (claimed) {
-          expect(claimed.state).toBe("running");
-        }
+        // Don't assert which job was claimed - just verify *a* job was claimed
+        expect(claimed).not.toBeNull();
 
         // Fetch our test job to get current attempt count
         const { data: currentJob, error: fetchError } = await supabaseTest

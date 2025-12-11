@@ -369,3 +369,67 @@ This may indicate feature-level issues (Engine Surface track):
 
 **Last Updated**: 2025-12-08 (BE-06 implementation: env template sync check)
 
+---
+
+## Run #2 – backend-readiness-v1 (2025-12-10)
+
+### Summary
+
+This run focused on aligning the env schema with the `.env.example` template file and ensuring all environment variables are properly documented.
+
+**Changes Made:**
+- ✅ Added missing `NEXT_PUBLIC_YOUTUBE_REDIRECT_URL` to env schema (was used in `apps/web/src/lib/env.ts` but missing from schema)
+- ✅ Created `.env.example` at repo root with all env vars from schema, organized by category
+- ✅ All required env vars now have corresponding entries in `.env.example` with safe placeholder values
+- ✅ Optional env vars are documented with comments indicating they're optional
+
+### Current Status
+
+**🟢 Green Areas:**
+- **Env Schema**: Centralized, type-safe schema in `packages/shared/src/env.ts` with Zod validation
+- **Schema Coverage**: All env vars used in code are now represented in the schema
+- **Documentation**: `.env.example` now exists and is aligned with the schema
+- **Required Vars**: All required vars (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) are clearly marked
+
+**🟡 Yellow Areas:**
+- **Optional Vars**: Many optional vars (Stripe, TikTok, YouTube OAuth, etc.) are documented but not required for core functionality
+- **Fallback Logic**: Some NEXT_PUBLIC_* vars have fallback logic to server-side vars (documented in schema)
+
+**🔴 Red Areas:**
+- None identified in this run
+
+### Env Key Inventory
+
+**Required (3):**
+- `NODE_ENV` (defaults to "development")
+- `SUPABASE_URL` (validated as URL)
+- `SUPABASE_ANON_KEY` (min 20 chars)
+- `SUPABASE_SERVICE_ROLE_KEY` (min 20 chars)
+
+**Optional but Important (23):**
+- Worker config: `WORKER_POLL_MS`, `WORKER_HEARTBEAT_MS`, `WORKER_RECLAIM_MS`, `WORKER_STALE_SECONDS`, `LOG_SAMPLE_RATE`
+- External services: `SENTRY_DSN`, `DATABASE_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`
+- YouTube OAuth: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `YOUTUBE_OAUTH_REDIRECT_URL`
+- TikTok OAuth: `TIKTOK_CLIENT_ID`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_OAUTH_REDIRECT_URL`, `TIKTOK_TOKEN_URL`, `TIKTOK_ENCRYPTION_KEY`
+- Cron/Automation: `CRON_SECRET`, `VERCEL_AUTOMATION_BYPASS_SECRET`
+- Next.js Public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_TIKTOK_REDIRECT_URL`, `NEXT_PUBLIC_YOUTUBE_REDIRECT_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SENTRY_DSN`
+
+### Schema Alignment
+
+- ✅ `.env.example` contains entries for all required env vars
+- ✅ `.env.example` contains entries for all optional env vars (commented out)
+- ✅ Schema and `.env.example` are now in sync
+- ✅ No unused/legacy keys identified in schema (all keys appear to be used in code)
+
+### Next Steps
+
+1. **Run `pnpm check:env:template`** to verify `.env.example` stays in sync with schema (automated check exists)
+2. **Verify CI integration**: Ensure CI runs `check:env:template` as part of `backend-core` job
+3. **Documentation**: Consider adding more detailed descriptions in `ENV.md` for complex optional vars
+
+### Notes
+
+- The `.env.example` file is organized by category (Core, Supabase, Worker, External Services, OAuth, Cron, Next.js Public) for easy navigation
+- All placeholder values use clear patterns (e.g., `your-project.supabase.co`, `your-supabase-anon-key-here`)
+- Optional vars are commented out in `.env.example` to indicate they're not required for basic setup
+
