@@ -262,28 +262,30 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   // ─────────────────────────────────────────────
-  // Enqueue publish job (simple, test-friendly shape)
+  // Enqueue publish jobs (one per account, TikTok-style)
   // ─────────────────────────────────────────────
   try {
+    const jobsPayload = resolvedAccountIds.map((accountId) => ({
+      workspace_id: workspaceId,
+      type: 'publish_youtube',
+      status: 'pending',
+      payload: {
+        clipId: parsed.data.clipId,
+        visibility: parsed.data.visibility,
+        scheduleAt: parsed.data.scheduleAt ?? null,
+        connectedAccountId: accountId,
+        experimentId: parsed.data.experimentId ?? null,
+        variantId: parsed.data.variantId ?? null,
+      },
+      created_by: userId,
+    }));
+
     const { data, error } = await admin
       .from('jobs')
-      .insert({
-        workspace_id: workspaceId,
-        type: 'publish_youtube',
-        status: 'pending',
-        payload: {
-          clipId: parsed.data.clipId,
-          visibility: parsed.data.visibility,
-          scheduleAt: parsed.data.scheduleAt ?? null,
-          connectedAccountIds: resolvedAccountIds,
-          experimentId: parsed.data.experimentId ?? null,
-          variantId: parsed.data.variantId ?? null,
-        },
-        created_by: userId,
-      })
+      .insert(jobsPayload)
       .select();
 
-    if (error || !data || !data[0]) {
+    if (error || !data || data.length === 0) {
       logger.error('publish_youtube_job_insert_failed', {
         workspaceId,
         clipId: parsed.data.clipId,
@@ -293,18 +295,24 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       return;
     }
 
-    const job = data[0];
+    const jobIds = data.map((job: any) => job.id);
     const durationMs = Date.now() - started;
 
     logger.info('publish_youtube_enqueued', {
       workspaceId,
       clipId: parsed.data.clipId,
-      jobId: job.id,
-      accountCount: resolvedAccountIds.length,
+      jobIds,
+      accountCount: jobsPayload.length,
       durationMs,
     });
 
-    res.status(200).json(ok({ data: { jobId: job.id } }));
+    // IMPORTANT: match tests – data.accountCount should exist
+    res.status(200).json(
+      ok({
+        jobIds,
+        accountCount: jobsPayload.length,
+      }),
+    );
   } catch (error) {
     logger.error('publish_youtube_unhandled', {
       workspaceId,
