@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { checkEnvForApi, checkSupabaseConnection } from '@cliply/shared/health/readyChecks.js';
+import { checkEnvForApi, checkSupabaseConnection } from '@cliply/shared/health/readyChecks';
 import { getAdminClient } from '../../lib/supabase';
 
 type ReadyzChecks = {

@@ -19,7 +19,8 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: mockSupabaseClientFactory,
 }));
 
-const toApiHandler = (handler: typeof uploadInit) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+const toApiHandler = (handler: typeof uploadInit) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
 const userId = '123e4567-e89b-12d3-a456-426614174001';
 const workspaceId = '123e4567-e89b-12d3-a456-426614174000';
@@ -38,74 +39,118 @@ type AdminMock = {
 function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic'): AdminMock {
   const inserted: Array<Record<string, unknown>> = [];
 
-  const admin = {
+  // Generic query chain helper with .in() etc
+  const createQueryChain = <TData = unknown>(result: TData) => {
+    const chain: any = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      in: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: result,
+        error: null,
+      }),
+    };
+
+    chain.select.mockReturnValue(chain);
+    chain.eq.mockReturnValue(chain);
+    chain.in.mockReturnValue(chain);
+    chain.order.mockReturnValue(chain);
+    chain.limit.mockReturnValue(chain);
+
+    return chain;
+  };
+
+  const admin: AdminMock = {
     inserted,
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'workspace_members') {
-        const chain = {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: { workspace_id: workspaceId },
-            error: null,
-          }),
-        };
-        // Support chaining multiple .eq() calls
-        chain.eq = vi.fn().mockReturnValue(chain);
-        chain.select = vi.fn().mockReturnValue(chain);
+        const chain = createQueryChain<{ workspace_id: string }>({
+          workspace_id: workspaceId,
+        });
+
+        // workspace_members queries use maybeSingle()
+        chain.maybeSingle = vi.fn().mockResolvedValue({
+          data: { workspace_id: workspaceId },
+          error: null,
+        });
+
         return chain;
       }
 
       if (table === 'subscriptions') {
-        const chain = {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockReturnThis(),
+        // Active subscription lookup for plan gating
+        const subscriptionData =
+          plan === 'basic'
+            ? null
+            : {
+                plan_name: plan,
+                status: 'active',
+                current_period_end: new Date().toISOString(),
+                stripe_subscription_id: 'sub_123',
+              };
+
+        const chain: any = {
+          select: vi.fn(),
+          eq: vi.fn(),
+          in: vi.fn(), // some plan helpers use .in(...)
+          order: vi.fn(),
+          limit: vi.fn(),
           maybeSingle: vi.fn().mockResolvedValue({
-            data: plan === 'basic' ? null : { plan_name: plan }, // Basic plan = no subscription
+            data: subscriptionData,
             error: null,
           }),
         };
-        // Support chaining
-        chain.select = vi.fn().mockReturnValue(chain);
-        chain.eq = vi.fn().mockReturnValue(chain);
-        chain.order = vi.fn().mockReturnValue(chain);
-        chain.limit = vi.fn().mockReturnValue(chain);
+
+        chain.select.mockReturnValue(chain);
+        chain.eq.mockReturnValue(chain);
+        chain.in.mockReturnValue(chain);
+        chain.order.mockReturnValue(chain);
+        chain.limit.mockReturnValue(chain);
+
         return chain;
       }
 
       if (table === 'projects') {
-        return {
-          insert: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
-            inserted.push(payload);
-            return {
-              select: vi.fn().mockReturnThis(),
-              maybeSingle: vi.fn().mockResolvedValue({
-                data: payload,
-                error: null,
-              }),
-            };
-          }),
-        };
+        // Projects created at upload init
+        const chain: any = createQueryChain<unknown>(null);
+
+        chain.insert = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+          inserted.push(payload);
+          // Allow .select().maybeSingle() after insert
+          return {
+            select: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: payload,
+              error: null,
+            }),
+          };
+        });
+
+        return chain;
       }
 
       if (table === 'jobs') {
-        return {
-          insert: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
-            inserted.push(payload);
-            return {
+        // Jobs enqueued at upload complete
+        const chain: any = createQueryChain<unknown>(null);
+
+        chain.insert = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+          inserted.push(payload);
+          // Allow optional .select() chaining on insert result
+          return {
+            select: vi.fn().mockResolvedValue({
+              data: [{ id: 'job-123' }],
               error: null,
-            };
-          }),
-        };
+            }),
+          };
+        });
+
+        return chain;
       }
 
-      return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn(),
-      };
+      // Fallback chain for any table touched by the handlers
+      return createQueryChain<unknown>(null);
     }),
     auth: {
       getUser: vi.fn().mockResolvedValue({
@@ -114,6 +159,9 @@ function createAdminMock(plan: 'basic' | 'pro' | 'premium' = 'basic'): AdminMock
       }),
     },
   };
+
+  // Default rpc() to a no-op success if called
+  (admin as any).rpc = vi.fn().mockResolvedValue({ data: null, error: null });
 
   return admin;
 }
@@ -159,13 +207,9 @@ describe('Plan Gating - Upload Endpoints', () => {
     });
 
     it('blocks upload when plan feature check fails (uploads_per_day = 0)', async () => {
-      // For this test, we need to mock checkPlanAccess to return false
-      // Since we can't easily mock the internal plan matrix, we test by ensuring
-      // the request gets through auth but fails at plan gating
-      // In practice, if uploads_per_day is 0 or undefined, the gate should block
-      
-      // Note: This is a conceptual test - in reality, all plans have uploads_per_day > 0
-      // But we verify the gating mechanism works by checking response structure
+      // Conceptual test: we rely on gating, but with basic plan in current
+      // configuration uploads are allowed. We still ensure the request
+      // goes through auth + gating without throwing.
       const admin = createAdminMock('basic'); // Basic plan has uploads_per_day: 5
       mockAdminClient(admin);
       vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
@@ -290,4 +334,3 @@ describe('Plan Gating - Upload Endpoints', () => {
     });
   });
 });
-
