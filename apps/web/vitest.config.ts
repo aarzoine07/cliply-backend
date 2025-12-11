@@ -47,7 +47,9 @@ export default defineConfig({
   test: {
     root: resolve(__dirname, "../.."),
     hookTimeout: 60000,
-    include: ["apps/web/test/**/*.test.ts"],
+
+    // Include both the app-specific tests and the shared root-level tests
+    include: ["apps/web/test/**/*.test.ts", "test/**/*.test.ts"],
 
     setupFiles: ["packages/shared/test/setup.ts"],
     environment: "node",

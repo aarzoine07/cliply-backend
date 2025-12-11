@@ -53,7 +53,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       });
 
       // Return only the usage section for a lighter payload
-      res.status(200).json(ok({ data: summary.usage }));
+      // Tests expect: res.body.data.minutes, not res.body.data.data.minutes
+      res.status(200).json(ok(summary.usage));
     } catch (serviceError) {
       const errorMessage =
         serviceError instanceof Error ? serviceError.message : "Unknown error";
@@ -86,3 +87,4 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       );
   }
 });
+
