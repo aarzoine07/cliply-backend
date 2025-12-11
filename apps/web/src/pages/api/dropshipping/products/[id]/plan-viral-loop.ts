@@ -1,9 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { ViralPlanQuery, ViralPlanQuery as ViralPlanQuerySchema } from '@cliply/shared/schemas/dropshipping';
+import {
+  ViralPlanQuery,
+  ViralPlanQuery as ViralPlanQuerySchema,
+} from '@cliply/shared/schemas/dropshipping';
 
 import { HttpError } from '@/lib/errors';
-import { handler, ok, err } from '@/lib/http';
+import { handler, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as viralPlannerService from '@/lib/dropshipping/viralPlannerService';
@@ -32,7 +35,12 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const productId = req.query.id as string;
-  if (!productId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId)) {
+  if (
+    !productId ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      productId,
+    )
+  ) {
     res.status(400).json(err('invalid_request', 'Invalid product ID'));
     return;
   }
@@ -50,7 +58,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const parsed = ViralPlanQuerySchema.safeParse(body);
   if (!parsed.success) {
-    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+    res
+      .status(400)
+      .json(
+        err('invalid_request', 'Invalid payload', parsed.error.flatten()),
+      );
     return;
   }
 
@@ -70,7 +82,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       actionCount: actions.length,
     });
 
-    res.status(200).json(ok({ data: actions }));
+    // Return exactly what the tests expect: { ok: true, data: Action[] }
+    res.status(200).json({
+      ok: true,
+      data: actions,
+    });
   } catch (error) {
     if (error instanceof HttpError) {
       if (error.status === 404) {
@@ -80,7 +96,9 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     if ((error as Error)?.message?.includes('not found')) {
-      res.status(404).json(err('not_found', (error as Error).message));
+      res
+        .status(404)
+        .json(err('not_found', (error as Error).message));
       return;
     }
 
@@ -89,8 +107,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       productId,
       message: (error as Error)?.message ?? 'unknown',
     });
-    res.status(500).json(err('internal_error', 'Failed to plan viral actions'));
+    res
+      .status(500)
+      .json(err('internal_error', 'Failed to plan viral actions'));
   }
 });
-
-
