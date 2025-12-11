@@ -99,10 +99,11 @@ describe("Jobs RLS – Row Level Security", () => {
   describe("Service-Role Access (Bypasses RLS)", () => {
     it("service-role can read jobs (bypasses RLS)", async () => {
       // Query all jobs with our test marker
-      const { data, error } = await serviceClient
-        .from("jobs")
-        .select("id, workspace_id, payload")
-        .contains("payload", { testMarker });
+  // Query all jobs we just seeded by ID
+  const { data, error } = await serviceClient
+    .from("jobs")
+    .select("id, workspace_id, payload")
+    .in("id", testJobIds);
 
       expect(error).toBeNull();
       expect(data).toBeTruthy();
@@ -131,12 +132,12 @@ describe("Jobs RLS – Row Level Security", () => {
     });
 
     it("service-role can update jobs in any workspace", async () => {
-      // Find one of our test jobs
-      const { data: jobs } = await serviceClient
-        .from("jobs")
-        .select("id")
-        .contains("payload", { testMarker })
-        .limit(1);
+  // Find one of our test jobs
+     const { data: jobs } = await serviceClient
+    .from("jobs")
+    .select("id")
+    .in("id", testJobIds)
+    .limit(1);
 
       expect(jobs).toBeTruthy();
       expect(jobs!.length).toBeGreaterThan(0);
@@ -197,12 +198,12 @@ describe("Jobs RLS – Row Level Security", () => {
     });
 
     it("anon client cannot update jobs (RLS blocks)", async () => {
-      // First, verify our test jobs exist via service-role
-      const { data: existingJobs } = await serviceClient
-        .from("jobs")
-        .select("id, state")
-        .contains("payload", { testMarker })
-        .limit(1);
+  // First, verify our test jobs exist via service-role
+  const { data: existingJobs } = await serviceClient
+    .from("jobs")
+    .select("id, state")
+    .in("id", testJobIds)
+    .limit(1);
 
       expect(existingJobs).toBeTruthy();
       expect(existingJobs!.length).toBeGreaterThan(0);

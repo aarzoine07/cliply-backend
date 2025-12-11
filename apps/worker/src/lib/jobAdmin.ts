@@ -26,15 +26,31 @@ export async function requeueDeadLetterJob(
 ): Promise<void> {
   const { supabaseClient, jobId } = options;
 
-  // Load current job state
-  const { data: job, error: fetchError } = await supabaseClient
+  // Load current job state without relying on `.single()` semantics
+  const { data, error: fetchError } = await supabaseClient
     .from("jobs")
     .select("id, state, attempts, max_attempts, workspace_id, kind")
-    .eq("id", jobId)
-    .single();
+    .eq("id", jobId);
 
-  if (fetchError || !job) {
-    throw new Error(`Job ${jobId} not found: ${fetchError?.message || "Job does not exist"}`);
+  if (fetchError) {
+    throw new Error(
+      `Job ${jobId} not found: ${fetchError.message || "Job does not exist"}`,
+    );
+  }
+
+  const job = (data && data[0]) as
+    | {
+        id: string;
+        state: string;
+        attempts: number | null;
+        max_attempts: number | null;
+        workspace_id: string | null;
+        kind: string | null;
+      }
+    | undefined;
+
+  if (!job) {
+    throw new Error(`Job ${jobId} not found: Job does not exist`);
   }
 
   // Safety check: only requeue jobs in dead_letter state
@@ -44,16 +60,18 @@ export async function requeueDeadLetterJob(
     );
   }
 
+  const now = new Date().toISOString();
+
   // Reset job to pending state
   const { error: updateError } = await supabaseClient
     .from("jobs")
     .update({
       state: "queued",
       attempts: 0, // Reset attempts to allow fresh retry
-      run_at: new Date().toISOString(), // Make it eligible for immediate claim
+      run_at: now, // Make it eligible for immediate claim
       locked_at: null,
       locked_by: null,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     })
     .eq("id", jobId)
     .eq("state", "dead_letter"); // Additional safety: only update if still dead_letter
@@ -80,7 +98,7 @@ export async function requeueDeadLetterJob(
       data: {
         reason: "requeued_from_dead_letter",
         previous_attempts: job.attempts,
-        requeued_at: new Date().toISOString(),
+        requeued_at: now,
       },
     });
   } catch (eventError) {
@@ -92,4 +110,3 @@ export async function requeueDeadLetterJob(
     );
   }
 }
-

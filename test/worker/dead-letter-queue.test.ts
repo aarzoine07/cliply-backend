@@ -388,40 +388,40 @@ describe("Dead-Letter Queue (DLQ) – ME-I-07", () => {
       expect(completedError).toBeNull();
       expect(completedJob).toBeTruthy();
 
-      // Try to requeue - should throw
-      await expect(
-        requeueDeadLetterJob({
-          supabaseClient: supabaseTest!,
-          jobId: completedJob!.id,
-        }),
-      ).rejects.toThrow(/Cannot requeue job.*expected "dead_letter"/);
-
-      // Create a running job
-      const runningResult = await supabaseTest!
-        .from("jobs")
-        .insert({
-          workspace_id: WORKSPACE_ID,
-          kind: "TRANSCRIBE",
-          payload: { test: "running" },
-          max_attempts: 5,
-          state: "running",
-        })
-        .select()
-        .single();
-
-      const runningError = runningResult.error;
-      const runningJob = runningResult.data as any | null;
-
-      expect(runningError).toBeNull();
-      expect(runningJob).toBeTruthy();
-
-      // Try to requeue - should throw
-      await expect(
-        requeueDeadLetterJob({
-          supabaseClient: supabaseTest!,
-          jobId: runningJob!.id,
-        }),
-      ).rejects.toThrow(/Cannot requeue job.*expected "dead_letter"/);
-    });
-  });
-});
+            // Try to requeue - should throw
+            await expect(
+              requeueDeadLetterJob({
+                supabaseClient: supabaseTest!,
+                jobId: completedJob!.id,
+              }),
+            ).rejects.toThrow(/Cannot requeue job .*expected "dead_letter"/i);
+      
+            // Create a running job
+            const runningResult = await supabaseTest!
+              .from("jobs")
+              .insert({
+                workspace_id: WORKSPACE_ID,
+                kind: "TRANSCRIBE",
+                payload: { test: "running" },
+                max_attempts: 5,
+                state: "running",
+              })
+              .select()
+              .single();
+      
+            const runningError = runningResult.error;
+            const runningJob = runningResult.data as any | null;
+      
+            expect(runningError).toBeNull();
+            expect(runningJob).toBeTruthy();
+      
+            // Try to requeue - should throw
+            await expect(
+              requeueDeadLetterJob({
+                supabaseClient: supabaseTest!,
+                jobId: runningJob!.id,
+              }),
+            ).rejects.toThrow(/Cannot requeue job .*expected "dead_letter"/i);
+          });
+        });
+      });
