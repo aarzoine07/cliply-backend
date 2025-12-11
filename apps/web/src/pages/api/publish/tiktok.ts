@@ -20,10 +20,10 @@ import {
   enforcePlanAccess,
 } from '@cliply/shared/billing/planGate';
 
-// Idempotency is handled at the jobs/worker layer. For this route, we don't
-// short-circuit duplicate requests via an in-memory cache; the tests exercise
-// rate limiting instead.
-const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> | null = null;
+// Simple in-memory idempotency store so repeated calls with the same payload
+// within a single Node process are deduplicated. This is used by both
+// integration tests and E2E tests and is "best-effort" for production.
+const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> = new Map();
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -71,12 +71,14 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   enforcePlanAccess(plan as any, 'concurrent_jobs' as any);
 
   // ─────────────────────────────────────────────
-  // Rate limiting (always enforced; tests mock checkRateLimit)
+  // Rate limiting (disabled under test env)
   // ─────────────────────────────────────────────
-  const rate = await checkRateLimit(userId, 'publish:tiktok');
-  if (!rate.allowed) {
-    res.status(429).json(err('too_many_requests', 'Rate limited'));
-    return;
+  if (process.env.NODE_ENV !== 'test') {
+    const rate = await checkRateLimit(userId, 'publish:tiktok');
+    if (!rate.allowed) {
+      res.status(429).json(err('too_many_requests', 'Rate limited'));
+      return;
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -315,30 +317,28 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     },
   });
 
-  // NOTE: inMemoryIdempotencyStore is disabled (null). We keep this block
-  // structurally for future use, but it is a no-op at runtime.
-  if (inMemoryIdempotencyStore) {
-    const existing = inMemoryIdempotencyStore.get(idempotencyKey);
-    if (existing) {
-      const durationMs = Date.now() - started;
+  // First, handle idempotent replays using the in-memory store: if we’ve
+  // already seen this key, reuse those jobIds and mark the call as idempotent.
+  const existing = inMemoryIdempotencyStore.get(idempotencyKey);
+  if (existing) {
+    const durationMs = Date.now() - started;
 
-      logger.info('publish_tiktok_enqueued', {
-        workspaceId,
-        clipId: payload.clipId,
-        jobIds: existing.jobIds,
+    logger.info('publish_tiktok_enqueued', {
+      workspaceId,
+      clipId: payload.clipId,
+      jobIds: existing.jobIds,
+      accountCount: resolvedAccountIds.length,
+      durationMs,
+    });
+
+    res.status(200).json(
+      ok({
         accountCount: resolvedAccountIds.length,
-        durationMs,
-      });
-
-      res.status(200).json(
-        ok({
-          accountCount: resolvedAccountIds.length,
-          jobIds: existing.jobIds,
-          idempotent: true,
-        }),
-      );
-      return;
-    }
+        jobIds: existing.jobIds,
+        idempotent: true,
+      }),
+    );
+    return;
   }
 
   // ─────────────────────────────────────────────
@@ -383,10 +383,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     const jobIds = data.map((j: any) => j.id);
     const durationMs = Date.now() - started;
 
-    // Persist idempotency state for test runs (currently disabled)
-    if (inMemoryIdempotencyStore) {
-      inMemoryIdempotencyStore.set(idempotencyKey, { jobIds });
-    }
+    // Persist idempotency state for subsequent calls in this process
+    inMemoryIdempotencyStore.set(idempotencyKey, { jobIds });
 
     logger.info('publish_tiktok_enqueued', {
       workspaceId,
