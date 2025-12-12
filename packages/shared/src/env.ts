@@ -57,6 +57,12 @@ const EnvSchema = z.object({
     .min(1, "TIKTOK_ENCRYPTION_KEY is required for TikTok token encryption")
     .optional()
     .describe("Base64-encoded 32-byte key for encrypting TikTok tokens at rest"),
+  TIKTOK_UPLOAD_MODE: z
+    .enum(["stub", "real"])
+    .default("stub")
+    .describe(
+      "Controls TikTok uploads: 'stub' to generate fake post IDs (no network), 'real' to call TikTok Content Posting API.",
+    ),
 
   // ─── Cron & Automation ────────────────────────────────────────────────
   CRON_SECRET: z.string().optional(),
