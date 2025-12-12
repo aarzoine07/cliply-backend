@@ -4,13 +4,11 @@
     "target": "ES2022",
     "baseUrl": ".",
 
-  "paths": {
-  "@/*": ["src/*"],
-
-  // Shared package (use built dist output)
-  "@cliply/shared": ["../../packages/shared/dist/src/index.d.ts"],
-  "@cliply/shared/*": ["../../packages/shared/dist/src/*"]
-},
+    "paths": {
+      "@/*": ["src/*"],
+      "@cliply/shared": ["../../packages/shared/dist/index.js"],
+      "@cliply/shared/*": ["../../packages/shared/dist/*"]
+    },
 
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
@@ -26,23 +24,27 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "downlevelIteration": true,
+
     "plugins": [
       {
         "name": "next"
       }
     ],
+
     "strictNullChecks": true
   },
+
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
     "test/**/*.ts",
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    "types/**/*.d.ts"
   ],
+
   "exclude": [
     "node_modules",
     ".next",
     "**/.next/**"
   ]
 }
-

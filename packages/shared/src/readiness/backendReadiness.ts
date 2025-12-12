@@ -4,6 +4,12 @@ import Stripe from "stripe";
 import { getEnv } from "@cliply/shared/env";
 import { STRIPE_PLAN_MAP } from "../billing/stripePlanMap";
 
+// ─────────────────────────────────────────────
+// Queue staleness thresholds used by health / readiness
+// ─────────────────────────────────────────────
+export const QUEUE_AGE_WARNING_MS = 60_000; // 60 seconds
+export const QUEUE_AGE_HARD_FAIL_MS = 300_000; // 5 minutes
+
 // WorkerEnvStatus type (duplicated to avoid circular dependency)
 export type WorkerEnvStatus = {
   ok: boolean;
@@ -12,31 +18,7 @@ export type WorkerEnvStatus = {
   missingEnv: string[];
 };
 
-export type BackendReadinessReport = {
-  ok: boolean;
-  env: {
-    ok: boolean;
-    missing: string[];
-    optionalMissing: string[];
-  };
-  worker?: WorkerEnvStatus;
-  db: {
-    ok: boolean;
-    error?: string;
-    tablesChecked: string[];
-    missingTables: string[];
-  };
-  stripe: {
-    ok: boolean;
-    missingEnv: string[];
-    priceIdsConfigured: number;
-  };
-  sentry: {
-    ok: boolean;
-    missingEnv: string[];
-  };
-};
-
+// Internal constants
 const REQUIRED_ENV_VARS = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
@@ -59,30 +41,84 @@ const CRITICAL_TABLES = [
   "subscriptions",
 ] as const;
 
-/**
- * Checks environment variables and returns missing required and optional ones.
- */
-function checkEnvironment(): {
+// ─────────────────────────────────────────────
+// Public result types
+// ─────────────────────────────────────────────
+
+export type EnvCheckResult = {
   ok: boolean;
   missing: string[];
   optionalMissing: string[];
-} {
+};
+
+export type DbCheckResult = {
+  ok: boolean;
+  error?: string;
+  tablesChecked: string[];
+  missingTables: string[];
+};
+
+export type StripeCheckResult = {
+  ok: boolean;
+  missingEnv: string[];
+  priceIdsConfigured: number;
+};
+
+export type SentryCheckResult = {
+  ok: boolean;
+  missingEnv: string[];
+};
+
+export type BackendReadinessChecks = {
+  env: EnvCheckResult;
+  db: DbCheckResult;
+  stripe: StripeCheckResult;
+  sentry: SentryCheckResult;
+  worker?: WorkerEnvStatus;
+};
+
+// This is the shape consumed by admin/readyz and tests
+export type BackendReadinessReport = {
+  ok: boolean;
+
+  // Individual checks (for internal use)
+  env: EnvCheckResult;
+  worker?: WorkerEnvStatus;
+  db: DbCheckResult;
+  stripe: StripeCheckResult;
+  sentry: SentryCheckResult;
+
+  // Aggregated map used by /api/admin/readyz
+  checks: BackendReadinessChecks;
+
+  // Optional higher-level fields populated by engine health helpers
+  queue?: unknown;
+  ffmpeg?: unknown;
+};
+
+// ─────────────────────────────────────────────
+// Check helpers
+// ─────────────────────────────────────────────
+
+/**
+ * Checks environment variables and returns missing required and optional ones.
+ */
+export function checkEnvironment(): EnvCheckResult {
   let env;
   try {
     env = getEnv();
   } catch (error) {
     // If getEnv() throws, it means required vars are missing
-    // Try to extract which specific vars are missing from the error message
     const errorMessage = error instanceof Error ? error.message : String(error);
     const missing: string[] = [];
-    
+
     // Check each required var to see if it's mentioned in the error
     for (const key of REQUIRED_ENV_VARS) {
       if (errorMessage.includes(key) || !process.env[key]) {
         missing.push(key);
       }
     }
-    
+
     // If we couldn't determine specific missing vars, assume all are missing
     if (missing.length === 0) {
       return {
@@ -91,7 +127,7 @@ function checkEnvironment(): {
         optionalMissing: [],
       };
     }
-    
+
     return {
       ok: false,
       missing,
@@ -99,13 +135,11 @@ function checkEnvironment(): {
     };
   }
 
-  // Check if the returned env object has all required keys
-  // Handle both real Env objects and mocked objects from tests
+  // Check required vars on the parsed env object
   const missing: string[] = [];
   for (const key of REQUIRED_ENV_VARS) {
-    // Use bracket notation to access potentially missing keys
     const value = (env as Record<string, unknown>)[key];
-    if (!value || (typeof value === 'string' && value.trim() === '')) {
+    if (!value || (typeof value === "string" && value.trim() === "")) {
       missing.push(key);
     }
   }
@@ -113,7 +147,7 @@ function checkEnvironment(): {
   const optionalMissing: string[] = [];
   for (const key of OPTIONAL_ENV_VARS) {
     const value = (env as Record<string, unknown>)[key];
-    if (!value || (typeof value === 'string' && value.trim() === '')) {
+    if (!value || (typeof value === "string" && value.trim() === "")) {
       optionalMissing.push(key);
     }
   }
@@ -128,12 +162,7 @@ function checkEnvironment(): {
 /**
  * Checks database connectivity and verifies critical tables exist.
  */
-async function checkDatabase(): Promise<{
-  ok: boolean;
-  error?: string;
-  tablesChecked: string[];
-  missingTables: string[];
-}> {
+export async function checkDatabase(): Promise<DbCheckResult> {
   let env;
   try {
     env = getEnv();
@@ -146,10 +175,11 @@ async function checkDatabase(): Promise<{
     };
   }
 
-  // Handle both real Env objects and mocked objects from tests
   const envRecord = env as Record<string, unknown>;
   const supabaseUrl = envRecord.SUPABASE_URL as string | undefined;
-  const supabaseServiceRoleKey = envRecord.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
+  const supabaseServiceRoleKey = envRecord.SUPABASE_SERVICE_ROLE_KEY as
+    | string
+    | undefined;
 
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     return {
@@ -175,10 +205,13 @@ async function checkDatabase(): Promise<{
 
     // Check each critical table exists by attempting a lightweight query
     for (const table of CRITICAL_TABLES) {
-      const { error: tableError } = await supabase.from(table).select("id").limit(1);
-      
+      const { error: tableError } = await supabase
+        .from(table)
+        .select("id")
+        .limit(1);
+
       if (tableError) {
-        // Check if table doesn't exist
+        // Table missing
         if (
           tableError.message?.includes("does not exist") ||
           tableError.message?.includes("relation") ||
@@ -186,18 +219,15 @@ async function checkDatabase(): Promise<{
         ) {
           missingTables.push(table);
         } else {
-          // Permission errors or other critical errors should stop the check
-          // With service role key, we shouldn't get permission errors, so this is unexpected
+          // Unexpected DB error
           dbError = `Error checking table '${table}': ${tableError.message}`;
           break;
         }
       } else {
-        // Query succeeded - table exists and is accessible
         tablesChecked.push(table);
       }
     }
 
-    // If we encountered a critical error, return early
     if (dbError) {
       return {
         ok: false,
@@ -226,31 +256,25 @@ async function checkDatabase(): Promise<{
 /**
  * Checks Stripe configuration.
  */
-function checkStripe(): {
-  ok: boolean;
-  missingEnv: string[];
-  priceIdsConfigured: number;
-} {
+export function checkStripe(): StripeCheckResult {
   let env;
   try {
     env = getEnv();
   } catch {
-    // If getEnv() fails, Stripe is not configured
+    // If getEnv() fails, Stripe is effectively "not configured" (optional)
     return {
-      ok: true, // Stripe is optional
+      ok: true,
       missingEnv: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
       priceIdsConfigured: Object.keys(STRIPE_PLAN_MAP).length,
     };
   }
 
-  // Handle both real Env objects and mocked objects from tests
   const envRecord = env as Record<string, unknown>;
   const missingEnv: string[] = [];
 
-  // Check for required Stripe env vars (if billing is enabled)
   const stripeSecretKey = envRecord.STRIPE_SECRET_KEY as string | undefined;
   const stripeWebhookSecret = envRecord.STRIPE_WEBHOOK_SECRET as string | undefined;
-  
+
   if (!stripeSecretKey) {
     missingEnv.push("STRIPE_SECRET_KEY");
   }
@@ -262,16 +286,14 @@ function checkStripe(): {
   let keyValid = false;
   if (stripeSecretKey) {
     try {
-      // Stripe keys start with sk_ for secret keys
       if (stripeSecretKey.startsWith("sk_")) {
-        // Try to instantiate Stripe client (no network call)
         new Stripe(stripeSecretKey, {
           apiVersion: "2025-10-29.clover",
         });
         keyValid = true;
       }
     } catch {
-      // Invalid key format
+      // Invalid key format – fall through with keyValid = false
     }
   }
 
@@ -279,8 +301,7 @@ function checkStripe(): {
 
   // Stripe is OK if:
   // 1. All env vars present and key is valid, OR
-  // 2. Stripe is not configured at all (all optional for basic functionality)
-  // If STRIPE_SECRET_KEY is provided, it must be valid
+  // 2. Stripe is not configured at all (secret key missing)
   const ok = missingEnv.length === 0 && (keyValid || !stripeSecretKey);
 
   return {
@@ -293,70 +314,66 @@ function checkStripe(): {
 /**
  * Checks Sentry configuration.
  */
-function checkSentry(): {
-  ok: boolean;
-  missingEnv: string[];
-} {
+export function checkSentry(): SentryCheckResult {
   let env;
   try {
     env = getEnv();
   } catch {
-    // If getEnv() fails, Sentry is not configured (optional)
+    // If getEnv() fails, Sentry is treated as "not configured" (optional)
     return {
       ok: true,
       missingEnv: ["SENTRY_DSN or NEXT_PUBLIC_SENTRY_DSN"],
     };
   }
 
-  // Handle both real Env objects and mocked objects from tests
   const envRecord = env as Record<string, unknown>;
   const missingEnv: string[] = [];
 
-  // Sentry is optional, but log if DSNs are missing
   const sentryDsn = envRecord.SENTRY_DSN as string | undefined;
   const publicSentryDsn = envRecord.NEXT_PUBLIC_SENTRY_DSN as string | undefined;
-  
+
   if (!sentryDsn && !publicSentryDsn) {
     missingEnv.push("SENTRY_DSN or NEXT_PUBLIC_SENTRY_DSN");
   }
 
-  // Sentry is always OK (it's optional)
   return {
     ok: true,
     missingEnv,
   };
 }
 
+// ─────────────────────────────────────────────
+// Main builder
+// ─────────────────────────────────────────────
+
 /**
  * Builds a comprehensive backend readiness report.
  *
- * @param options Configuration options
- * @param options.includeWorkerEnv Whether to include worker environment checks (requires child_process calls)
- * @param options.workerStatus Optional pre-computed worker status (to avoid importing worker code in shared package)
- * @returns Readiness report with all checks
+ * @param options.includeWorkerEnv  Whether to include worker environment checks
+ * @param options.workerStatus      Pre-computed worker status (from engine surface)
  */
 export async function buildBackendReadinessReport(options?: {
   includeWorkerEnv?: boolean;
   workerStatus?: WorkerEnvStatus;
 }): Promise<BackendReadinessReport> {
-  const { includeWorkerEnv = false, workerStatus: providedWorkerStatus } = options ?? {};
+  const { includeWorkerEnv = false, workerStatus: providedWorkerStatus } =
+    options ?? {};
 
-  // Check environment
+  // Core checks
   const envCheck = checkEnvironment();
-
-  // Use provided worker status or leave undefined
   const workerStatus = includeWorkerEnv ? providedWorkerStatus : undefined;
-
-  // Check database
   const dbCheck = await checkDatabase();
-
-  // Check Stripe
   const stripeCheck = checkStripe();
-
-  // Check Sentry
   const sentryCheck = checkSentry();
 
-  // Overall status: OK only if all critical checks pass
+  const checks: BackendReadinessChecks = {
+    env: envCheck,
+    db: dbCheck,
+    stripe: stripeCheck,
+    sentry: sentryCheck,
+    worker: workerStatus,
+  };
+
   const ok =
     envCheck.ok &&
     dbCheck.ok &&
@@ -371,6 +388,9 @@ export async function buildBackendReadinessReport(options?: {
     db: dbCheck,
     stripe: stripeCheck,
     sentry: sentryCheck,
+    checks,
+    // Queue / ffmpeg fields can be filled by higher-level engine health helpers.
+    queue: undefined,
+    ffmpeg: undefined,
   };
 }
-

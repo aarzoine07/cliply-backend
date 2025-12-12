@@ -8,7 +8,8 @@ import * as experimentService from '../../apps/web/src/lib/viral/experimentServi
 import * as supabase from '../../apps/web/src/lib/supabase';
 import { TikTokClient } from '../../apps/worker/src/services/tiktok/client';
 
-const toApiHandler = (handler: typeof publishTikTokRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+const toApiHandler = (handler: typeof publishTikTokRoute) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
 const commonHeaders = {
   'x-debug-user': '00000000-0000-0000-0000-000000000001',
@@ -38,22 +39,29 @@ function createAdminClient() {
           }),
         };
       }
+
       if (table === 'jobs') {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockResolvedValue({
-              data: [{ id: 'job-123' }, { id: 'job-456' }],
-              error: null,
-            }),
-          }),
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockResolvedValue({
+        const insert = vi.fn().mockReturnValue({
+          select: vi.fn().mockResolvedValue({
             data: [{ id: 'job-123' }, { id: 'job-456' }],
             error: null,
           }),
+        });
+        const select = vi.fn().mockReturnThis();
+        const eq = vi.fn().mockReturnThis();
+        const order = vi.fn().mockResolvedValue({
+          data: [{ id: 'job-123' }, { id: 'job-456' }],
+          error: null,
+        });
+
+        return {
+          insert,
+          select,
+          eq,
+          order,
         };
       }
+
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
@@ -76,7 +84,10 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
     const admin = createAdminClient();
     mockAdminClient(admin);
 
-    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+    vi.spyOn(
+      connectedAccountsService,
+      'getConnectedAccountsForPublish',
+    ).mockResolvedValue([
       {
         id: mockAccountId1,
         workspace_id: mockWorkspaceId,
@@ -158,7 +169,10 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
     const admin = createAdminClient();
     mockAdminClient(admin);
 
-    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+    vi.spyOn(
+      connectedAccountsService,
+      'getConnectedAccountsForPublish',
+    ).mockResolvedValue([
       {
         id: mockAccountId1,
         workspace_id: mockWorkspaceId,
@@ -175,8 +189,12 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
       },
     ]);
 
-    const attachClipSpy = vi.spyOn(experimentService, 'attachClipToExperimentVariant').mockResolvedValue(undefined);
-    const createVariantPostsSpy = vi.spyOn(orchestrationService, 'createVariantPostsForClip').mockResolvedValue(undefined);
+    const attachClipSpy = vi
+      .spyOn(experimentService, 'attachClipToExperimentVariant')
+      .mockResolvedValue(undefined);
+    const createVariantPostsSpy = vi
+      .spyOn(orchestrationService, 'createVariantPostsForClip')
+      .mockResolvedValue(undefined);
 
     const experimentId = 'exp-e2e-123';
     const variantId = 'var-e2e-123';
@@ -223,7 +241,10 @@ describe('POST /api/publish/tiktok - E2E Flow', () => {
     const admin = createAdminClient();
     mockAdminClient(admin);
 
-    vi.spyOn(connectedAccountsService, 'getConnectedAccountsForPublish').mockResolvedValue([
+    vi.spyOn(
+      connectedAccountsService,
+      'getConnectedAccountsForPublish',
+    ).mockResolvedValue([
       {
         id: mockAccountId1,
         workspace_id: mockWorkspaceId,
@@ -296,4 +317,5 @@ describe('TikTok Client Integration Points', () => {
     });
   });
 });
+
 

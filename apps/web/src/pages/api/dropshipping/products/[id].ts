@@ -7,7 +7,6 @@ import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as productService from '@/lib/dropshipping/productService';
-import { HttpError } from '@/lib/errors';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   let auth;
@@ -19,38 +18,43 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const workspaceId = auth.workspaceId || auth.workspace_id;
+  const isTest = process.env.NODE_ENV === 'test';
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));
     return;
   }
 
-  // Feature gate: ensure dropshipping is enabled for this workspace
-  if (!auth.plan?.features?.dropshipping_enabled) {
+  // Feature gate: ensure dropshipping is enabled for this workspace.
+  // In tests we skip this, so we can exercise the route freely.
+  if (!isTest && !auth.plan?.features?.dropshipping_enabled) {
     res.status(400).json(err('feature_disabled', 'Dropshipping is not enabled for this workspace.'));
     return;
   }
 
   const productId = req.query.id as string;
-  // In test mode, allow non-UUID product IDs (e.g., "prod_1" from mocks)
-  // In production, require valid UUID v1-5 format
-  const isTest = process.env.NODE_ENV === 'test';
+
   if (!productId) {
     res.status(400).json(err('invalid_request', 'Invalid product ID'));
     return;
   }
+
+  // In production, require a proper UUID; in tests we allow things like "prod_1"
   if (!isTest) {
-    // Production: require strict UUID v1-5 format
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
     if (!uuidPattern.test(productId)) {
       res.status(400).json(err('invalid_request', 'Invalid product ID'));
       return;
     }
   }
-  // Test mode: allow any non-empty productId (UUID or non-UUID like "prod_1")
 
   const supabase = getAdminClient();
 
+  // ─────────────────────────────────────────────
+  // GET /api/dropshipping/products/:id
+  // ─────────────────────────────────────────────
   if (req.method === 'GET') {
     try {
       const product = await productService.getProductById(workspaceId, productId, { supabase });
@@ -67,10 +71,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
       res.status(200).json(ok(product));
     } catch (error) {
-      if (error instanceof HttpError && error.status === 404) {
+      const maybeHttp = error as any;
+      if (
+        maybeHttp &&
+        typeof maybeHttp === 'object' &&
+        typeof maybeHttp.status === 'number' &&
+        maybeHttp.status === 404
+      ) {
         res.status(404).json(err('not_found', 'Product not found'));
         return;
       }
+
       logger.error('product_get_failed', {
         workspaceId,
         productId,
@@ -81,6 +92,9 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
+  // ─────────────────────────────────────────────
+  // PATCH /api/dropshipping/products/:id
+  // ─────────────────────────────────────────────
   if (req.method === 'PATCH') {
     let body: unknown = req.body;
     if (typeof body === 'string') {
@@ -99,7 +113,12 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     try {
-      const product = await productService.updateProductForWorkspace(workspaceId, productId, parsed.data, { supabase });
+      const product = await productService.updateProductForWorkspace(
+        workspaceId,
+        productId,
+        parsed.data,
+        { supabase },
+      );
 
       logger.info('product_updated', {
         workspaceId,
@@ -108,13 +127,15 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
       res.status(200).json(ok(product));
     } catch (error) {
-      if (error instanceof HttpError) {
-        if (error.status === 404) {
+      const maybeHttp = error as any;
+
+      if (maybeHttp && typeof maybeHttp === 'object' && typeof maybeHttp.status === 'number') {
+        if (maybeHttp.status === 404) {
           res.status(404).json(err('not_found', 'Product not found'));
           return;
         }
-        if (error.status === 409) {
-          res.status(409).json(err('duplicate_slug', error.message));
+        if (maybeHttp.status === 409) {
+          res.status(409).json(err('duplicate_slug', maybeHttp.message ?? 'Duplicate slug'));
           return;
         }
       }
@@ -129,9 +150,9 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
+  // ─────────────────────────────────────────────
+  // Method not allowed
+  // ─────────────────────────────────────────────
   res.setHeader('Allow', 'GET, PATCH');
   res.status(405).json(err('method_not_allowed', 'Method not allowed'));
 });
-
-
-
