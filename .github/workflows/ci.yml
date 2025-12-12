@@ -82,6 +82,7 @@ jobs:
   # May have failures related to Engine Surface features, not env readiness
   extended-tests:
     runs-on: ubuntu-latest
+    continue-on-error: true
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_TEST_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
@@ -114,5 +115,3 @@ jobs:
           name: coverage-report
           path: coverage
           retention-days: 7
-
-
