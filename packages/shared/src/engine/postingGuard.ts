@@ -21,6 +21,9 @@
  * ```
  */
 
+import { getPostingLimitsForPlan as getPlanMatrixPostingLimits } from "../billing/planMatrix";
+import type { PlanName } from "../types/auth";
+
 /**
  * A single posting event in the history.
  */
@@ -88,27 +91,17 @@ export class PostingLimitExceededError extends Error {
 /**
  * Returns default posting limits based on plan tier.
  * 
- * These are conservative defaults. ME-I-04 will align these with
- * planMatrix and add plan-based enforcement.
+ * Delegates to getPostingLimitsForPlan from planMatrix as the single source of truth.
  * 
- * @param planName - Plan tier: 'basic', 'pro', 'premium'
- * @returns Posting limits for the plan
+ * @param planName - Plan tier: 'basic', 'pro', 'premium', or undefined
+ * @returns Posting limits for the plan (defaults to basic for unknown plans)
  * 
  * @example
  * const limits = getDefaultPostingLimitsForPlan('pro');
  * // { maxPerDay: 30, minIntervalMs: 120_000 }
  */
-export function getDefaultPostingLimitsForPlan(planName?: string): PostingLimits {
-  // TODO (ME-I-04): Align with planMatrix limits and add to plan features
-  switch (planName) {
-    case 'premium':
-      return { maxPerDay: 50, minIntervalMs: 60_000 }; // 1 minute
-    case 'pro':
-      return { maxPerDay: 30, minIntervalMs: 120_000 }; // 2 minutes
-    case 'basic':
-    default:
-      return { maxPerDay: 10, minIntervalMs: 300_000 }; // 5 minutes
-  }
+export function getDefaultPostingLimitsForPlan(planName?: PlanName): PostingLimits {
+  return getPlanMatrixPostingLimits(planName);
 }
 
 /**
