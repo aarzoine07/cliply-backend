@@ -98,12 +98,11 @@ describe("Jobs RLS – Row Level Security", () => {
 
   describe("Service-Role Access (Bypasses RLS)", () => {
     it("service-role can read jobs (bypasses RLS)", async () => {
-      // Query all jobs with our test marker
-  // Query all jobs we just seeded by ID
-  const { data, error } = await serviceClient
-    .from("jobs")
-    .select("id, workspace_id, payload")
-    .in("id", testJobIds);
+      // Query all jobs we just seeded by ID
+      const { data, error } = await serviceClient
+        .from("jobs")
+        .select("id, workspace_id, payload")
+        .in("id", testJobIds);
 
       expect(error).toBeNull();
       expect(data).toBeTruthy();
@@ -132,12 +131,12 @@ describe("Jobs RLS – Row Level Security", () => {
     });
 
     it("service-role can update jobs in any workspace", async () => {
-  // Find one of our test jobs
-     const { data: jobs } = await serviceClient
-    .from("jobs")
-    .select("id")
-    .in("id", testJobIds)
-    .limit(1);
+      // Find one of our test jobs
+      const { data: jobs } = await serviceClient
+        .from("jobs")
+        .select("id")
+        .in("id", testJobIds)
+        .limit(1);
 
       expect(jobs).toBeTruthy();
       expect(jobs!.length).toBeGreaterThan(0);
@@ -198,36 +197,48 @@ describe("Jobs RLS – Row Level Security", () => {
     });
 
     it("anon client cannot update jobs (RLS blocks)", async () => {
-  // First, verify our test jobs exist via service-role
-  const { data: existingJobs } = await serviceClient
-    .from("jobs")
-    .select("id, state")
-    .in("id", testJobIds)
-    .limit(1);
+      // Create a fresh job via service-role so it definitely exists
+      const { data: createdJob, error: createError } = await serviceClient
+        .from("jobs")
+        .insert({
+          workspace_id: WORKSPACE_ID,
+          kind: "TRANSCRIBE",
+          state: "queued",
+          payload: { testMarker, rlsUpdateBlocked: true },
+        })
+        .select("id, state")
+        .single();
 
-      expect(existingJobs).toBeTruthy();
-      expect(existingJobs!.length).toBeGreaterThan(0);
+      expect(createError).toBeNull();
+      expect(createdJob).toBeTruthy();
 
-      const jobId = existingJobs![0].id;
-      const originalState = existingJobs![0].state;
+      const jobId = createdJob!.id;
+      const originalState = createdJob!.state;
 
       // Try to update via anon client
-      const { data: updated } = await anonClient
+      const { data: updated, error: updateError } = await anonClient
         .from("jobs")
         .update({ state: "failed" })
         .eq("id", jobId)
-        .select();
+        .select("id, state");
 
-      // RLS should block - no rows updated (data is null or empty array)
-      expect(updated ?? []).toEqual([]);
+      // RLS should block - either error or no rows updated
+      if (updateError) {
+        // Expected path: RLS error
+        expect(updateError.code).toBeDefined();
+      } else {
+        // Alternative: update returns no rows
+        expect(updated ?? []).toEqual([]);
+      }
 
-      // Verify the job wasn't actually changed
-      const { data: verifyJob } = await serviceClient
+      // Verify via service-role that the job wasn't changed
+      const { data: verifyJob, error: verifyError } = await serviceClient
         .from("jobs")
         .select("state")
         .eq("id", jobId)
         .single();
 
+      expect(verifyError).toBeNull();
       expect(verifyJob?.state).toBe(originalState);
     });
   });

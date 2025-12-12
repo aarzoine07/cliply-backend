@@ -432,6 +432,7 @@ describe("Stuck Job Recovery – ME-I-09", () => {
       if (!stillQueued) {
         throw new Error("Expected stillQueued job to be found");
       }
+      // Non-running job should remain queued after recovery
       expect(stillQueued.state).toBe("queued");
     });
 
