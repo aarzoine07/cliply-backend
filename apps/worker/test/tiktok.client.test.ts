@@ -8,11 +8,9 @@ const fetchMock = vi.fn();
 global.fetch = fetchMock as unknown as typeof fetch;
 
 // Mock getEnv to avoid needing real env vars
+const mockGetEnv = vi.fn();
 vi.mock('@cliply/shared/env', () => ({
-  getEnv: vi.fn(() => ({
-    TIKTOK_CLIENT_ID: 'test-client-id',
-    TIKTOK_CLIENT_SECRET: 'test-client-secret',
-  })),
+  getEnv: () => mockGetEnv(),
 }));
 
 describe('TikTokClient', () => {
@@ -22,6 +20,12 @@ describe('TikTokClient', () => {
     vi.clearAllMocks();
     // Create a temporary video file for testing
     tempVideoPath = join(process.cwd(), 'test-video.mp4');
+    // Default env mock (stub mode)
+    mockGetEnv.mockReturnValue({
+      TIKTOK_CLIENT_ID: 'test-client-id',
+      TIKTOK_CLIENT_SECRET: 'test-client-secret',
+      TIKTOK_UPLOAD_MODE: 'stub',
+    });
   });
 
   afterEach(async () => {
@@ -48,6 +52,13 @@ describe('TikTokClient', () => {
 
   describe('uploadVideo - happy path', () => {
     it('should successfully upload video through init → upload → publish flow', async () => {
+      // Set real mode for this test
+      mockGetEnv.mockReturnValue({
+        TIKTOK_CLIENT_ID: 'test-client-id',
+        TIKTOK_CLIENT_SECRET: 'test-client-secret',
+        TIKTOK_UPLOAD_MODE: 'real',
+      });
+
       // Create a minimal video file
       await fs.mkdir(dirname(tempVideoPath), { recursive: true });
       await fs.writeFile(tempVideoPath, Buffer.from([0, 1, 2, 3]));
@@ -115,6 +126,12 @@ describe('TikTokClient', () => {
     beforeEach(async () => {
       await fs.mkdir(dirname(tempVideoPath), { recursive: true });
       await fs.writeFile(tempVideoPath, Buffer.from([0, 1, 2, 3]));
+      // Set real mode for error handling tests
+      mockGetEnv.mockReturnValue({
+        TIKTOK_CLIENT_ID: 'test-client-id',
+        TIKTOK_CLIENT_SECRET: 'test-client-secret',
+        TIKTOK_UPLOAD_MODE: 'real',
+      });
     });
 
     it('should throw TikTokApiError on 401 authentication error', async () => {
@@ -368,6 +385,210 @@ describe('TikTokClient', () => {
           expect(error.retryable).toBe(false);
         }
       }
+    });
+  });
+
+  describe('TIKTOK_UPLOAD_MODE gating', () => {
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      fetchMock.mockClear();
+      await fs.mkdir(dirname(tempVideoPath), { recursive: true });
+      await fs.writeFile(tempVideoPath, Buffer.from([0, 1, 2, 3]));
+    });
+
+    describe('stub mode', () => {
+      it('should return dryrun_* postId and not call real upload helper when TIKTOK_UPLOAD_MODE=stub', async () => {
+        // Force stub mode
+        mockGetEnv.mockReturnValue({
+          TIKTOK_CLIENT_ID: 'test-client-id',
+          TIKTOK_CLIENT_SECRET: 'test-client-secret',
+          TIKTOK_UPLOAD_MODE: 'stub',
+        });
+
+        const client = new TikTokClient({ accessToken: 'test-token' });
+        const result = await client.uploadVideo({
+          filePath: tempVideoPath,
+          caption: 'Test caption',
+          privacyLevel: 'PUBLIC_TO_EVERYONE',
+        });
+
+        // Verify stub behavior
+        expect(result.videoId).toMatch(/^dryrun_/);
+        // Verify no network calls were made
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+
+      it('should default to stub mode when TIKTOK_UPLOAD_MODE is undefined', async () => {
+        // Mock env without TIKTOK_UPLOAD_MODE (should default to stub)
+        mockGetEnv.mockReturnValue({
+          TIKTOK_CLIENT_ID: 'test-client-id',
+          TIKTOK_CLIENT_SECRET: 'test-client-secret',
+          // TIKTOK_UPLOAD_MODE is undefined
+        });
+
+        const client = new TikTokClient({ accessToken: 'test-token' });
+        const result = await client.uploadVideo({
+          filePath: tempVideoPath,
+          caption: 'Test caption',
+        });
+
+        // Verify stub behavior (default)
+        expect(result.videoId).toMatch(/^dryrun_/);
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('real mode - success', () => {
+      it('should call real upload helper and return real postId when TIKTOK_UPLOAD_MODE=real', async () => {
+        // Force real mode
+        mockGetEnv.mockReturnValue({
+          TIKTOK_CLIENT_ID: 'test-client-id',
+          TIKTOK_CLIENT_SECRET: 'test-client-secret',
+          TIKTOK_UPLOAD_MODE: 'real',
+        });
+
+        // Clear any previous mocks
+        fetchMock.mockClear();
+
+        // Mock init upload response
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              upload_url: 'https://upload.example.com/video',
+              publish_id: 'publish-123',
+            },
+          }),
+        });
+
+        // Mock file upload response
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: async () => 'OK',
+        });
+
+        // Mock publish response
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              video_id: 'tiktok_123',
+            },
+          }),
+        });
+
+        const client = new TikTokClient({ accessToken: 'test-token' });
+        const result = await client.uploadVideo({
+          filePath: tempVideoPath,
+          caption: 'Test caption',
+          privacyLevel: 'PUBLIC_TO_EVERYONE',
+        });
+
+        // Verify real upload path was used (fetch was called 3 times: init, upload, publish)
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+
+        // Verify real videoId was returned
+        expect(result.videoId).toBe('tiktok_123');
+        expect(result.rawResponse).toEqual({
+          video_id: 'tiktok_123',
+          publishedAt: null,
+        });
+      });
+    });
+
+    describe('real mode - error handling', () => {
+      it('should throw TikTokApiError when real upload helper returns error', async () => {
+        // Force real mode
+        mockGetEnv.mockReturnValue({
+          TIKTOK_CLIENT_ID: 'test-client-id',
+          TIKTOK_CLIENT_SECRET: 'test-client-secret',
+          TIKTOK_UPLOAD_MODE: 'real',
+        });
+
+        // Clear any previous mocks
+        fetchMock.mockClear();
+
+        // Mock init upload error response
+        fetchMock.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            error: {
+              code: 'invalid_request',
+              message: 'Invalid request parameters',
+            },
+          }),
+        });
+
+        const client = new TikTokClient({ accessToken: 'test-token' });
+
+        // Verify error is thrown with correct details
+        try {
+          await client.uploadVideo({
+            filePath: tempVideoPath,
+            caption: 'Test caption',
+          });
+          expect.fail('Should have thrown TikTokApiError');
+        } catch (error) {
+          expect(error).toBeInstanceOf(TikTokApiError);
+          if (error instanceof TikTokApiError) {
+            expect(error.tiktokErrorCode).toBe('invalid_request');
+            expect(error.retryable).toBe(false);
+          }
+        }
+
+        // Verify real upload path was attempted (fetch was called)
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('should throw TikTokApiError with correct status when upload fails with HTTP error', async () => {
+        // Force real mode
+        mockGetEnv.mockReturnValue({
+          TIKTOK_CLIENT_ID: 'test-client-id',
+          TIKTOK_CLIENT_SECRET: 'test-client-secret',
+          TIKTOK_UPLOAD_MODE: 'real',
+        });
+
+        // Clear any previous mocks
+        fetchMock.mockClear();
+
+        // Mock 401 authentication error
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          text: async () =>
+            JSON.stringify({
+              error: {
+                code: 'invalid_token',
+                message: 'Invalid access token',
+              },
+            }),
+        });
+
+        const client = new TikTokClient({ accessToken: 'invalid-token' });
+
+        // Verify error is thrown with correct details
+        try {
+          await client.uploadVideo({
+            filePath: tempVideoPath,
+            caption: 'Test caption',
+          });
+          expect.fail('Should have thrown TikTokApiError');
+        } catch (error) {
+          expect(error).toBeInstanceOf(TikTokApiError);
+          if (error instanceof TikTokApiError) {
+            expect(error.status).toBe(401);
+            expect(error.tiktokErrorCode).toBe('invalid_token');
+            expect(error.retryable).toBe(false);
+          }
+        }
+
+        // Verify real upload path was attempted (fetch was called)
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });
