@@ -201,7 +201,7 @@ export type BackendReadinessReport = {
 | `NEXT_PUBLIC_APP_URL` | ✅ | ❓ | ✅ | Optional, validated as URL |
 | `NEXT_PUBLIC_SENTRY_DSN` | ✅ | ❓ | ✅ | Optional |
 
-**Note**: `.env.example` file was not found in the repository. According to `ENV.md`, it should exist and be the template for local setup.
+**Note**: ✅ `.env.example` file now exists and is in sync with EnvSchema (33 keys). `pnpm check:env:template` passes. File: `.env.example`
 
 ### Env Schema Structure
 
@@ -218,9 +218,7 @@ export type BackendReadinessReport = {
 
 ### Misalignment List
 
-1. **Missing `.env.example` file**: Documented in `ENV.md` but not found in repository
-   - **Impact**: Developers may not know which env vars to set
-   - **Recommendation**: Create `.env.example` with all schema keys documented
+1. ✅ **`.env.example` file created**: File now exists and is in sync with EnvSchema (33 keys). `pnpm check:env:template` passes. File: `.env.example`
 
 2. **Env key usage in code vs schema**: All keys in schema appear to be used in code (no obvious unused keys)
 
@@ -228,14 +226,15 @@ export type BackendReadinessReport = {
 
 ### Recommendations (with OWNER tags)
 
-1. **⚠️ HIGH (Person 1)**: Create `.env.example` file
-   - Include all env vars from schema with helpful comments
-   - Organize by category (Core, Supabase, Worker, External Services, etc.)
-   - Mark required vs optional clearly
+1. ✅ **DONE (Person 1)**: Create `.env.example` file
+   - ✅ File created with all env vars from schema (33 keys), organized by category
+   - ✅ `pnpm check:env:template` now passes
+   - ✅ File: `.env.example`
 
-2. **⚠️ MEDIUM (Person 1)**: Run `pnpm check:env:template` to verify sync
-   - Script exists: `scripts/check-env-template-sync.ts`
-   - Ensures `.env.example` stays in sync with schema
+2. ✅ **DONE (Person 1)**: Run `pnpm check:env:template` to verify sync
+   - ✅ Script verified: `scripts/check-env-template-sync.ts`
+   - ✅ `.env.example` is in sync with EnvSchema (33 keys match)
+   - ✅ Includes `NEXT_PUBLIC_YOUTUBE_REDIRECT_URL`
 
 3. **⚠️ LOW (Person 1)**: Verify CI env vars are documented
    - Check if CI/CD pipeline has env var documentation
@@ -334,8 +333,8 @@ export type BackendReadinessReport = {
 |----|------|-------------|-------|--------|------------|
 | **T1** | Readiness | Fix `BackendReadinessReport` type mismatch - `/api/readyz` and `/api/admin/readyz` reference non-existent `checks`, `queue`, `ffmpeg` properties | **Person 1** | 🚨 **CRITICAL** - Will crash in production | **S** (2-4 hours) |
 | **T2** | Readiness | Consolidate health endpoint implementations - too many endpoints with different contracts | **Person 1** | ⚠️ **HIGH** - Confusion, maintenance burden | **M** (1 day) |
-| **T3** | Env | Create `.env.example` file with all schema keys documented | **Person 1** | ⚠️ **HIGH** - Developer onboarding blocker | **S** (1-2 hours) |
-| **T4** | Env | Run `pnpm check:env:template` to verify `.env.example` sync with schema | **Person 1** | ⚠️ **MEDIUM** - Prevents drift | **S** (30 min) |
+| **T3** | Env | ✅ **DONE** - Create `.env.example` file with all schema keys documented | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
+| **T4** | Env | ✅ **DONE** - Run `pnpm check:env:template` to verify `.env.example` sync with schema | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
 | **T5** | Tests | Fix DLQ test configuration - test file exists but not in vitest search path | **Person 1** | ⚠️ **MEDIUM** - Test coverage gap | **S** (30 min) |
 | **T6** | Tests | Add integration tests for readiness endpoints (use real `buildBackendReadinessReport`, not mocks) | **Person 1** | ⚠️ **MEDIUM** - Test quality | **M** (4-6 hours) |
 | **T7** | RLS | Stabilize RLS policies for jobs table - consolidate 4 policy iterations into one | **Person 2** | ⚠️ **MEDIUM** - Stability concern | **M** (1-2 days) |
@@ -350,10 +349,12 @@ export type BackendReadinessReport = {
 
 **⚠️ HIGH (Should Fix Soon):**
 - T2: Consolidate health endpoints
-- T3: Create `.env.example` file
+
+**✅ COMPLETED:**
+- T3: Create `.env.example` file ✅ **DONE** - File created, 33 keys, `check:env:template` passes
+- T4: Verify env template sync ✅ **DONE** - `pnpm check:env:template` now green
 
 **⚠️ MEDIUM (Important but Not Blocking):**
-- T4: Verify env template sync
 - T5: Fix DLQ test config
 - T6: Add readiness integration tests
 - T7: Stabilize RLS policies
@@ -362,6 +363,9 @@ export type BackendReadinessReport = {
 - T8: RLS edge case tests
 - T9: Standardize response shapes
 - T10: Document RLS strategy
+
+**Note on Completed Items:**
+- **T3 & T4 (Env Template Sync)**: ✅ Completed. `.env.example` file created with 33 keys matching EnvSchema. `pnpm check:env:template` passes. File: `.env.example`
 
 ---
 

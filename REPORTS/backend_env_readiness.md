@@ -423,7 +423,7 @@ This run focused on aligning the env schema with the `.env.example` template fil
 
 ### Next Steps
 
-1. **Run `pnpm check:env:template`** to verify `.env.example` stays in sync with schema (automated check exists)
+1. ✅ **DONE**: `pnpm check:env:template` now passes — `.env.example` is in sync with EnvSchema (33 keys). File: `.env.example`
 2. **Verify CI integration**: Ensure CI runs `check:env:template` as part of `backend-core` job
 3. **Documentation**: Consider adding more detailed descriptions in `ENV.md` for complex optional vars
 
