@@ -27,5 +27,14 @@ describe('GET /api/healthz', () => {
     // Should be very fast (no external calls)
     expect(elapsed).toBeLessThan(100);
   });
+
+  it('does not include deprecation headers (canonical endpoint)', async () => {
+    const res = await supertestHandler(toApiHandler(healthzRoute), 'get').get('/');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['deprecation']).toBeUndefined();
+    expect(res.headers['sunset']).toBeUndefined();
+    expect(res.headers['link']).toBeUndefined();
+  });
 });
 

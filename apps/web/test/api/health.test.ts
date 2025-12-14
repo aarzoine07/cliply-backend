@@ -105,4 +105,25 @@ describe("GET /api/health", () => {
     expect(res.body).not.toHaveProperty("ffmpeg");
     expect(res.body).not.toHaveProperty("checks");
   });
+
+  it("includes deprecation headers pointing to /api/healthz", async () => {
+    mockBuildReadiness.mockResolvedValue({
+      ok: true,
+      env: { ok: true, missing: [], optionalMissing: [] },
+      checks: { db: { ok: true }, worker: { ok: true } },
+      queue: { length: 0, oldestJobAge: null },
+      ffmpeg: { ok: true },
+      db: { ok: true, tablesChecked: ["jobs"], missingTables: [] },
+      stripe: { ok: true, missingEnv: [], priceIdsConfigured: 3 },
+      sentry: { ok: true, missingEnv: [] },
+    });
+
+    const res = await supertestHandler(toApiHandler(healthRoute), "get").get("/");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["deprecation"]).toBe("true");
+    expect(res.headers["sunset"]).toBe("2026-03-01");
+    expect(res.headers["link"]).toContain("/api/healthz");
+    expect(res.headers["link"]).toContain('rel="successor-version"');
+  });
 });

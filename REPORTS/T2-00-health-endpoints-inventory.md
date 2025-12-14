@@ -5,7 +5,9 @@
 **Branch:** `backend-readiness-v1`  
 **Task:** T2-00 (Discovery Only - No Code Changes)
 
-**Note:** T2-01 implementation completed on 2025-12-14. Phase 1 (contract alignment) is complete.
+**Implementation Status:**
+- ✅ **T2-01 (Phase 1)**: Completed 2025-12-14 - Contract alignment (canonical response shapes)
+- ✅ **T2-02 (Phase 2)**: Completed 2025-12-14 - Deprecation headers added to legacy endpoints
 
 ---
 
@@ -263,35 +265,51 @@ The Cliply backend monorepo currently has **9 distinct health/readiness endpoint
 
 ---
 
-### Phase 2: Deprecate Legacy Routes
+### Phase 2: Deprecate Legacy Routes ✅ COMPLETE (2025-12-14)
 
 **Goal:** Mark redundant endpoints as deprecated and redirect to canonical endpoints.
 
-**Tasks:**
+**Status:** ✅ **COMPLETED** - All legacy `/api/health` endpoints now emit deprecation headers.
 
-1. **Deprecate Express `/api/health`:**
-   - Add `X-Deprecated: true` header
-   - Add `X-Deprecation-Message: "Use /api/healthz for liveness or /api/readyz for readiness"`
-   - Optionally: Return 301 redirect to `/api/healthz` (if Express server still in use)
+**Implementation Summary:**
 
-2. **Deprecate Legacy `/api/health` (Pages Router stub):**
-   - Add deprecation notice in response
-   - Document removal in Phase 3
+1. **Created deprecation header helper** (`apps/web/src/lib/readiness/deprecationHeaders.ts`):
+   - `setDeprecationHeaders()` function for Next.js Pages Router
+   - Sets standard headers: `Deprecation: true`, `Sunset: 2026-03-01`, `Link: </api/healthz>; rel="successor-version"`
 
-3. **Update documentation:**
-   - Mark deprecated endpoints in API docs
-   - Update runbooks to reference canonical endpoints
-   - Update monitoring configs to use canonical endpoints
+2. **Deprecated `/api/health` (Pages Router)** - `apps/web/src/pages/api/health.ts`:
+   - ✅ Added deprecation headers pointing to `/api/healthz`
+   - ✅ Response body unchanged (backward compatible)
+   - ✅ Status codes unchanged (200/503/500)
+
+3. **Deprecated `/api/health` (Legacy Pages)** - `apps/web/pages/api/health.ts`:
+   - ✅ Added deprecation headers pointing to `/api/healthz`
+   - ✅ Response body unchanged (backward compatible)
+
+4. **Deprecated `/api/health` (Express)** - `apps/web/src/server.ts`:
+   - ✅ Added deprecation headers directly (Express response)
+   - ✅ Response body unchanged (backward compatible)
+
+5. **Tests updated:**
+   - ✅ Legacy endpoints verified to include deprecation headers
+   - ✅ Canonical endpoints (`/api/healthz`, `/api/readyz`, `/api/admin/readyz`) verified to NOT include deprecation headers
+
+**Deprecated Endpoints:**
+- `/api/health` (Pages Router) → Successor: `/api/healthz`
+- `/api/health` (Legacy Pages) → Successor: `/api/healthz`
+- `/api/health` (Express) → Successor: `/api/healthz`
+
+**Sunset Date:** 2026-03-01
 
 **Risks:**
 - Medium risk: External systems may depend on deprecated endpoints
 - Breaking change if redirects are not handled gracefully
 
 **Mitigations:**
-- Add deprecation headers (non-breaking)
+- ✅ Deprecation headers added (non-breaking)
 - Monitor usage of deprecated endpoints (log access)
 - Provide migration guide for external consumers
-- Keep deprecated endpoints active for 1-2 release cycles
+- Keep deprecated endpoints active until 2026-03-01
 
 ---
 

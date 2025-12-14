@@ -236,4 +236,26 @@ describe("GET /api/admin/readyz", () => {
     expect(res.body.queue).toHaveProperty("warning", true);
     expect(res.body).toHaveProperty("timestamp");
   });
+
+  it("does not include deprecation headers (canonical endpoint)", async () => {
+    const mockReadiness = {
+      ok: true,
+      env: { ok: true, missing: [], optionalMissing: [] },
+      checks: { db: { ok: true }, worker: { ok: true } },
+      queue: { length: 0, oldestJobAge: null },
+      ffmpeg: { ok: true },
+      db: { ok: true, tablesChecked: ["jobs"], missingTables: [] },
+      stripe: { ok: true, missingEnv: [], priceIdsConfigured: 3 },
+      sentry: { ok: true, missingEnv: [] },
+    };
+
+    mockBuildReadiness.mockResolvedValue(mockReadiness);
+
+    const res = await supertestHandler(toApiHandler(adminReadyzRoute), "get").get("/");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["deprecation"]).toBeUndefined();
+    expect(res.headers["sunset"]).toBeUndefined();
+    expect(res.headers["link"]).toBeUndefined();
+  });
 });
