@@ -2,10 +2,11 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
 import { getAdminClient } from "@/lib/supabase";
+import { mapToReadyzResponse } from "@/lib/readiness/canonicalResponses";
 
 /**
  * Main public readiness endpoint.
- * Returns full readiness object with checks, queue, and ffmpeg status.
+ * Returns canonical readiness response with checks, queue, and ffmpeg status.
  * 
  * - 200: All checks pass
  * - 503: One or more critical checks failed
@@ -27,31 +28,20 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
       supabaseClient,
     });
 
-    // Defensive checks: builder guarantees these exist when includeDetailedHealth: true,
-    // but TypeScript sees them as optional, so we provide fallbacks
-    const checks = readiness.checks ?? {
-      db: { ok: readiness.db.ok, ...(readiness.db.error ? { message: readiness.db.error } : {}) },
-      worker: { ok: readiness.worker?.ok ?? false },
-    };
-    const queue = readiness.queue ?? { length: 0, oldestJobAge: null };
-    const ffmpeg = readiness.ffmpeg ?? { ok: readiness.worker?.ffmpegOk ?? false };
+    // Map to canonical response shape
+    const response = mapToReadyzResponse(readiness);
 
     console.log("readyz_check", {
-      ok: readiness.ok,
-      checks,
-      queue,
-      ffmpeg,
+      ok: response.ok,
+      checks: response.checks,
+      queue: response.queue,
+      ffmpeg: response.ffmpeg,
     });
 
     const statusCode = readiness.ok ? 200 : 503;
 
-    // Return structured readiness response
-    res.status(statusCode).json({
-      ok: readiness.ok,
-      checks,
-      queue,
-      ffmpeg,
-    });
+    // Return canonical readiness response
+    res.status(statusCode).json(response);
   } catch (error) {
     console.error("readyz_check_error", error instanceof Error ? error.message : error);
     res.status(500).json({

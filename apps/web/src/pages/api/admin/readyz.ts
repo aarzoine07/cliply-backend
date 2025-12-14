@@ -2,14 +2,16 @@ import type { NextApiRequest, NextApiResponse } from "next";
 
 import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
 import { getAdminClient } from "@/lib/supabase";
+import { mapToAdminReadyzResponse } from "@/lib/readiness/canonicalResponses";
 
 /**
  * Admin/SRE-focused detailed readiness endpoint.
- * Returns full readiness object with checks, queue, ffmpeg status, and timestamp.
+ * Returns canonical readiness response with checks, queue, ffmpeg status, and timestamp.
  * 
  * - 200: All checks pass
  * - 503: One or more critical checks failed
  * - 500: Unexpected internal error
+ * - 405: Method not allowed (non-GET requests)
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
@@ -33,32 +35,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       supabaseClient,
     });
 
-    // Defensive checks: builder guarantees these exist when includeDetailedHealth: true,
-    // but TypeScript sees them as optional, so we provide fallbacks
-    const checks = readiness.checks ?? {
-      db: { ok: readiness.db.ok, ...(readiness.db.error ? { message: readiness.db.error } : {}) },
-      worker: { ok: readiness.worker?.ok ?? false },
-    };
-    const queue = readiness.queue ?? { length: 0, oldestJobAge: null };
-    const ffmpeg = readiness.ffmpeg ?? { ok: readiness.worker?.ffmpegOk ?? false };
+    // Map to canonical admin readiness response shape (includes timestamp)
+    const response = mapToAdminReadyzResponse(readiness);
 
     console.log("admin_readyz_check", {
-      ok: readiness.ok,
-      checks,
-      queue,
-      ffmpeg,
+      ok: response.ok,
+      checks: response.checks,
+      queue: response.queue,
+      ffmpeg: response.ffmpeg,
+      timestamp: response.timestamp,
     });
 
     const statusCode = readiness.ok ? 200 : 503;
 
-    // Return structured readiness response with timestamp for admin
-    res.status(statusCode).json({
-      ok: readiness.ok,
-      checks,
-      queue,
-      ffmpeg,
-      timestamp: new Date().toISOString(),
-    });
+    // Return canonical admin readiness response
+    res.status(statusCode).json(response);
   } catch (error) {
     console.error("admin_readyz_check_error", error instanceof Error ? error.message : error);
     res.status(500).json({
