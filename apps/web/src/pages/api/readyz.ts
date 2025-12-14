@@ -27,11 +27,20 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
       supabaseClient,
     });
 
+    // Defensive checks: builder guarantees these exist when includeDetailedHealth: true,
+    // but TypeScript sees them as optional, so we provide fallbacks
+    const checks = readiness.checks ?? {
+      db: { ok: readiness.db.ok, ...(readiness.db.error ? { message: readiness.db.error } : {}) },
+      worker: { ok: readiness.worker?.ok ?? false },
+    };
+    const queue = readiness.queue ?? { length: 0, oldestJobAge: null };
+    const ffmpeg = readiness.ffmpeg ?? { ok: readiness.worker?.ffmpegOk ?? false };
+
     console.log("readyz_check", {
       ok: readiness.ok,
-      checks: readiness.checks,
-      queue: readiness.queue,
-      ffmpeg: readiness.ffmpeg,
+      checks,
+      queue,
+      ffmpeg,
     });
 
     const statusCode = readiness.ok ? 200 : 503;
@@ -39,9 +48,9 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
     // Return structured readiness response
     res.status(statusCode).json({
       ok: readiness.ok,
-      checks: readiness.checks,
-      queue: readiness.queue,
-      ffmpeg: readiness.ffmpeg,
+      checks,
+      queue,
+      ffmpeg,
     });
   } catch (error) {
     console.error("readyz_check_error", error instanceof Error ? error.message : error);
