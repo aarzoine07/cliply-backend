@@ -335,7 +335,7 @@ export type BackendReadinessReport = {
 | **T2** | Readiness | Consolidate health endpoint implementations - too many endpoints with different contracts | **Person 1** | ⚠️ **HIGH** - Confusion, maintenance burden | **M** (1 day) |
 | **T3** | Env | ✅ **DONE** - Create `.env.example` file with all schema keys documented | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
 | **T4** | Env | ✅ **DONE** - Run `pnpm check:env:template` to verify `.env.example` sync with schema | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
-| **T5** | Tests | Fix DLQ test configuration - test file exists but not in vitest search path | **Person 1** | ⚠️ **MEDIUM** - Test coverage gap | **S** (30 min) |
+| **T5** | Tests | ✅ **DONE** - Fix DLQ test configuration - test file exists but not in vitest search path | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
 | **T6** | Tests | Add integration tests for readiness endpoints (use real `buildBackendReadinessReport`, not mocks) | **Person 1** | ⚠️ **MEDIUM** - Test quality | **M** (4-6 hours) |
 | **T7** | RLS | Stabilize RLS policies for jobs table - consolidate 4 policy iterations into one | **Person 2** | ⚠️ **MEDIUM** - Stability concern | **M** (1-2 days) |
 | **T8** | RLS | Add RLS integration tests for edge cases (cross-workspace, service role) | **Person 1** | ⚠️ **LOW** - Security verification | **M** (1 day) |
