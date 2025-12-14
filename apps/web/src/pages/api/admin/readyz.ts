@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
 import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
+import type { AdminReadyzResponse, HealthErrorResponse } from "@cliply/shared/types/health";
 import { getAdminClient } from "@/lib/supabase";
 import { mapToAdminReadyzResponse } from "@/lib/readiness/canonicalResponses";
 
@@ -13,7 +14,7 @@ import { mapToAdminReadyzResponse } from "@/lib/readiness/canonicalResponses";
  * - 500: Unexpected internal error
  * - 405: Method not allowed (non-GET requests)
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse<AdminReadyzResponse | HealthErrorResponse>) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     res.status(405).json({ ok: false, error: { message: "method_not_allowed" } });

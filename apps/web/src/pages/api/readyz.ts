@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
 import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
+import type { HealthErrorResponse, ReadyzResponse } from "@cliply/shared/types/health";
 import { getAdminClient } from "@/lib/supabase";
 import { mapToReadyzResponse } from "@/lib/readiness/canonicalResponses";
 
@@ -12,7 +13,7 @@ import { mapToReadyzResponse } from "@/lib/readiness/canonicalResponses";
  * - 503: One or more critical checks failed
  * - 500: Unexpected internal error
  */
-export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(_req: NextApiRequest, res: NextApiResponse<ReadyzResponse | HealthErrorResponse>) {
   try {
     // Get Supabase client for queue metrics
     let supabaseClient;
