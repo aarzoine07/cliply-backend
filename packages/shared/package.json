@@ -14,9 +14,9 @@
       "types": "./dist/src/index.d.ts"
     },
     "./env": {
-      "import": "./dist/env.js",
-      "require": "./dist/env.js",
-      "types": "./dist/env.d.ts"
+      "import": "./dist/src/env.js",
+      "require": "./dist/src/env.js",
+      "types": "./dist/src/env.d.ts"
     },
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
