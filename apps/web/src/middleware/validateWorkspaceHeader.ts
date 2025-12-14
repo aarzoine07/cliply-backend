@@ -21,22 +21,6 @@ function jsonError(status: number, code: ErrorCode, message: string): NextRespon
   );
 }
 
-function loadServiceClient() {
-  const url = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceRoleKey) {
-    throw new Error("Supabase configuration missing");
-  }
-
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
-
 function parseBearerToken(headerValue: string | null): string | null {
   if (!headerValue) return null;
   const [scheme, token] = headerValue.split(/\s+/);
@@ -79,6 +63,29 @@ function extractAccessToken(req: NextRequest): string | null {
   return parseCookieToken(req);
 }
 
+function loadRlsClient(accessToken: string) {
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error("Supabase configuration missing");
+  }
+
+  // IMPORTANT: use anon + user JWT so RLS enforces membership.
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
 export async function validateWorkspaceHeader(req: NextRequest) {
   // 1. Read and validate the X-Workspace-ID header format.
   const workspaceId = req.headers.get("x-workspace-id")?.trim();
@@ -92,34 +99,30 @@ export async function validateWorkspaceHeader(req: NextRequest) {
     return jsonError(401, "AUTH_MISSING_HEADER", "Supabase session token is missing.");
   }
 
-  // 3. Resolve the authenticated user id using service-role Supabase client.
+  // 3. Resolve the authenticated user (validates token).
   let supabase;
   try {
-    supabase = loadServiceClient();
-  } catch (error) {
+    supabase = loadRlsClient(accessToken);
+  } catch {
     return jsonError(500, "AUTH_WORKSPACE_MISMATCH", "Authentication service unavailable.");
   }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData?.user?.id) {
     return jsonError(401, "AUTH_MISSING_HEADER", "Supabase session token is invalid.");
   }
 
-  const userId = userData.user.id;
-
-  // 4. Confirm the user is a member of the requested workspace via workspace_members table.
-  const { data: membership, error: membershipError } = await supabase
-    .from("workspace_members")
-    .select("workspace_id")
-    .eq("workspace_id", workspaceId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  // 4. Confirm membership via RPC (RLS-backed).
+  const { data: isMember, error: membershipError } = await supabase.rpc(
+    "is_workspace_member",
+    { p_workspace_id: workspaceId },
+  );
 
   if (membershipError) {
     return jsonError(500, "AUTH_WORKSPACE_MISMATCH", "Unable to verify workspace membership.");
   }
 
-  if (!membership) {
+  if (isMember !== true) {
     return jsonError(403, "AUTH_WORKSPACE_MISMATCH", "User is not a member of this workspace.");
   }
 
