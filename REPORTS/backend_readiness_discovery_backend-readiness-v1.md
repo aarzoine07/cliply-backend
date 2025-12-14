@@ -26,8 +26,7 @@
 
 1. **⚠️ MEDIUM (Person 2)**: Stabilize RLS policies for jobs table - consolidate 4 policy iterations into one (T7)
 2. **⚠️ MEDIUM (Person 1)**: Add RLS integration tests for edge cases (cross-workspace, service role) (T8)
-3. **⚠️ LOW (Person 1)**: Standardize health endpoint response shapes - define common health response type (T9)
-4. **⚠️ LOW (Person 1)**: Document RLS policy strategy and service role usage (T10)
+3. **⚠️ LOW (Person 1)**: Document RLS policy strategy and service role usage (T10)
 
 ---
 
@@ -35,7 +34,7 @@
 
 **Status Update Proof (2025-12-14)**
 
-Current HEAD: `f79c366`
+Current HEAD: `5e911c9`
 
 Latest commit lines for key readiness-related paths:
 
@@ -43,10 +42,11 @@ Latest commit lines for key readiness-related paths:
 - `apps/web/src/pages/api/admin/readyz.ts`: `8818540 feat(health): align readyz/admin readyz to canonical response contracts (T2-01)`
 - `apps/web/vitest.config.ts`: `6341315 chore(test): include test/worker in apps/web vitest config (T5)`
 - `apps/web/test/api/readyz.integration.test.ts`: `488a206 test(readiness): add integration tests for healthz/readyz/admin readyz (T6)`
+- `5e911c9 chore(types): add shared health endpoint response types (T9)`
 
 Integration tests: T6 completed - integration tests exist for healthz/readyz/admin readyz endpoints.
 
-**Note**: T1, T2, T3, T4, T5, T6 are now completed. See task table (Section E) for current status. All critical blockers have been resolved.
+**Note**: T1, T2, T3, T4, T5, T6, T9 are now completed. See task table (Section E) for current status. All critical blockers have been resolved.
 
 ---
 
@@ -86,12 +86,13 @@ export type BackendReadinessReport = {
 **Current Status:**
 
 1. ✅ **RESOLVED (T1/T2)**: Type mismatch fixed - `/api/readyz` and `/api/admin/readyz` now correctly aligned to canonical response contracts
-2. **Response Shape Inconsistency**: Different endpoints return different structures (some variation remains, see T9 for standardization work):
+2. ✅ **RESOLVED (T9)**: Shared health response types added - common health response type defined and handlers updated
+3. **Response Shape Variation**: Different endpoints return different structures (variation acceptable for domain-specific endpoints):
    - `/api/health` (Express): Includes `service`, `env`, `uptime_ms`, `db_name`
    - `/api/health` (Next.js): Only `{ ok: boolean }`
    - `/api/analytics/health`: `{ ok, ts, db, activeWorkers }`
    - `/api/health/audit`: `{ ok, lastEventAt, totalEvents, stale }`
-3. **Status Code Semantics**: Most use 200/503/500, but `/api/health/audit` uses 401 for missing workspace_id
+4. **Status Code Semantics**: Most use 200/503/500, but `/api/health/audit` uses 401 for missing workspace_id
 
 ### Recommendations (with OWNER tags)
 
@@ -103,9 +104,9 @@ export type BackendReadinessReport = {
    - Health endpoint consolidation and canonicalization work completed
    - Legacy endpoints deprecated with appropriate headers (see T2-02)
 
-3. **⚠️ MEDIUM (Person 1)**: Standardize response shapes
-   - Define a common health response type
-   - Ensure all health endpoints return consistent structure (at minimum: `{ ok: boolean }`)
+3. ✅ **DONE (Person 1)**: Standardize response shapes (T9 completed)
+   - Common health response type defined
+   - Handlers updated to use shared types
 
 ---
 
@@ -356,7 +357,7 @@ export type BackendReadinessReport = {
 
 | **T7** | RLS | Stabilize RLS policies for jobs table - consolidate 4 policy iterations into one | **Person 2** | ⚠️ **MEDIUM** - Stability concern | **M** (1-2 days) |
 | **T8** | RLS | Add RLS integration tests for edge cases (cross-workspace, service role) | **Person 1** | ⚠️ **LOW** - Security verification | **M** (1 day) |
-| **T9** | Readiness | Standardize health endpoint response shapes - define common health response type | **Person 1** | ⚠️ **LOW** - Consistency | **S** (2-3 hours) |
+| **T9** | Readiness | ✅ **DONE** - Standardize health endpoint response shapes - define common health response type | **Person 1** | ✅ **COMPLETE** | ✅ **DONE** |
 | **T10** | Documentation | Document RLS policy strategy and service role usage | **Person 1** | ⚠️ **LOW** - Knowledge sharing | **S** (1-2 hours) |
 
 ### Priority Summary
@@ -368,13 +369,13 @@ export type BackendReadinessReport = {
 - T4: Verify env template sync ✅ **DONE** - `pnpm check:env:template` now green
 - T5: Fix DLQ test config ✅ **DONE**
 - T6: Add readiness integration tests ✅ **DONE**
+- T9: Standardize response shapes ✅ **DONE**
 
 **⚠️ MEDIUM (Important but Not Blocking):**
 - T7: Stabilize RLS policies
 
 **⚠️ LOW (Nice to Have):**
 - T8: RLS edge case tests
-- T9: Standardize response shapes
 - T10: Document RLS strategy
 
 **Note on Completed Items:**
