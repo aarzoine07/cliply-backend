@@ -5,10 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 // Use relative path instead of alias to avoid TS "Cannot find module" error
 import { env } from "../../../packages/shared/test/setup";
 
-const SERVICE_CLIENT = createClient(
-  env.SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY
-);
+const SERVICE_CLIENT = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
 test("⚙️ Enqueue API Functionality > creates a new queued job with correct defaults", async () => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
@@ -19,8 +16,6 @@ test("⚙️ Enqueue API Functionality > creates a new queued job with correct d
       workspace_id: workspaceId,
       kind: "TRANSCRIBE",
       payload: { clip: "demo" },
-      // optional, but matches how other tests think about input/payload
-      input: { a: 1 },
     })
     .select()
     .single();
@@ -36,4 +31,3 @@ test("⚙️ Enqueue API Functionality > creates a new queued job with correct d
   // if your schema also has status defaulting to "queued", you can add:
   // expect(data.status).toBe("queued");
 });
-

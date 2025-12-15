@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
-import { getAdminClient } from '@/lib/supabase';
+import { getAdminClient, getRlsClient } from '@/lib/supabase';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { checkPlanAccess } from '@cliply/shared/billing/planGate';
 
@@ -30,9 +30,16 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const userId = auth.userId || auth.user_id;
   const workspaceId = auth.workspaceId || auth.workspace_id;
+  const accessToken = auth.accessToken || auth.access_token;
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));
+    return;
+  }
+
+  // T2 (M2): any surface-table access must be via RLS client
+  if (!accessToken) {
+    res.status(401).json(err('unauthorized', 'Authentication required'));
     return;
   }
 
@@ -59,18 +66,43 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   if (!parsed.success) {
     res
       .status(400)
-      .json(
-        err('invalid_request', 'Invalid payload', parsed.error.flatten()),
-      );
+      .json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
     return;
   }
 
+  const { projectId } = parsed.data;
+
+  const rls = getRlsClient(accessToken);
   const admin = getAdminClient();
+
+  // Verify the project exists AND is accessible to this workspace member (RLS)
+  const { data: project, error: projectError } = await rls
+    .from('projects')
+    .select('id')
+    .eq('id', projectId)
+    .maybeSingle();
+
+  if (projectError) {
+    logger.error('upload_complete_project_check_failed', {
+      workspaceId,
+      projectId,
+      message: projectError.message,
+    });
+    res.status(500).json(err('internal_error', 'Failed to verify project'));
+    return;
+  }
+
+  if (!project) {
+    res.status(404).json(err('not_found', 'Project not found'));
+    return;
+  }
+
+  // Enqueue transcript job (non-surface table; admin is OK)
   const { error } = await admin.from('jobs').insert({
     workspace_id: workspaceId,
     kind: 'TRANSCRIBE',
     status: 'queued',
-    payload: { projectId: parsed.data.projectId },
+    payload: { projectId },
   });
 
   if (error) {
@@ -78,9 +110,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       workspaceId,
       message: error.message,
     });
-    res
-      .status(500)
-      .json(err('internal_error', 'Failed to enqueue transcript job'));
+    res.status(500).json(err('internal_error', 'Failed to enqueue transcript job'));
     return;
   }
 
@@ -93,4 +123,3 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   res.status(200).json(ok());
 });
-

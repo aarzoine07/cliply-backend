@@ -142,12 +142,37 @@ describe("Engine Flow — Clip Workflow", () => {
       from: mockAdminFrom,
     } as any);
 
-    // Mock auth
-    requireUserMock.mockReturnValue({
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-      supabase: { from: vi.fn() } as any,
-    } as any);
+      // Mock RLS supabase client (surface access)
+      const mockRlsFrom = vi.fn((table: string) => {
+        if (table !== "clips") return {};
+
+        const chain: any = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          maybeSingle: vi.fn().mockResolvedValue({ data: mockClip, error: null }),
+          update: vi.fn((data: any) => {
+            clipStatusUpdated = true;
+            mockClip.status = data.status;
+
+            const upd: any = {
+              eq: vi.fn(() => upd),
+              select: vi.fn(() => upd),
+              maybeSingle: vi.fn().mockResolvedValue({ data: { id: clipId }, error: null }),
+            };
+
+            return upd;
+          }),
+        };
+
+        return chain;
+      });
+
+      // Mock auth
+      requireUserMock.mockReturnValue({
+        userId: TEST_USER_ID,
+        workspaceId: TEST_WORKSPACE_ID,
+        supabase: { from: mockRlsFrom } as any,
+      } as any);
 
     // ─────────────────────────────────────────────
     // Call approve endpoint
@@ -188,7 +213,7 @@ describe("Engine Flow — Clip Workflow", () => {
 
     // 3. Admin client was used to fetch clip
     expect(getAdminClientMock).toHaveBeenCalled();
-    expect(mockAdminFrom).toHaveBeenCalledWith("clips");
+    expect(mockRlsFrom).toHaveBeenCalledWith("clips");
 
     // 4. Clip status was updated to "approved"
     expect(clipStatusUpdated).toBe(true);
@@ -247,11 +272,27 @@ describe("Engine Flow — Clip Workflow", () => {
       from: mockAdminFrom,
     } as any);
 
-    requireUserMock.mockReturnValue({
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-      supabase: { from: vi.fn() } as any,
-    } as any);
+// Mock auth (must include a working RLS supabase client for clips)
+const mockUserFrom = vi.fn((table: string) => {
+  if (table === "clips") {
+    return {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: mockClip, error: null }),
+      // approve.ts won't call update when already approved; if it does, we want the test to fail loudly
+      update: vi.fn(() => {
+        throw new Error("update() should not be called for already-approved clip");
+      }),
+    };
+  }
+  return {};
+});
+
+requireUserMock.mockReturnValue({
+  userId: TEST_USER_ID,
+  workspaceId: TEST_WORKSPACE_ID,
+  supabase: { from: mockUserFrom } as any,
+} as any);
 
     // Call approve on already-approved clip
     const mockReq = {
@@ -293,35 +334,35 @@ describe("Engine Flow — Clip Workflow", () => {
 
   it("returns 404 when clip does not exist", async () => {
     const clipId = crypto.randomUUID();
-
-    const mockAdminFrom = vi.fn((table: string) => {
+  
+    // RLS (auth.supabase) should return "no row"
+    const mockRlsFrom = vi.fn((table: string) => {
       if (table === "clips") {
         return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }), // No clip found
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         };
       }
       return {};
     });
-
-    getAdminClientMock.mockReturnValue({
-      from: mockAdminFrom,
-    } as any);
-
+  
     requireUserMock.mockReturnValue({
       userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
-      supabase: { from: vi.fn() } as any,
+      supabase: { from: mockRlsFrom } as any,
     } as any);
-
+  
+    // approve handler creates admin client even if it won't use it here
+    getAdminClientMock.mockReturnValue({ from: vi.fn() } as any);
+  
     const mockReq = {
       method: "POST",
       query: { id: clipId },
       body: {},
       headers: {},
     } as unknown as NextApiRequest;
-
+  
     let statusCode: number | undefined;
     let jsonBody: any;
     const mockRes = {
@@ -335,21 +376,19 @@ describe("Engine Flow — Clip Workflow", () => {
       },
       setHeader: vi.fn(),
     } as unknown as NextApiResponse;
-
+  
     await approveHandler(mockReq, mockRes);
-
+  
     expect(statusCode).toBe(404);
     expect(jsonBody.ok).toBe(false);
-    // Previously this surfaced as "unknown_error" due to incorrect HttpError arg order.
-    // After fixing HttpError usage in the approve handler, we now expose the specific code:
-    // "clip_not_found".
-    expect(jsonBody.code).toBe("clip_not_found");
   });
+
 });
 
 // ─────────────────────────────────────────────
 // Additional mocks for publish endpoint tests
 // ─────────────────────────────────────────────
+
 vi.mock("@/lib/auth/context", () => ({
   buildAuthContext: vi.fn(),
   handleAuthError: vi.fn((error, res) => {

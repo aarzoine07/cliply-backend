@@ -26,7 +26,7 @@ import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getSignedUploadUrl } from '@/lib/storage';
-import { getAdminClient } from '@/lib/supabase';
+import { getAdminClient, getRlsClient } from '@/lib/supabase';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -48,11 +48,21 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const userId = auth.userId || auth.user_id;
   const workspaceId = auth.workspaceId || auth.workspace_id;
+  const accessToken = auth.accessToken || auth.access_token;
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));
     return;
   }
+
+  // T2 (M1): surface table writes MUST go through RLS client
+  if (!accessToken) {
+    res.status(401).json(err('unauthorized', 'Authentication required'));
+    return;
+  }
+
+  const rls = getRlsClient(accessToken);
+  const admin = getAdminClient();
 
   // Plan gate: uploads_per_day
   const gate = checkPlanAccess(auth.plan, 'uploads_per_day');
@@ -92,7 +102,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const input = parsed.data;
-  const admin = getAdminClient();
 
   // FILE UPLOAD FLOW
   if (input.source === 'file') {
@@ -156,7 +165,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       );
 
       const title = deriveTitle(input.filename);
-      const { data: project, error: insertError } = await admin
+      const { data: project, error: insertError } = await rls
         .from('projects')
         .insert({
           id: projectId,
@@ -257,7 +266,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     const projectId = randomUUID();
-    const { data: project, error: insertError } = await admin
+    const { data: project, error: insertError } = await rls
       .from('projects')
       .insert({
         id: projectId,
@@ -286,7 +295,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       amount: 1,
     });
 
-    // Enqueue YouTube download job
+    // Enqueue YouTube download job (non-surface table; admin is OK)
     const { error: jobError } = await admin.from('jobs').insert({
       workspace_id: workspaceId,
       kind: 'YOUTUBE_DOWNLOAD',
@@ -351,4 +360,3 @@ function deriveTitle(filename: string): string {
   const base = trimmed.slice(0, lastDot).trim();
   return base || 'Untitled Project';
 }
-

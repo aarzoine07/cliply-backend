@@ -10,7 +10,32 @@ const __dirname = dirname(__filename);
 const envPath = resolve(__dirname, "../../../.env.test");
 dotenv.config({ path: envPath });
 
-// Derive NODE_ENV for our test env config without mutating process.env.NODE_ENV
+/**
+ * ✅ Ensure NODE_ENV === "test" for shared getEnv()/auth fast-path.
+ * Some runtimes define process.env.NODE_ENV as non-writable; assignment throws.
+ * We only set it if missing, and do so via defineProperty.
+ */
+function ensureNodeEnvTest(): void {
+  if (process.env.NODE_ENV) return;
+
+  try {
+    Object.defineProperty(process.env, "NODE_ENV", {
+      value: "test",
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } catch {
+    // If we can't set it, tests that depend on shared auth debug fast-path will fail.
+    // Keep noise low but surface the root cause.
+    // eslint-disable-next-line no-console
+    console.warn("⚠️ Unable to define process.env.NODE_ENV='test' (read-only env).");
+  }
+}
+
+ensureNodeEnvTest();
+
+// Derive NODE_ENV for our test env config (should now be "test")
 const NODE_ENV = process.env.NODE_ENV ?? "test";
 
 // Set STRIPE_SECRET_KEY for tests (required by billing/checkout route)
@@ -20,6 +45,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
+console.log("🔎 process.env.NODE_ENV =", process.env.NODE_ENV);
 
 export const env = {
   NODE_ENV,
@@ -134,7 +160,6 @@ export async function resetDatabase() {
   }
 
   // ✅ Seed deterministic workspace used by worker/job tests.
-  // This prevents FK errors when tests insert jobs with workspace_id = TEST_WORKSPACE_ID.
   const { error: wsError } = await supabaseTest
     .from("workspaces")
     .upsert(
@@ -151,11 +176,6 @@ export async function resetDatabase() {
     throw new Error(`resetDatabase(): failed to seed workspaces: ${wsError.message}`);
   }
 
-  // NOTE:
-  // We intentionally do NOT seed workspace_members here.
-  // In this repo state, workspace_members.user_id has an FK that is not satisfiable
-  // via PostgREST seeding (often points to auth.users). Worker/job tests do not need it.
-
   console.log("✅ resetDatabase() done");
 }
 
@@ -164,10 +184,6 @@ import { clearEnvCache } from "../src/env";
 
 /**
  * Test helper: reset any cached env-related state between tests.
- *
- * Clears the shared env cache so the next getEnv() call re-parses
- * from process.env. This allows tests to dynamically change env vars
- * and have them take effect immediately.
  */
 export function resetEnvForTesting(): void {
   clearEnvCache();
@@ -175,27 +191,17 @@ export function resetEnvForTesting(): void {
 
 /**
  * Checks if Supabase test client is configured and usable for real DB operations.
- * Returns false if:
- * - supabaseTest is null (missing credentials)
- * - SUPABASE_URL is a dashboard URL (contains '/dashboard/') instead of an API URL
- *
- * @returns true if Supabase is properly configured for tests, false otherwise
  */
 export function isSupabaseTestConfigured(): boolean {
   if (!supabaseTest) {
     return false;
   }
 
-  // Check if URL is a dashboard URL (not a real API URL)
-  // Dashboard URLs: https://supabase.com/dashboard/project/...
-  // API URLs: https://xxx.supabase.co or https://xxx.supabase.io
   const url = env.SUPABASE_URL || "";
   if (url.includes("/dashboard/")) {
     return false;
   }
 
-  // Check if it looks like a real Supabase API URL
-  // Real URLs typically end with .supabase.co or .supabase.io
   if (!url.match(/\.supabase\.(co|io)/)) {
     return false;
   }

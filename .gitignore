@@ -28,3 +28,8 @@ REPORTS/engine_surface_epics_1-5_overview_2025-12-11.md
 # Build / test artifacts
 coverage/
 .next/
+
+# Local-only JWT helpers
+/generate-jwts-from-jwks.mjs
+/generate-jwts-hs256.mjs
+/supabase/signing_keys.json

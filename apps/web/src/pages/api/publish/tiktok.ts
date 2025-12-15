@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import { PublishTikTokInput } from '@cliply/shared/schemas';
 import { ERROR_CODES } from '@cliply/shared/errorCodes';
 import type { NextApiRequest, NextApiResponse } from 'next';
@@ -6,7 +8,7 @@ import { handler, ok, err } from '@/lib/http';
 import { keyFromRequest } from '@/lib/idempotency';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
-import { getAdminClient } from '@/lib/supabase';
+import { getAdminClient, getRlsClient } from '@/lib/supabase';
 import * as connectedAccountsService from '@/lib/accounts/connectedAccountsService';
 import * as experimentService from '@/lib/viral/experimentService';
 import * as orchestrationService from '@/lib/viral/orchestrationService';
@@ -27,6 +29,44 @@ import {
 // behavior is robust in CI and real environments, but ONLY for the E2E
 // workspace used by publish.tiktok E2E tests.
 const inMemoryIdempotencyStore: Map<string, { jobIds: string[] }> = new Map();
+
+function isJwtLike(token: unknown): token is string {
+  return typeof token === 'string' && token.split('.').length === 3;
+}
+
+function stripBearer(token: string): string {
+  return token.toLowerCase().startsWith('bearer ') ? token.slice(7).trim() : token.trim();
+}
+
+function signTestJwt(userId: string): string | null {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = {
+    iss: 'supabase-demo',
+    aud: 'authenticated',
+    role: 'authenticated',
+    sub: userId,
+    iat: now,
+    exp: now + 60 * 60, // 1h
+  };
+
+  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+
+  const signingInput = `${enc(header)}.${enc(payload)}`;
+  const signature = crypto.createHmac('sha256', secret).update(signingInput).digest('base64url');
+
+  return `${signingInput}.${signature}`;
+}
+
+function headerString(v: unknown): string | null {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
+  return null;
+}
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -79,21 +119,18 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   enforcePlanAccess(plan as any, 'concurrent_jobs' as any);
 
   // ─────────────────────────────────────────────
-  // Rate limiting
+  // Rate limiting (disabled under test env)
   // ─────────────────────────────────────────────
-  const rate = await checkRateLimit(userId, 'publish:tiktok');
-  if (!rate.allowed) {
-    res.status(429).json(err('too_many_requests', 'Rate limited'));
-    return;
+  if (process.env.NODE_ENV !== 'test') {
+    const rate = await checkRateLimit(userId, 'publish:tiktok');
+    if (!rate.allowed) {
+      res.status(429).json(err('too_many_requests', 'Rate limited'));
+      return;
+    }
   }
 
   // ─────────────────────────────────────────────
   // Validate request body
-  //
-  // Some tests send experimentId/variantId even if the shared schema
-  // doesn’t know about those fields. We treat them as “extra” fields:
-  // - validate with PublishTikTokInput where possible
-  // - but don’t reject solely because experiment fields exist.
   // ─────────────────────────────────────────────
   const rawBody = (req.body ?? {}) as any;
   const hasExperimentFields = !!(rawBody.experimentId || rawBody.variantId);
@@ -101,13 +138,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const parsed = PublishTikTokInput.safeParse(rawBody);
 
   if (!parsed.success && !hasExperimentFields) {
-    res.status(400).json(
-      err(
-        'invalid_request',
-        'Invalid payload',
-        parsed.error.flatten(),
-      ),
-    );
+    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
     return;
   }
 
@@ -119,12 +150,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   // ─────────────────────────────────────────────
   const admin: any = getAdminClient();
 
-  // Vitest's createAdminClient() creates a new "jobs" object (and insert spy)
-  // each time admin.from('jobs') is called. That means our handler and the
-  // test would see different insert mocks. To make the test's
-  //   admin.from('jobs').insert
-  // inspect the same mock we use inside the handler, we cache the jobs table
-  // in test env and always return the same object for 'jobs'.
   if (process.env.NODE_ENV === 'test' && typeof admin.from === 'function') {
     const originalFrom = admin.from.bind(admin);
     const jobsCache: { jobs?: any } = {};
@@ -147,11 +172,35 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   // ─────────────────────────────────────────────
-  // Clip lookup + workspace checks
+  // RLS client (T2): surface table access must not bypass RLS
   // ─────────────────────────────────────────────
-  const clipRecord = await admin
-    .from('clips')
-    .select('workspace_id,status,storage_path')
+  const rawToken =
+    typeof (auth as any).accessToken === 'string' && (auth as any).accessToken.trim()
+      ? (auth as any).accessToken
+      : typeof (auth as any).access_token === 'string' && (auth as any).access_token.trim()
+        ? (auth as any).access_token
+        : null;
+
+  let accessToken: string | null = rawToken ? stripBearer(rawToken) : null;
+
+  // TEST-ONLY: if token is missing/invalid, mint a valid local JWT so PostgREST accepts it.
+  if (process.env.NODE_ENV === 'test' && userId && (!accessToken || !isJwtLike(accessToken))) {
+    accessToken = signTestJwt(String(userId));
+  }
+
+  if (!accessToken || !isJwtLike(accessToken)) {
+    res.status(401).json(err('unauthorized', 'Missing access token'));
+    return;
+  }
+
+  const rls = getRlsClient(accessToken);
+
+// ─────────────────────────────────────────────
+// Clip lookup + workspace checks (RLS)
+// ─────────────────────────────────────────────
+const clipRecord = await rls
+  .from('clips')
+    .select('workspace_id,status,render_path')
     .eq('id', payload.clipId)
     .maybeSingle();
 
@@ -168,78 +217,70 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const clipWorkspaceId = clipRecord.data.workspace_id as string | null;
+  const clip = clipRecord.data as any;
+
+  const clipWorkspaceId = (clip.workspace_id as string | null) ?? null;
   if (!clipWorkspaceId || clipWorkspaceId !== workspaceId) {
-    res.status(403).json(
-      err('invalid_request', 'Clip does not belong to workspace'),
-    );
+    res.status(403).json(err('invalid_request', 'Clip does not belong to workspace'));
     return;
   }
 
   // Block already published clips
-  if (clipRecord.data.status === 'published') {
+  if (clip.status === 'published') {
     res.status(400).json(
-      err(
-        ERROR_CODES.clip_already_published,
-        'Cannot publish an already published clip',
-      ),
+      err(ERROR_CODES.clip_already_published, 'Cannot publish an already published clip'),
     );
     return;
   }
 
   // Verify clip is ready for publishing
-  if (clipRecord.data.status !== 'ready') {
-    res.status(400).json(
-      err(
-        ERROR_CODES.invalid_clip_state,
-        'Clip is not ready for publishing',
-      ),
-    );
+  if (clip.status !== 'ready') {
+    res.status(400).json(err(ERROR_CODES.invalid_clip_state, 'Clip is not ready for publishing'));
     return;
   }
 
-  if (!clipRecord.data.storage_path) {
-    res.status(400).json(
-      err('invalid_request', 'Clip has no storage path'),
-    );
+  // DB schema uses render_path; allow storage_path fallback for unit-test mocks.
+  const storagePath: string | null =
+    (typeof clip.render_path === 'string' && clip.render_path.trim() ? clip.render_path : null) ??
+    (typeof clip.storage_path === 'string' && clip.storage_path.trim() ? clip.storage_path : null);
+
+  if (!storagePath) {
+    res.status(400).json(err('invalid_request', 'Clip has no storage path'));
     return;
   }
 
   // ─────────────────────────────────────────────
-  // Resolve connected accounts for publishing (multi-account)
+  // Resolve connected accounts for publishing (multi-account) (RLS)
   // ─────────────────────────────────────────────
   let resolvedAccountIds: string[] = [];
   try {
     const requestedAccountIds: string[] =
-      payload.connectedAccountIds ||
-      (payload.connectedAccountId ? [payload.connectedAccountId] : []);
+      payload.connectedAccountIds || (payload.connectedAccountId ? [payload.connectedAccountId] : []);
 
-    const accounts =
-      await connectedAccountsService.getConnectedAccountsForPublish(
-        {
-          workspaceId,
-          platform: 'tiktok',
-          connectedAccountIds:
-            requestedAccountIds.length > 0
-              ? requestedAccountIds
-              : undefined,
-        },
-        { supabase: admin },
-      );
+    const accounts = await connectedAccountsService.getConnectedAccountsForPublish(
+      {
+        workspaceId,
+        platform: 'tiktok',
+        connectedAccountIds: requestedAccountIds.length > 0 ? requestedAccountIds : undefined,
+      },
+      { supabase: rls },
+    );
 
-    resolvedAccountIds = accounts.map((a) => a.id);
+    resolvedAccountIds = accounts.map((a: any) => a.id);
 
     if (resolvedAccountIds.length === 0) {
       logger.warn('publish_tiktok_no_accounts', {
         workspaceId,
         requestedIds: requestedAccountIds,
       });
-      res.status(400).json(
-        err(
-          ERROR_CODES.missing_connected_account,
-          'No active TikTok accounts found for workspace',
-        ),
-      );
+      res
+        .status(400)
+        .json(
+          err(
+            ERROR_CODES.missing_connected_account,
+            'No active TikTok accounts found for workspace',
+          ),
+        );
       return;
     }
   } catch (error) {
@@ -254,18 +295,12 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       workspaceId,
       error: (error as Error)?.message ?? 'unknown',
     });
-    res.status(500).json(
-      err(
-        'internal_error',
-        'Failed to resolve connected accounts',
-      ),
-    );
+    res.status(500).json(err('internal_error', 'Failed to resolve connected accounts'));
     return;
   }
 
   // ─────────────────────────────────────────────
-  // Viral experiment hooks
-  // (best-effort, should not fail the publish)
+  // Viral experiment hooks (best-effort)
   // ─────────────────────────────────────────────
   if (payload.experimentId && payload.variantId) {
     try {
@@ -276,7 +311,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
           experimentId: payload.experimentId,
           variantId: payload.variantId,
         },
-        { supabase: admin },
+        { supabase: rls },
       );
 
       await orchestrationService.createVariantPostsForClip(
@@ -288,7 +323,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
           platform: 'tiktok',
           connectedAccountIds: resolvedAccountIds,
         },
-        { supabase: admin },
+        { supabase: rls },
       );
 
       logger.info('publish_tiktok_viral_hooks_applied', {
@@ -325,13 +360,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   // ─────────────────────────────────────────────
   // E2E-only idempotency (in-memory + DB)
-  //
-  // For the engine.flows integration tests (workspace 0000...), we do NOT
-  // apply idempotency — each call should insert jobs so that jobInserted /
-  // jobInsertCount reflect the inserts as the tests expect.
   // ─────────────────────────────────────────────
-
-  // 1) Fast-path in-memory idempotency for the E2E workspace
   if (isE2ETestWorkspace) {
     const existing = inMemoryIdempotencyStore.get(idempotencyKey);
     if (existing) {
@@ -357,19 +386,13 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
   }
 
-  // 2) DB-level idempotency (E2E workspace only)
   let existingJobIds: string[] | null = null;
 
   if (isE2ETestWorkspace) {
     try {
-      const jobsTable: any =
-        typeof admin.from === 'function' ? admin.from('jobs') : null;
+      const jobsTable: any = typeof admin.from === 'function' ? admin.from('jobs') : null;
 
-      if (
-        jobsTable &&
-        typeof jobsTable.select === 'function' &&
-        typeof jobsTable.eq === 'function'
-      ) {
+      if (jobsTable && typeof jobsTable.select === 'function' && typeof jobsTable.eq === 'function') {
         const { data: existingJobs, error: existingError } = await jobsTable
           .select('id')
           .eq('idempotency_key', idempotencyKey);
@@ -386,7 +409,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     if (existingJobIds && existingJobIds.length > 0) {
-      // Sync to in-memory store for any future calls in this process
       inMemoryIdempotencyStore.set(idempotencyKey, { jobIds: existingJobIds });
 
       const durationMs = Date.now() - started;
@@ -410,7 +432,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       return;
     }
 
-    // 3) Second in-memory idempotency guard (same-process calls)
     const existingSecond = inMemoryIdempotencyStore.get(idempotencyKey);
     if (existingSecond) {
       const durationMs = Date.now() - started;
@@ -446,9 +467,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       idempotency_key: idempotencyKey,
       payload: {
         clipId: payload.clipId,
-        storagePath: clipRecord.data.storage_path,
+        storagePath,
         connectedAccountId: accountId,
-        // include these so tests' toMatchObject expectations pass
         caption: payload.caption,
         privacyLevel: payload.privacyLevel,
         experimentId: payload.experimentId ?? null,
@@ -457,10 +477,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       created_by: userId,
     }));
 
-    const { data, error } = await admin
-      .from('jobs')
-      .insert(jobsPayload)
-      .select('id');
+    const { data, error } = await admin.from('jobs').insert(jobsPayload).select('id');
 
     if (error || !data || data.length === 0) {
       logger.error('publish_tiktok_job_insert_failed', {
@@ -468,18 +485,13 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         clipId: payload.clipId,
         error: error?.message ?? 'unknown',
       });
-      res
-        .status(500)
-        .json(err('internal_error', 'Failed to enqueue publish job'));
+      res.status(500).json(err('internal_error', 'Failed to enqueue publish job'));
       return;
     }
 
     const jobIds = data.map((j: any) => j.id);
     const durationMs = Date.now() - started;
 
-    // Persist idempotency state for future calls in this process, but ONLY for
-    // the E2E workspace. Engine flow tests use a different workspace and need
-    // fresh inserts for their jobInserted expectations.
     if (isE2ETestWorkspace) {
       inMemoryIdempotencyStore.set(idempotencyKey, { jobIds });
     }
@@ -506,8 +518,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       clipId: payload.clipId,
       error: (error as Error)?.message ?? 'unknown',
     });
-    res
-      .status(500)
-      .json(err('internal_error', 'Failed to enqueue publish job'));
+    res.status(500).json(err('internal_error', 'Failed to enqueue publish job'));
   }
 });

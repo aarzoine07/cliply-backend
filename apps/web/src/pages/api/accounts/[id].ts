@@ -5,7 +5,7 @@ import { UpdateConnectedAccountStatusInput } from '@cliply/shared/schemas/accoun
 import { handler, ok, err } from '@/lib/http';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
 import { logger } from '@/lib/logger';
-import { getAdminClient } from '@/lib/supabase';
+import { getRlsClient } from '@/lib/supabase';
 import * as connectedAccountsService from '@/lib/accounts/connectedAccountsService';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
@@ -30,8 +30,26 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
+  // T2: Surface table access MUST be via RLS client (no service-role fallback).
+  const accessToken =
+    typeof (auth as any).accessToken === 'string'
+      ? (auth as any).accessToken
+      : typeof (auth as any).access_token === 'string'
+        ? (auth as any).access_token
+        : null;
+
+  if (!accessToken) {
+    res.status(401).json(err('unauthorized', 'Missing access token'));
+    return;
+  }
+
   const accountId = req.query.id as string;
-  if (!accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(accountId)) {
+  if (
+    !accountId ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      accountId,
+    )
+  ) {
     res.status(400).json(err('invalid_request', 'Invalid account ID'));
     return;
   }
@@ -48,11 +66,13 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const parsed = UpdateConnectedAccountStatusInput.safeParse(body);
   if (!parsed.success) {
-    res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+    res
+      .status(400)
+      .json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
     return;
   }
 
-  const supabase = getAdminClient();
+  const supabase = getRlsClient(accessToken);
 
   try {
     await connectedAccountsService.updateConnectedAccountStatus(
@@ -85,5 +105,3 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to update account status'));
   }
 });
-
-

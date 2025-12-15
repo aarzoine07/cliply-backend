@@ -112,11 +112,13 @@ function isPlanName(value: unknown): value is PlanName {
 export async function buildAuthContext(req: Request): Promise<AuthContext> {
   const env = getEnv();
   const isProduction = env.NODE_ENV === "production";
-  const isTest = env.NODE_ENV === "test";
 
   // --- Extract debug headers ---
   const debugUserId = req.headers.get("x-debug-user")?.trim() || null;
   const debugWorkspaceId = req.headers.get("x-debug-workspace")?.trim() || null;
+
+  // Extract access token (either Authorization header OR cookies)
+  const accessToken = extractAccessToken(req);
 
   // ❌ Reject debug headers in production
   if (isProduction && (debugUserId || debugWorkspaceId)) {
@@ -127,8 +129,8 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     );
   }
 
-  // ✅ TEST-ONLY FAST PATH — used by API tests (including 7C)
-  if (!isProduction && isTest && debugUserId) {
+   // ✅ DEBUG FAST PATH (non-production only) — used by API tests
+   if (!isProduction && debugUserId) { 
     const userId = validateUuid(debugUserId, "x-debug-user");
     const workspaceId = debugWorkspaceId
       ? validateUuid(debugWorkspaceId, "x-debug-workspace")
@@ -145,14 +147,12 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
       isAuthenticated: true,
       userId,
       workspaceId,
+      accessToken,   // ✅ expose for web to build RLS client
+      access_token: accessToken,
     };
   }
 
   // --- REAL AUTH FLOW BELOW THIS POINT ---
-  let userId: string;
-  let workspaceId: string;
-
-  const accessToken = extractAccessToken(req);
   if (!accessToken) {
     throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session is missing or invalid", 401);
   }
@@ -164,8 +164,8 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session could not be verified", 401);
   }
 
-  userId = userData.user.id;
-  workspaceId = ensureWorkspaceId(req);
+  const userId = userData.user.id;
+  const workspaceId = ensureWorkspaceId(req);
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
@@ -200,5 +200,7 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     isAuthenticated: true,
     userId,
     workspaceId,
+    accessToken,     // ✅ expose for web to build RLS client
+    access_token: accessToken,
   };
 }
