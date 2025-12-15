@@ -122,16 +122,10 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-  # Extended test suite - covers full feature-level API behavior
-  # (publish, viral experiments, Stripe webhooks, etc.)
-  # May have failures related to Engine Surface features, not env readiness
+    # Extended test suite - covers full feature-level API behavior
+  # Runs against local Supabase (same as worker-db-tests) for deterministic permissions + schema
   extended-tests:
     runs-on: ubuntu-latest
-    continue-on-error: true
-    env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_TEST_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -149,6 +143,26 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local stack
+        run: supabase start
+
+      - name: Reset DB (apply migrations + seed)
+        run: supabase db reset --yes
+
+      - name: Write .env.test from local Supabase status (map keys)
+        run: |
+          supabase status -o env | sed 's/^export //' \
+            | sed 's/^API_URL=/SUPABASE_URL=/' \
+            | sed 's/^ANON_KEY=/SUPABASE_ANON_KEY=/' \
+            | sed 's/^SERVICE_ROLE_KEY=/SUPABASE_SERVICE_ROLE_KEY=/' \
+            > .env.test
+          echo "STRIPE_SECRET_KEY=sk_test_mock_key_for_tests" >> .env.test
 
       - name: Run tests with coverage
         run: pnpm test:coverage
