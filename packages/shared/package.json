@@ -18,11 +18,13 @@
       "require": "./dist/env.js",
       "types": "./dist/env.d.ts"
     },
+
     "./errorCodes": {
-      "import": "./dist/errorCodes.js",
-      "require": "./dist/errorCodes.js",
-      "types": "./dist/errorCodes.d.ts"
+    "import": "./dist/src/errorCodes.js",
+    "require": "./dist/src/errorCodes.js",
+    "types": "./dist/src/errorCodes.d.ts"
     },
+
     "./sentry": {
       "import": "./dist/sentry.js",
       "require": "./dist/sentry.js",
