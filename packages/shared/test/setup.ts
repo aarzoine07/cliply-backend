@@ -62,6 +62,10 @@ export const supabaseTest =
     ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
     : null;
 
+// ✅ Deterministic test IDs used by multiple test suites
+const TEST_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+const TEST_OWNER_ID = "00000000-0000-0000-0000-000000000002";
+
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
   const payload = {
@@ -79,7 +83,80 @@ export function createTestJwt(userId: string, workspaceId: string) {
 }
 
 export async function resetDatabase() {
-  console.log("⚙️  resetDatabase() called (stubbed for local tests)");
+  if (!supabaseTest) {
+    console.warn("⚠️ resetDatabase() skipped: supabaseTest not configured");
+    return;
+  }
+
+  console.log("⚙️  resetDatabase() clearing jobs-related tables...");
+
+  // FK-safe order: job_events -> jobs
+  const { error: jobEventsError } = await supabaseTest
+    .from("job_events")
+    .delete()
+    .neq("id", 0);
+
+  if (jobEventsError) {
+    throw new Error(
+      `resetDatabase(): failed to clear job_events: ${jobEventsError.message}`,
+    );
+  }
+
+  // idempotency_keys may not be exposed via PostgREST schema cache in some local states
+  const { error: idemError } = await supabaseTest
+    .from("idempotency_keys")
+    .delete()
+    .neq("id", 0);
+
+  if (idemError) {
+    const msg = `${idemError.message ?? ""}`.toLowerCase();
+    const code = (idemError as any)?.code;
+
+    const ignorable =
+      msg.includes("could not find the table") || // PostgREST schema cache miss
+      msg.includes("does not exist") || // DB relation missing
+      code === "PGRST205"; // PostgREST "not found in schema cache" (common)
+
+    if (!ignorable) {
+      throw new Error(
+        `resetDatabase(): failed to clear idempotency_keys: ${idemError.message}`,
+      );
+    }
+  }
+
+  const { error: jobsError } = await supabaseTest
+    .from("jobs")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+
+  if (jobsError) {
+    throw new Error(`resetDatabase(): failed to clear jobs: ${jobsError.message}`);
+  }
+
+  // ✅ Seed deterministic workspace used by worker/job tests.
+  // This prevents FK errors when tests insert jobs with workspace_id = TEST_WORKSPACE_ID.
+  const { error: wsError } = await supabaseTest
+    .from("workspaces")
+    .upsert(
+      {
+        id: TEST_WORKSPACE_ID,
+        name: "Test Workspace",
+        owner_id: TEST_OWNER_ID,
+        org_id: null,
+      },
+      { onConflict: "id" },
+    );
+
+  if (wsError) {
+    throw new Error(`resetDatabase(): failed to seed workspaces: ${wsError.message}`);
+  }
+
+  // NOTE:
+  // We intentionally do NOT seed workspace_members here.
+  // In this repo state, workspace_members.user_id has an FK that is not satisfiable
+  // via PostgREST seeding (often points to auth.users). Worker/job tests do not need it.
+
+  console.log("✅ resetDatabase() done");
 }
 
 // Import clearEnvCache for test reset functionality
@@ -125,4 +202,3 @@ export function isSupabaseTestConfigured(): boolean {
 
   return true;
 }
-

@@ -17,7 +17,7 @@ const client = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+const WORKSPACE_ID = "00000000-0000-0000-0000-000000000101";
 
 describe("Worker Bootstrap + Polling Loop", () => {
   beforeAll(async () => {

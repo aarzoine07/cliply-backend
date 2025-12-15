@@ -1,10 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import envModule from "../../../../packages/shared/dist/src/env.js";
-import loggerModule from "../../../../packages/shared/dist/logging/logger.js";
+import * as loggerModule from "../../../../packages/shared/dist/logging/logger.js";
 
-const { getEnv } = envModule;
 const { logger } = loggerModule;
 
 const execFileAsync = promisify(execFile);
@@ -27,19 +25,27 @@ const REQUIRED_ENVS = [
 
 /**
  * Verifies the worker environment by checking:
- * - Presence of critical environment variables
+ * - Presence of critical environment variables (from process.env, no caching)
  * - Availability of ffmpeg binary
  * - Availability of yt-dlp binary
  *
  * @returns Status object indicating what's available and what's missing
  */
 export async function verifyWorkerEnvironment(): Promise<WorkerEnvStatus> {
-  const env = getEnv();
+  // Read directly from process.env so tests can temporarily unset vars
+  const env = process.env as Record<string, string | undefined>;
 
   // Check for missing required environment variables
   const missingEnv: string[] = [];
   for (const key of REQUIRED_ENVS) {
-    if (!env[key]) {
+    const val = env[key];
+
+    if (
+      val == null ||
+      val.trim() === "" ||
+      val === "undefined" ||
+      val === "null"
+    ) {
       missingEnv.push(key);
     }
   }
@@ -74,7 +80,6 @@ export async function verifyWorkerEnvironment(): Promise<WorkerEnvStatus> {
 
   // Overall status: ok only if all critical checks pass
   // Missing binaries are warnings but don't fail if env vars are present
-  // (We'll let the actual job handlers fail if they need the binaries)
   const ok = missingEnv.length === 0;
 
   const status: WorkerEnvStatus = {
@@ -99,4 +104,3 @@ export async function verifyWorkerEnvironment(): Promise<WorkerEnvStatus> {
 
   return status;
 }
-

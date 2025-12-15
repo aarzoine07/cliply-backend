@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { supabaseTest, resetDatabase } from "@cliply/shared/test/setup";
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+const WORKSPACE_ID = "00000000-0000-0000-0000-000000000101";
 const WORKER_ID = "test-worker";
 
 describe("Background Job System – Happy Path", () => {
@@ -11,6 +11,10 @@ describe("Background Job System – Happy Path", () => {
   });
 
   it("enqueues and completes a TRANSCRIBE job", async () => {
+    // Assert once for TS + runtime safety
+    expect(supabaseTest).not.toBeNull();
+    const sb = supabaseTest!;
+
     const enqueuePayload = {
       workspace_id: WORKSPACE_ID,
       kind: "TRANSCRIBE",
@@ -18,7 +22,7 @@ describe("Background Job System – Happy Path", () => {
       priority: 5,
     };
 
-    const { data: jobRow, error: enqueueError } = await supabaseTest
+    const { data: jobRow, error: enqueueError } = await sb
       .from("jobs")
       .insert(enqueuePayload)
       .select()
@@ -28,7 +32,7 @@ describe("Background Job System – Happy Path", () => {
     expect(jobRow).toBeTruthy();
     expect(jobRow.state).toBe("queued");
 
-    const { data: claimed, error: claimError } = await supabaseTest.rpc("worker_claim_next_job", {
+    const { data: claimed, error: claimError } = await sb.rpc("worker_claim_next_job", {
       p_worker_id: WORKER_ID,
     });
 
@@ -37,7 +41,7 @@ describe("Background Job System – Happy Path", () => {
     expect(claimed?.state).toBe("running");
     expect(claimed?.locked_by).toBe(WORKER_ID);
 
-    const { error: finishError } = await supabaseTest.rpc("worker_finish", {
+    const { error: finishError } = await sb.rpc("worker_finish", {
       p_job_id: claimed.id,
       p_worker_id: WORKER_ID,
       p_result: { ok: true },
@@ -45,7 +49,7 @@ describe("Background Job System – Happy Path", () => {
 
     expect(finishError).toBeNull();
 
-    const { data: job, error: jobFetchError } = await supabaseTest
+    const { data: job, error: jobFetchError } = await sb
       .from("jobs")
       .select("*")
       .eq("id", claimed.id)
@@ -55,7 +59,7 @@ describe("Background Job System – Happy Path", () => {
     expect(job.state).toBe("done");
     expect(job.result).toMatchObject({ ok: true });
 
-    const { data: events, error: eventsError } = await supabaseTest
+    const { data: events, error: eventsError } = await sb
       .from("job_events")
       .select("stage")
       .eq("job_id", claimed.id)
@@ -64,6 +68,6 @@ describe("Background Job System – Happy Path", () => {
     expect(eventsError).toBeNull();
     const stages = (events ?? []).map((event) => event.stage);
     expect(stages).toContain("claimed");
-    expect(stages).toContain("done");
+    expect(stages).toContain("finished");
   });
 });

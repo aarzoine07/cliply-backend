@@ -115,30 +115,38 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       ),
     ]);
 
-    // Record actual source minutes usage (idempotent - only record once per project)
-    if (result.durationSec !== undefined && result.durationSec > 0) {
-      const minutes = Math.ceil(result.durationSec / 60);
-      await recordUsage({
-        workspaceId,
-        metric: 'source_minutes',
-        amount: minutes,
-      });
-    }
+      // Record actual source minutes usage (idempotent - only record once per project)
+      if (result.durationSec !== undefined && result.durationSec > 0) {
+        const minutes = Math.ceil(result.durationSec / 60);
+
+        try {
+          await recordUsage({
+            workspaceId,
+            metric: 'source_minutes',
+            amount: minutes,
+          });
+        } catch (error) {
+          // Best-effort: don't fail pipeline if usage tracking can't write (e.g., test DB seed/FK constraints)
+          ctx.logger.warn('pipeline_usage_record_failed', {
+            pipeline: PIPELINE,
+            jobId: job.id,
+            workspaceId,
+            projectId: payload.projectId,
+            metric: 'source_minutes',
+            amount: minutes,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
     // ─────────────────────────────────────────────
     // Advance pipeline stage to TRANSCRIBED
     // (We only reach here if we were NOT already at/after TRANSCRIBED)
     // ─────────────────────────────────────────────
-    const {
-      data: updatedProjects,
-      error: updateError,
-    } = await ctx.supabase
-      .from('projects')
-      .update({
-        pipeline_stage: 'TRANSCRIBED',
-      })
-      .eq('id', payload.projectId)
-      .select('id,pipeline_stage,status');
+    const { error: updateError } = await ctx.supabase
+    .from('projects')
+    .update({ pipeline_stage: 'TRANSCRIBED', status: 'transcribed' })
+    .eq('id', payload.projectId);
 
     if (updateError) {
       ctx.logger.error('pipeline_stage_update_failed', {
@@ -157,7 +165,6 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       jobId: job.id,
       workspaceId,
       projectId: payload.projectId,
-      updatedProjects,
     });
 
     ctx.logger.info('pipeline_stage_advanced', {

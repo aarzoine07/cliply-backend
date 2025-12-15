@@ -54,6 +54,46 @@ jobs:
       - name: Core backend tests (health & readiness)
         run: pnpm run test:core
 
+  # Worker DB RPC test suite - runs against a local Supabase started in CI
+  worker-db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local stack
+        run: supabase start
+
+      - name: Reset DB (apply migrations + seed)
+        run: supabase db reset --yes
+
+      - name: Write .env.test from local Supabase status
+        run: |
+          supabase status -o env | sed 's/^export //' > .env.test
+          echo "STRIPE_SECRET_KEY=sk_test_mock_key_for_tests" >> .env.test
+
+      - name: Worker DB tests
+        run: pnpm test:worker:db
+
   lint:
     runs-on: ubuntu-latest
     steps:

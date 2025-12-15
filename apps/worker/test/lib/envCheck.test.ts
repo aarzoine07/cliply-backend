@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
 
 import { verifyWorkerEnvironment } from "../../src/lib/envCheck";
@@ -12,12 +12,6 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-// Mock getEnv to control environment variables
-const mockGetEnv = vi.fn();
-vi.mock("@cliply/shared/env", () => ({
-  getEnv: mockGetEnv,
-}));
-
 // Mock logger
 vi.mock("@cliply/shared/logging/logger", () => ({
   logger: {
@@ -30,16 +24,33 @@ vi.mock("@cliply/shared/logging/logger", () => ({
 describe("verifyWorkerEnvironment", () => {
   const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 
+  const REQUIRED_KEYS = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const;
+
+  let savedEnv: Record<(typeof REQUIRED_KEYS)[number], string | undefined>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Save current env so we don't leak between tests
+    savedEnv = {
+      SUPABASE_URL: process.env.SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    };
+  });
+
+  afterEach(() => {
+    // Restore env after each test
+    for (const key of REQUIRED_KEYS) {
+      const v = savedEnv[key];
+      if (v === undefined) delete process.env[key];
+      else process.env[key] = v;
+    }
   });
 
   it("returns ok: true when all checks pass", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    // Set env with all required vars
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile to succeed for both binaries
     mockExecFile.mockImplementation(
@@ -60,19 +71,19 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("detects missing required environment variables", async () => {
-    // Mock env missing SUPABASE_URL
-    mockGetEnv.mockReturnValue({
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-      // SUPABASE_URL missing
-    });
+    // Missing SUPABASE_URL
+    delete process.env.SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile to succeed
-    mockExecFile.mockImplementation((cmd: string, args: string[], options: unknown, callback: unknown) => {
-      if (typeof callback === "function") {
-        callback(null, { stdout: "version info" }, "");
-      }
-      return {} as ReturnType<typeof execFile>;
-    });
+    mockExecFile.mockImplementation(
+      (cmd: string, args: string[], options: unknown, callback: unknown) => {
+        if (typeof callback === "function") {
+          callback(null, { stdout: "version info" }, "");
+        }
+        return {} as ReturnType<typeof execFile>;
+      },
+    );
 
     const status = await verifyWorkerEnvironment();
 
@@ -82,19 +93,18 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("detects missing SUPABASE_SERVICE_ROLE_KEY", async () => {
-    // Mock env missing SUPABASE_SERVICE_ROLE_KEY
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      // SUPABASE_SERVICE_ROLE_KEY missing
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     // Mock execFile to succeed
-    mockExecFile.mockImplementation((cmd: string, args: string[], options: unknown, callback: unknown) => {
-      if (typeof callback === "function") {
-        callback(null, { stdout: "version info" }, "");
-      }
-      return {} as ReturnType<typeof execFile>;
-    });
+    mockExecFile.mockImplementation(
+      (cmd: string, args: string[], options: unknown, callback: unknown) => {
+        if (typeof callback === "function") {
+          callback(null, { stdout: "version info" }, "");
+        }
+        return {} as ReturnType<typeof execFile>;
+      },
+    );
 
     const status = await verifyWorkerEnvironment();
 
@@ -103,11 +113,8 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("detects missing ffmpeg binary (ENOENT)", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile: ffmpeg fails with ENOENT, yt-dlp succeeds
     mockExecFile.mockImplementation(
@@ -133,11 +140,8 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("detects missing yt-dlp binary (ENOENT)", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile: ffmpeg succeeds, yt-dlp fails with ENOENT
     mockExecFile.mockImplementation(
@@ -163,11 +167,8 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("treats non-ENOENT errors as binary available", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile: ffmpeg fails with non-ENOENT error (binary exists but command failed)
     mockExecFile.mockImplementation(
@@ -187,17 +188,13 @@ describe("verifyWorkerEnvironment", () => {
 
     const status = await verifyWorkerEnvironment();
 
-    // Binary exists (non-ENOENT error), so mark as available
     expect(status.ffmpegOk).toBe(true);
     expect(status.ytDlpOk).toBe(true);
   });
 
   it("handles both binaries missing", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile: both binaries fail with ENOENT
     mockExecFile.mockImplementation(
@@ -219,11 +216,8 @@ describe("verifyWorkerEnvironment", () => {
   });
 
   it("handles timeout errors gracefully", async () => {
-    // Mock env with all required vars
-    mockGetEnv.mockReturnValue({
-      SUPABASE_URL: "https://test.supabase.co",
-      SUPABASE_SERVICE_ROLE_KEY: "test-key-123",
-    });
+    process.env.SUPABASE_URL = "https://test.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key-123";
 
     // Mock execFile: timeout error (binary might exist but took too long)
     mockExecFile.mockImplementation(
@@ -244,4 +238,3 @@ describe("verifyWorkerEnvironment", () => {
     expect(status.ytDlpOk).toBe(true);
   });
 });
-
