@@ -145,7 +145,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     // ─────────────────────────────────────────────
     const { error: updateError } = await ctx.supabase
     .from('projects')
-    .update({ pipeline_stage: 'TRANSCRIBED', status: 'transcribed' })
+    .update({ pipeline_stage: 'TRANSCRIBED', status: 'processing' })
     .eq('id', payload.projectId);
 
     if (updateError) {
