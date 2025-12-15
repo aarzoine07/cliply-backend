@@ -1,5 +1,5 @@
 import { HttpError } from './errors';
-import { getRlsClient } from "./supabase.js";
+import { getRlsClient } from "./supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Relaxed UUID check: enforce shape + hex, but do not enforce version/variant.

@@ -29,6 +29,12 @@
       "types": "./dist/sentry.d.ts"
     },
 
+      "./job-kinds": {
+      "import": "./dist/src/job-kinds.js",
+      "require": "./dist/src/job-kinds.js",
+      "types": "./dist/src/job-kinds.d.ts"
+    },
+
     "./constants": {
       "import": "./dist/src/constants.js",
       "require": "./dist/src/constants.js",
