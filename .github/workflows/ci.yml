@@ -88,7 +88,12 @@ jobs:
 
       - name: Write .env.test from local Supabase status
         run: |
-          supabase status -o env | sed 's/^export //' > .env.test
+          supabase status -o env | sed 's/^export //' | \
+            sed -e 's/^API_URL=/SUPABASE_URL=/' \
+                -e 's/^ANON_KEY=/SUPABASE_ANON_KEY=/' \
+                -e 's/^SERVICE_ROLE_KEY=/SUPABASE_SERVICE_ROLE_KEY=/' \
+                -e 's/^DB_URL=/DATABASE_URL=/' \
+            > .env.test
           echo "STRIPE_SECRET_KEY=sk_test_mock_key_for_tests" >> .env.test
 
       - name: Worker DB tests
