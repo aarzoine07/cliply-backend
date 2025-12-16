@@ -59,7 +59,7 @@ export async function listConnectedAccounts(
 
 /**
  * Create or update a connected account
- * Uses upsert semantics by (workspace_id, platform, external_id)
+ * Uses upsert semantics by (workspace_id, platform)
  */
 export async function createOrUpdateConnectedAccount(
   params: {
@@ -72,16 +72,16 @@ export async function createOrUpdateConnectedAccount(
   const { workspaceId, userId, ...inputData } = params;
   const parsed = CreateConnectedAccountInputSchema.parse(inputData);
 
-  // Check for existing account by (workspace_id, platform, external_id)
+  // Check for existing account by (workspace_id, platform)
+  // (DB enforces unique constraint connected_accounts_workspace_platform_key)
   const { data: existing, error: lookupError } = await ctx.supabase
     .from("connected_accounts")
     .select("*")
     .eq("workspace_id", workspaceId)
     .eq("platform", parsed.platform)
-    .eq("external_id", parsed.external_id)
     .maybeSingle();
 
-  if (lookupError && lookupError.code !== "PGRST116") {
+  if (lookupError && (lookupError as any).code !== "PGRST116") {
     logger.error("connected_accounts_lookup_failed", {
       workspaceId,
       platform: parsed.platform,
@@ -205,9 +205,14 @@ export async function updateConnectedAccountStatus(
     throw new Error("Connected account not found or does not belong to workspace");
   }
 
+  // DB constraint allows only: active | revoked | error
+  const rawStatus = (parsed as any).status as string;
+  const statusForDb =
+    rawStatus === "disabled" ? "revoked" : rawStatus === "enabled" ? "active" : rawStatus;
+
   const { error: updateError } = await ctx.supabase
     .from("connected_accounts")
-    .update({ status: parsed.status })
+    .update({ status: statusForDb })
     .eq("id", accountId);
 
   if (updateError) {
@@ -222,7 +227,7 @@ export async function updateConnectedAccountStatus(
   logger.info("connected_account_status_updated", {
     workspaceId,
     accountId,
-    status: parsed.status,
+    status: rawStatus,
   });
 }
 
@@ -369,4 +374,3 @@ export async function getConnectedAccountById(
     updated_at: account.updated_at,
   };
 }
-

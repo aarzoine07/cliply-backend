@@ -4,7 +4,7 @@ import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
-import { getAdminClient } from '@/lib/supabase';
+import { getRlsClient } from '@/lib/supabase';
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   const started = Date.now();
@@ -26,12 +26,26 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   const userId = auth.userId || auth.user_id;
   const workspaceId = auth.workspaceId || auth.workspace_id;
-  const supabase = getAdminClient();
 
   if (!workspaceId) {
     res.status(400).json(err('invalid_request', 'workspace required'));
     return;
   }
+
+  // T2: Surface table access MUST be via RLS client (no service-role fallback).
+  const accessToken =
+    typeof (auth as any).accessToken === 'string'
+      ? (auth as any).accessToken
+      : typeof (auth as any).access_token === 'string'
+        ? (auth as any).access_token
+        : null;
+
+  if (!accessToken) {
+    res.status(401).json(err('unauthorized', 'Missing access token'));
+    return;
+  }
+
+  const supabase = getRlsClient(accessToken);
 
   const rate = await checkRateLimit(userId, 'schedules:list');
   if (!rate.allowed) {
@@ -39,7 +53,11 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const { data, error } = await supabase.from('schedules').select('*').eq('workspace_id', workspaceId);
+  const { data, error } = await supabase
+    .from('schedules')
+    .select('*')
+    .eq('workspace_id', workspaceId);
+
   if (error) {
     logger.error('schedules_list_query_failed', { message: error.message, workspaceId });
     res.status(500).json(err('internal_error', 'Failed to fetch schedules'));

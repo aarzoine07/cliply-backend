@@ -1,8 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-import { ExecuteDropshippingActionInput, ExecuteDropshippingActionInput as ExecuteDropshippingActionInputSchema } from '@cliply/shared/schemas/dropshipping';
+import {
+  ExecuteDropshippingActionInput,
+  ExecuteDropshippingActionInput as ExecuteDropshippingActionInputSchema,
+} from '@cliply/shared/schemas/dropshipping';
 
-import { handler, ok, err } from '@/lib/http';
+import { handler, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { getAdminClient } from '@/lib/supabase';
 import * as actionExecutorService from '@/lib/dropshipping/actionExecutorService';
@@ -32,7 +35,10 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     }
 
     const actionId = req.query.id as string;
-    if (!actionId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actionId)) {
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    if (!actionId || !uuidPattern.test(actionId)) {
       res.status(400).json(err('invalid_request', 'Invalid action ID'));
       return;
     }
@@ -50,7 +56,9 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
     const parsed = ExecuteDropshippingActionInputSchema.safeParse(body || {});
     if (!parsed.success) {
-      res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+      res
+        .status(400)
+        .json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
       return;
     }
 
@@ -70,9 +78,21 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       dryRun: parsed.data.dryRun,
     });
 
-    res.status(200).json(ok({ data: action }));
+    // Shape that tests expect:
+    // { ok: true, data: action }
+    res.status(200).json({
+      ok: true,
+      data: action,
+    });
   } catch (error) {
     const errObj = error as Error & { status?: number; code?: string };
+
+    // Special-case: executor can throw a plain Error("Action not found")
+    if (errObj.message === 'Action not found') {
+      res.status(404).json(err('not_found', errObj.message));
+      return;
+    }
+
     if (errObj.status) {
       if (errObj.status === 401) {
         res.status(401).json(err('unauthorized', errObj.message));
@@ -83,11 +103,15 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         return;
       }
       if (errObj.status === 409) {
-        res.status(409).json(err(errObj.code || 'action_already_processed', errObj.message));
+        res
+          .status(409)
+          .json(err(errObj.code || 'action_already_processed', errObj.message));
         return;
       }
       if (errObj.status === 400) {
-        res.status(400).json(err(errObj.code || 'invalid_request', errObj.message));
+        res
+          .status(400)
+          .json(err(errObj.code || 'invalid_request', errObj.message));
         return;
       }
     }
@@ -101,4 +125,3 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     res.status(500).json(err('internal_error', 'Failed to execute action'));
   }
 });
-

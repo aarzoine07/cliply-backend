@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { AuthContext, AuthErrorCode, PlanName } from "../types/auth.js";
+import { AuthContext, AuthErrorCode, PlanName } from "../types/auth";
 import { getEnv } from "../env";
 
 export type { AuthContext } from "../types/auth";
@@ -87,8 +87,10 @@ function extractAccessToken(req: Request): string | null {
 }
 
 function validateUuid(value: string, headerName: string): string {
+  // Relaxed UUID check: enforce shape + hex, but do not enforce version/variant.
   const uuidPattern =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   if (!uuidPattern.test(value)) {
     throwAuthError(AuthErrorCode.MISSING_HEADER, `${headerName} must be a valid UUID`, 401);
   }
@@ -111,9 +113,14 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
   const env = getEnv();
   const isProduction = env.NODE_ENV === "production";
 
+  // --- Extract debug headers ---
   const debugUserId = req.headers.get("x-debug-user")?.trim() || null;
   const debugWorkspaceId = req.headers.get("x-debug-workspace")?.trim() || null;
 
+  // Extract access token (either Authorization header OR cookies)
+  const accessToken = extractAccessToken(req);
+
+  // ❌ Reject debug headers in production
   if (isProduction && (debugUserId || debugWorkspaceId)) {
     throwAuthError(
       AuthErrorCode.UNAUTHORIZED,
@@ -122,73 +129,78 @@ export async function buildAuthContext(req: Request): Promise<AuthContext> {
     );
   }
 
-  let userId: string;
-  let workspaceId: string;
-
-  if (!isProduction && debugUserId) {
-    userId = validateUuid(debugUserId, "x-debug-user");
-
-    if (debugWorkspaceId) {
-      workspaceId = validateUuid(debugWorkspaceId, "x-debug-workspace");
-    } else {
-      workspaceId = ensureWorkspaceId(req);
-    }
-  } else {
-    const accessToken = extractAccessToken(req);
-    if (!accessToken) {
-      throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session is missing or invalid", 401);
-    }
+   // ✅ DEBUG FAST PATH (non-production only) — used by API tests
+   if (!isProduction && debugUserId) { 
+    const userId = validateUuid(debugUserId, "x-debug-user");
+    const workspaceId = debugWorkspaceId
+      ? validateUuid(debugWorkspaceId, "x-debug-workspace")
+      : ensureWorkspaceId(req);
 
     const supabase = loadSupabaseClient();
+    const { resolveWorkspacePlan } = await import("../billing/planResolution");
+    const resolvedPlan = await resolveWorkspacePlan(workspaceId, { supabase });
 
-    const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
-    if (userError || !userData?.user?.id) {
-      throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session could not be verified", 401);
-    }
+    return {
+      user_id: userId,
+      workspace_id: workspaceId,
+      plan: resolvedPlan.planId,
+      isAuthenticated: true,
+      userId,
+      workspaceId,
+      accessToken,   // ✅ expose for web to build RLS client
+      access_token: accessToken,
+    };
+  }
 
-    userId = userData.user.id;
-
-    workspaceId = ensureWorkspaceId(req);
-
-    const { data: membership, error: membershipError } = await supabase
-      .from("workspace_members")
-      .select("workspace_id")
-      .eq("workspace_id", workspaceId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (membershipError) {
-      throwAuthError(
-        AuthErrorCode.INTERNAL_ERROR,
-        "Failed to verify workspace membership",
-        500,
-      );
-    }
-
-    if (!membership) {
-      throwAuthError(
-        AuthErrorCode.WORKSPACE_MISMATCH,
-        "User is not a member of the requested workspace",
-        403,
-      );
-    }
+  // --- REAL AUTH FLOW BELOW THIS POINT ---
+  if (!accessToken) {
+    throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session is missing or invalid", 401);
   }
 
   const supabase = loadSupabaseClient();
 
-  // IMPORTANT FIX: correct dynamic path resolution
-  const { resolveWorkspacePlan } = await import("../billing/planResolution.js");
+  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  if (userError || !userData?.user?.id) {
+    throwAuthError(AuthErrorCode.UNAUTHORIZED, "Supabase session could not be verified", 401);
+  }
 
+  const userId = userData.user.id;
+  const workspaceId = ensureWorkspaceId(req);
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (membershipError) {
+    throwAuthError(
+      AuthErrorCode.INTERNAL_ERROR,
+      "Failed to verify workspace membership",
+      500,
+    );
+  }
+
+  if (!membership) {
+    throwAuthError(
+      AuthErrorCode.WORKSPACE_MISMATCH,
+      "User is not a member of the requested workspace",
+      403,
+    );
+  }
+
+  const { resolveWorkspacePlan } = await import("../billing/planResolution");
   const resolvedPlan = await resolveWorkspacePlan(workspaceId, { supabase });
-  const plan = resolvedPlan.planId as PlanName;
 
   return {
     user_id: userId,
     workspace_id: workspaceId,
-    plan,
+    plan: resolvedPlan.planId,
     isAuthenticated: true,
     userId,
     workspaceId,
+    accessToken,     // ✅ expose for web to build RLS client
+    access_token: accessToken,
   };
 }
-

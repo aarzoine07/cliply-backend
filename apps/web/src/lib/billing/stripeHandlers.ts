@@ -1,3 +1,6 @@
+// FILE: apps/web/src/lib/billing/stripeHandlers.ts
+// FINAL VERSION – Stripe webhook helpers for subscriptions/invoices
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
@@ -5,6 +8,7 @@ import { getPlanFromPriceId } from "@cliply/shared/billing/stripePlanMap";
 import type { PlanName } from "@cliply/shared/types/auth";
 import { logStripeEvent } from "@cliply/shared/observability/logging";
 import * as workspacePlanService from "./workspacePlanService";
+import { withRetry } from "@cliply/shared/resilience/externalServiceResilience";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -55,44 +59,6 @@ function shouldRetryStripeCall(error: unknown): boolean {
 
   // Default: don't retry unknown errors
   return false;
-}
-
-/**
- * Local helper to retrieve a Stripe subscription with retry logic.
- * Uses shouldRetryStripeCall() to decide whether to retry.
- */
-async function retrieveSubscriptionWithRetry(
-  stripe: Stripe,
-  subscriptionId: string,
-): Promise<Stripe.Subscription> {
-  const maxAttempts = 2;
-  const baseDelayMs = 300;
-  const maxDelayMs = 2000;
-
-  let attempt = 0;
-  let lastError: unknown;
-
-  while (attempt < maxAttempts) {
-    attempt += 1;
-    try {
-      return await stripe.subscriptions.retrieve(subscriptionId);
-    } catch (error) {
-      lastError = error;
-
-      if (!shouldRetryStripeCall(error) || attempt >= maxAttempts) {
-        throw error;
-      }
-
-      const delayMs = Math.min(baseDelayMs * attempt, maxDelayMs);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-
-  throw new Error("Failed to retrieve subscription after retries");
 }
 
 type SupportedSubscriptionStatus =
@@ -180,7 +146,8 @@ async function resolveWorkspaceIdFromSubscription(
   if (subscriptionRow?.workspace_id) return subscriptionRow.workspace_id;
 
   // Third, try customer lookup via subscriptions table
-  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  const customerId =
+    typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
   if (customerId) {
     const { data: customerRow, error: customerError } = await supabase
       .from("subscriptions")
@@ -209,7 +176,6 @@ export async function upsertBillingFromCheckout(
   supabase: SupabaseClient,
   stripe: Stripe,
 ): Promise<void> {
-  // Extract workspace_id from session metadata
   const workspaceId = extractWorkspaceId(session.metadata);
   if (!workspaceId) {
     const error = new Error(
@@ -223,9 +189,10 @@ export async function upsertBillingFromCheckout(
     throw error;
   }
 
-  // Get customer ID
   const customerId =
-    typeof session.customer === "string" ? session.customer : session.customer?.id;
+    typeof session.customer === "string"
+      ? session.customer
+      : session.customer?.id;
   if (!customerId) {
     const error = new Error(`Checkout session ${session.id} missing customer ID`);
     logStripeEvent("checkout.session.completed", {
@@ -243,11 +210,18 @@ export async function upsertBillingFromCheckout(
   });
 
   try {
-    // If session has a subscription, retrieve and process it
     if (session.subscription && typeof session.subscription === "string") {
-      const subscription = await retrieveSubscriptionWithRetry(
-        stripe,
-        session.subscription as string,
+      const subscription = await withRetry(
+        async () => {
+          return await stripe.subscriptions.retrieve(
+            session.subscription as string,
+          );
+        },
+        {
+          maxAttempts: 2,
+          baseDelayMs: 300,
+          retryableError: (error) => shouldRetryStripeCall(error),
+        },
       );
 
       await upsertSubscriptionRecord(
@@ -257,8 +231,6 @@ export async function upsertBillingFromCheckout(
         "checkout.session.completed",
       );
     } else {
-      // No subscription yet - this might be a one-time payment or incomplete checkout
-      // Log but don't fail - subscription will be created when customer.subscription.created fires
       console.warn(
         `Checkout session ${session.id} completed but no subscription ID present`,
       );
@@ -289,7 +261,9 @@ export async function handleSubscriptionEvent(
   ) => Promise<void>,
 ): Promise<string> {
   const customerId =
-    typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer?.id;
 
   logStripeEvent(eventType, {
     stripeCustomerId: customerId,
@@ -299,7 +273,10 @@ export async function handleSubscriptionEvent(
 
   let workspaceId: string;
   try {
-    workspaceId = await resolveWorkspaceIdFromSubscription(subscription, supabase);
+    workspaceId = await resolveWorkspaceIdFromSubscription(
+      subscription,
+      supabase,
+    );
 
     if (eventType === "customer.subscription.deleted") {
       await deleteSubscriptionRecord(subscription, workspaceId, supabase);
@@ -310,10 +287,16 @@ export async function handleSubscriptionEvent(
         });
       }
     } else {
-      await upsertSubscriptionRecord(subscription, workspaceId, supabase, eventType);
+      await upsertSubscriptionRecord(
+        subscription,
+        workspaceId,
+        supabase,
+        eventType,
+      );
       if (logAudit) {
         const price = subscription.items.data[0]?.price;
-        const plan = (getPlanFromPriceId(price?.id ?? "") ?? "basic") as PlanName;
+        const plan = (getPlanFromPriceId(price?.id ?? "") ??
+          "basic") as PlanName;
         const status = mapSubscriptionStatus(subscription.status);
         await logAudit(workspaceId, eventType, subscription.id, {
           stripe_subscription_id: subscription.id,
@@ -360,9 +343,9 @@ async function upsertSubscriptionRecord(
 
   const plan = (getPlanFromPriceId(price.id) ?? "basic") as PlanName;
   const status = mapSubscriptionStatus(sub.status);
-  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  const customerId =
+    typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
 
-  // Upsert subscription record
   const { error } = await supabase.from("subscriptions").upsert(
     {
       workspace_id: workspaceId,
@@ -385,7 +368,6 @@ async function upsertSubscriptionRecord(
     throw new Error(`Failed to upsert subscription ${sub.id}: ${error.message}`);
   }
 
-  // Update workspace plan and billing status
   try {
     await workspacePlanService.setWorkspacePlan(
       workspaceId,
@@ -398,8 +380,10 @@ async function upsertSubscriptionRecord(
       },
     );
   } catch (error) {
-    // Log but don't fail webhook if workspace update fails
-    console.error(`Failed to update workspace plan for ${workspaceId}:`, error);
+    console.error(
+      `Failed to update workspace plan for ${workspaceId}:`,
+      error,
+    );
   }
 }
 
@@ -420,7 +404,6 @@ async function deleteSubscriptionRecord(
     throw new Error(`Failed to delete subscription ${sub.id}: ${error.message}`);
   }
 
-  // Reset workspace plan to basic when subscription is deleted
   try {
     await workspacePlanService.setWorkspacePlan(
       workspaceId,
@@ -433,8 +416,10 @@ async function deleteSubscriptionRecord(
       },
     );
   } catch (error) {
-    // Log but don't fail webhook if workspace update fails
-    console.error(`Failed to reset workspace plan for ${workspaceId}:`, error);
+    console.error(
+      `Failed to reset workspace plan for ${workspaceId}:`,
+      error,
+    );
   }
 }
 
@@ -446,13 +431,14 @@ export async function handleInvoiceEvent(
   eventType: string,
   supabase: SupabaseClient,
 ): Promise<string> {
-  // Resolve workspace from subscription
   const subscriptionId =
     typeof invoice.subscription === "string"
       ? invoice.subscription
       : invoice.subscription?.id;
   if (!subscriptionId) {
-    throw new Error(`Invoice ${invoice.id} does not include a subscription reference`);
+    throw new Error(
+      `Invoice ${invoice.id} does not include a subscription reference`,
+    );
   }
 
   const { data, error } = await supabase
@@ -472,7 +458,6 @@ export async function handleInvoiceEvent(
 
   const workspaceId = data.workspace_id;
 
-  // Update subscription status based on invoice event
   if (eventType === "invoice.payment_failed") {
     const { error: updateError } = await supabase
       .from("subscriptions")

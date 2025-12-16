@@ -186,7 +186,8 @@ describe("buildBackendReadinessReport", () => {
             limit: vi.fn(() =>
               Promise.resolve({
                 error: { message: "relation does not exist", code: "PGRST116" },
-              }),
+              })
+            ),
           })),
         };
       }

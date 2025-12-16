@@ -13,27 +13,57 @@ function isAuthorizedCronRequest(req: NextApiRequest): boolean {
   // Extract provided secret from header, query param, or Bearer token
   let providedSecret: string | null = null;
 
-  // Check X-CRON-SECRET header
+  // 1) Check X-CRON-SECRET header
   const headerSecret = Array.isArray(req.headers["x-cron-secret"])
     ? req.headers["x-cron-secret"][0]
     : req.headers["x-cron-secret"];
   if (headerSecret) {
-    providedSecret = headerSecret;
+    providedSecret = headerSecret as string;
   }
 
-  // Check query parameter
-  if (!providedSecret && req.query?.secret) {
-    const querySecret = Array.isArray(req.query.secret) ? req.query.secret[0] : req.query.secret;
-    if (querySecret && typeof querySecret === "string") {
+  // 2) Check query parameter (`?secret=...`)
+  if (!providedSecret) {
+    let querySecret: string | null = null;
+
+    // Normal Next.js case: req.query is populated
+    const rawQuerySecret =
+      typeof req.query === "object" && req.query
+        ? ((req.query as any).secret as string | string[] | undefined)
+        : undefined;
+
+    if (Array.isArray(rawQuerySecret)) {
+      querySecret = rawQuerySecret[0] ?? null;
+    } else if (typeof rawQuerySecret === "string") {
+      querySecret = rawQuerySecret;
+    }
+
+    // Test / non-Next fallback: parse from req.url if query object is missing
+    if (!querySecret && req.url) {
+      try {
+        const url = new URL(
+          req.url,
+          req.url.startsWith("http") ? undefined : "http://localhost",
+        );
+        const fromUrl = url.searchParams.get("secret");
+        if (fromUrl) {
+          querySecret = fromUrl;
+        }
+      } catch {
+        // ignore URL parse errors, we'll just fall through
+      }
+    }
+
+    if (querySecret) {
       providedSecret = querySecret;
     }
   }
 
-  // Check Bearer token in Authorization header
+  // 3) Check Bearer token in Authorization header
   if (!providedSecret) {
     const authHeader = Array.isArray(req.headers.authorization)
       ? req.headers.authorization[0]
       : req.headers.authorization;
+
     if (authHeader) {
       const [scheme, token] = authHeader.split(/\s+/, 2);
       if (scheme?.toLowerCase() === "bearer" && token) {
@@ -113,4 +143,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
+
 

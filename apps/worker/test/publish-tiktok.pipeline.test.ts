@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BUCKET_RENDERS } from '@cliply/shared/constants';
 import type { Job, WorkerContext } from '../src/pipelines/types';
 import { run } from '../src/pipelines/publish-tiktok';
@@ -74,8 +74,8 @@ describe('PUBLISH_TIKTOK pipeline', () => {
     queue = createQueueMock();
     sentry = createSentryMock();
     ctx = {
-      storage,
-      supabase,
+      storage: storage as unknown as WorkerContext['storage'],
+      supabase: supabase as unknown as WorkerContext['supabase'],
       logger,
       queue,
       sentry,
@@ -226,6 +226,7 @@ describe('PUBLISH_TIKTOK pipeline', () => {
           platform: 'tiktok',
           status: 'posted',
           platform_post_id: 'tiktok-video-existing',
+          posted_at: new Date().toISOString(),
         },
       ];
 
@@ -639,10 +640,21 @@ function createStorageMock(initial: Record<string, string>) {
       await fs.writeFile(destination, data, 'utf8');
       return destination;
     }),
-    upload: vi.fn(async (bucket: string, path: string, localFile: string) => {
+    upload: vi.fn(async (bucket: string, path: string, localFile: string, _contentType?: string) => {
       const data = await fs.readFile(localFile, 'utf8');
       const key = `${bucket}/${path}`;
       files.set(key, data);
+    }),
+    remove: vi.fn(async (bucket: string, path: string) => {
+      const key = `${bucket}/${path}`;
+      return files.delete(key); // boolean
+    }),
+    removeBatch: vi.fn(async (bucket: string, paths: string[]) => {
+      let deleted = 0;
+      for (const p of paths) {
+        if (files.delete(`${bucket}/${p}`)) deleted++;
+      }
+      return deleted; // number
     }),
   };
 }
@@ -659,6 +671,17 @@ function createSupabaseMock() {
       caption_suggestion: string | null;
       published_at?: string;
     }>,
+    projects: [
+      {
+        id: PROJECT_ID,
+        workspace_id: WORKSPACE_ID,
+        pipeline_stage: null as string | null,
+      },
+    ] as Array<{
+      id: string;
+      workspace_id: string;
+      pipeline_stage: string | null;
+    }>,
     connected_accounts: [] as Array<{
       id: string;
       workspace_id: string;
@@ -672,26 +695,169 @@ function createSupabaseMock() {
       platform: string;
       status: string;
       platform_post_id: string | null;
+      posted_at?: string | null;
     }>,
+  };
+
+  const makeSelectQuery = (rowsSource: any[]) => {
+    const eqFilters: Array<[string, any]> = [];
+    const notIsNullFields: string[] = [];
+    const gteFilters: Array<[string, string]> = [];
+    let orderBy: { field: string; ascending: boolean } | null = null;
+    let limitN: number | null = null;
+
+    const executeMany = () => {
+      let rows = rowsSource.slice();
+
+      for (const [f, v] of eqFilters) rows = rows.filter((r) => (r as any)[f] === v);
+
+      for (const f of notIsNullFields) {
+        rows = rows.filter((r) => (r as any)[f] !== null && (r as any)[f] !== undefined);
+      }
+
+      for (const [f, iso] of gteFilters) {
+        const cutoff = new Date(iso).getTime();
+        rows = rows.filter((r) => {
+          const val = (r as any)[f];
+          if (!val) return false;
+          const t = new Date(val).getTime();
+          return Number.isFinite(t) && t >= cutoff;
+        });
+      }
+
+      if (orderBy) {
+        const { field, ascending } = orderBy;
+        rows.sort((a, b) => {
+          const av = (a as any)[field];
+          const bv = (b as any)[field];
+          const at = av ? new Date(av).getTime() : 0;
+          const bt = bv ? new Date(bv).getTime() : 0;
+          return ascending ? at - bt : bt - at;
+        });
+      }
+
+      if (limitN !== null) rows = rows.slice(0, limitN);
+
+      return rows;
+    };
+
+    const query: any = {
+      eq: (field: string, value: any) => {
+        eqFilters.push([field, value]);
+        return query;
+      },
+      not: (field: string, operator: string, value: any) => {
+        if (operator === 'is' && value === null) notIsNullFields.push(field);
+        return query;
+      },
+      gte: (field: string, value: string) => {
+        gteFilters.push([field, value]);
+        return query;
+      },
+      order: (field: string, opts?: { ascending?: boolean }) => {
+        orderBy = { field, ascending: opts?.ascending ?? true };
+        return query;
+      },
+      limit: (n: number) => {
+        limitN = n;
+        return query;
+      },
+      maybeSingle: () => Promise.resolve({ data: executeMany()[0] ?? null, error: null }),
+      then: (onFulfilled: any, onRejected: any) =>
+        Promise.resolve({ data: executeMany(), error: null }).then(onFulfilled, onRejected),
+      catch: (onRejected: any) => query.then(undefined, onRejected),
+      finally: (onFinally: any) =>
+        Promise.resolve({ data: executeMany(), error: null }).finally(onFinally),
+    };
+
+    return query;
+  };
+
+  const makeUpdateQuery = (rowsSource: any[], values: Record<string, any>) => {
+    const eqFilters: Array<[string, any]> = [];
+    const neqFilters: Array<[string, any]> = [];
+    const notEqFilters: Array<[string, any]> = [];
+    let selectFields: string | null = null;
+
+    const matches = (r: any) => {
+      for (const [f, v] of eqFilters) if (r[f] !== v) return false;
+      for (const [f, v] of neqFilters) if (r[f] === v) return false;
+      for (const [f, v] of notEqFilters) if (r[f] === v) return false;
+      return true;
+    };
+
+    const applyUpdate = () => {
+      const updated: any[] = [];
+      for (const row of rowsSource) {
+        if (matches(row)) {
+          Object.assign(row, values);
+          updated.push(row);
+        }
+      }
+      // We don’t need to enforce select(field list) fidelity for tests; just return updated rows.
+      return updated;
+    };
+
+    const query: any = {
+      select: (fields: string) => {
+        selectFields = fields;
+        void selectFields;
+        return query;
+      },
+      eq: (field: string, value: any) => {
+        eqFilters.push([field, value]);
+        return query;
+      },
+      neq: (field: string, value: any) => {
+        neqFilters.push([field, value]);
+        return query;
+      },
+      not: (field: string, operator: string, value: any) => {
+        // Support the common pattern: .not('pipeline_stage','eq','PUBLISHED')
+        if (operator === 'eq') notEqFilters.push([field, value]);
+        return query;
+      },
+      maybeSingle: () => Promise.resolve({ data: applyUpdate()[0] ?? null, error: null }),
+      then: (onFulfilled: any, onRejected: any) =>
+        Promise.resolve({ data: applyUpdate(), error: null }).then(onFulfilled, onRejected),
+      catch: (onRejected: any) => query.then(undefined, onRejected),
+      finally: (onFinally: any) =>
+        Promise.resolve({ data: applyUpdate(), error: null }).finally(onFinally),
+    };
+
+    return query;
   };
 
   return {
     state,
-    from(table: 'clips' | 'connected_accounts' | 'variant_posts') {
+    from(table: string) {
       if (table === 'clips') {
         return {
-          select: (fields: string) => ({
-            eq: (field: string, value: string) => {
-              const filtered = state.clips.filter((row) => row[field as keyof typeof row] === value);
-              return Promise.resolve({ data: filtered, error: null });
-            },
-          }),
+          select: (_fields: string) => {
+            const filters: Array<[string, string]> = [];
+
+            const executeMany = () =>
+              state.clips.filter((row) => filters.every(([f, v]) => (row as any)[f] === v));
+
+            const query: any = {
+              eq: (field: string, value: string) => {
+                filters.push([field, value]);
+                return query;
+              },
+              maybeSingle: () => Promise.resolve({ data: executeMany()[0] ?? null, error: null }),
+              then: (onFulfilled: any, onRejected: any) =>
+                Promise.resolve({ data: executeMany(), error: null }).then(onFulfilled, onRejected),
+              catch: (onRejected: any) => query.then(undefined, onRejected),
+              finally: (onFinally: any) =>
+                Promise.resolve({ data: executeMany(), error: null }).finally(onFinally),
+            };
+
+            return query;
+          },
           update: (values: Partial<(typeof state.clips)[number]>) => ({
             eq: (field: string, value: string) => {
               state.clips.forEach((clip) => {
-                if (clip[field as keyof typeof clip] === value) {
-                  Object.assign(clip, values);
-                }
+                if ((clip as any)[field] === value) Object.assign(clip, values);
               });
               return Promise.resolve({ data: null, error: null });
             },
@@ -699,16 +865,32 @@ function createSupabaseMock() {
         };
       }
 
+      if (table === 'projects') {
+        return {
+          select: (_fields: string) => ({
+            eq: (field: string, value: string) => ({
+              maybeSingle: () => {
+                const found = state.projects.find((row) => (row as any)[field] === value) ?? null;
+                return Promise.resolve({ data: found, error: null });
+              },
+            }),
+          }),
+          update: (values: Partial<(typeof state.projects)[number]>) =>
+            makeUpdateQuery(state.projects as any[], values as any),
+        };
+      }
+
       if (table === 'connected_accounts') {
         return {
-          select: (fields: string) => ({
+          select: (_fields: string) => ({
             eq: (field: string, value: string) => ({
               eq: (field2: string, value2: string) => ({
                 maybeSingle: () => {
-                  const found = state.connected_accounts.find(
-                    (acc) => acc[field as keyof typeof acc] === value && acc[field2 as keyof typeof acc] === value2,
-                  );
-                  return Promise.resolve({ data: found ?? null, error: null });
+                  const found =
+                    state.connected_accounts.find(
+                      (acc) => (acc as any)[field] === value && (acc as any)[field2] === value2,
+                    ) ?? null;
+                  return Promise.resolve({ data: found, error: null });
                 },
               }),
             }),
@@ -718,29 +900,18 @@ function createSupabaseMock() {
 
       if (table === 'variant_posts') {
         return {
-          select: (fields: string) => ({
-            eq: (field: string, value: string) => ({
-              eq: (field2: string, value2: string) => ({
-                eq: (field3: string, value3: string) => ({
-                  maybeSingle: () => {
-                    const found = state.variant_posts.find(
-                      (post) =>
-                        post[field as keyof typeof post] === value &&
-                        post[field2 as keyof typeof post] === value2 &&
-                        post[field3 as keyof typeof post] === value3,
-                    );
-                    return Promise.resolve({ data: found ?? null, error: null });
-                  },
-                }),
-              }),
-            }),
-          }),
+          select: (_fields: string) => makeSelectQuery(state.variant_posts),
+          update: (values: Partial<(typeof state.variant_posts)[number]>) =>
+            makeUpdateQuery(state.variant_posts as any[], values as any),
         };
       }
 
+      // default table fallback
       return {
         select: () => ({
-          eq: () => Promise.resolve({ data: [], error: null }),
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({ data: null, error: null }),
+          }),
         }),
       };
     },
@@ -767,4 +938,3 @@ function createSentryMock() {
     captureException: vi.fn(),
   };
 }
-

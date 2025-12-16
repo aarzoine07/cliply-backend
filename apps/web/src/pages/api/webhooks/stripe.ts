@@ -1,40 +1,22 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextApiRequest, NextApiResponse } from "next";
+import { Readable } from "stream";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { BillingErrorCode, billingErrorResponse } from "@cliply/shared/types/billing";
-import { logAuditEvent } from "@cliply/shared/logging/audit";
 import {
   handleInvoiceEvent,
   handleSubscriptionEvent,
   upsertBillingFromCheckout,
 } from "@/lib/billing/stripeHandlers";
-
 import { serverEnv } from "@/lib/env";
 
-const { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = serverEnv;
-
-if (!STRIPE_SECRET_KEY) {
-  throw new Error("STRIPE_SECRET_KEY is not configured");
+async function buffer(readable: Readable) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of readable) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks);
 }
-if (!STRIPE_WEBHOOK_SECRET) {
-  throw new Error("STRIPE_WEBHOOK_SECRET is not configured");
-}
-if (!SUPABASE_URL) {
-  throw new Error("SUPABASE_URL is not configured");
-}
-if (!SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
-}
-
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
-const endpointSecret = STRIPE_WEBHOOK_SECRET;
-const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 export const config = {
   api: {
@@ -42,131 +24,84 @@ export const config = {
   },
 };
 
-export async function POST(req: NextRequest) {
-  const signature = req.headers.get("stripe-signature");
-  if (!signature) {
-    return NextResponse.json(
-      billingErrorResponse(
-        BillingErrorCode.INVALID_SIGNATURE,
-        "Missing Stripe signature header.",
-        400,
-      ),
-      { status: 400 },
-    );
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ ok: false, error: { message: "method_not_allowed" } });
   }
+
+  const signature = req.headers["stripe-signature"];
+  if (!signature) {
+    return res.status(400).json({
+      ok: false,
+      error: { message: "missing_stripe_signature" },
+    });
+  }
+
+  const {
+    STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET,
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
+  } = serverEnv;
+
+  // IMPORTANT: no top-level throws — validate inside the handler
+  if (!STRIPE_SECRET_KEY || !STRIPE_WEBHOOK_SECRET || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({
+      ok: false,
+      error: { message: "server_misconfigured" },
+    });
+  }
+
+  const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+  const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   let event: Stripe.Event;
   try {
-    const body = await req.text();
-    event = stripe.webhooks.constructEvent(body, signature, endpointSecret);
+    const raw = await buffer(req as unknown as Readable);
+    event = stripe.webhooks.constructEvent(raw, signature as string, STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Invalid Stripe signature.";
-    return NextResponse.json(
-      billingErrorResponse(BillingErrorCode.INVALID_SIGNATURE, message, 400),
-      { status: 400 },
-    );
+    const message = err instanceof Error ? err.message : "invalid_stripe_signature";
+    return res.status(400).json({
+      ok: false,
+      error: { message },
+    });
   }
 
   try {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        try {
-          await upsertBillingFromCheckout(session, supabase, stripe);
-        } catch (err) {
-          console.error("Error handling checkout.session.completed:", err);
-        }
+        await upsertBillingFromCheckout(session, supabase, stripe);
         break;
       }
+
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        try {
-          const workspaceId = await handleSubscriptionEvent(
-            subscription,
-            event.type,
-            supabase,
-            async (wsId: string, evtType: string, evtId: string, payload: Record<string, unknown>) => {
-              // Map old signature to new logAuditEvent signature
-              const action = evtType === "customer.subscription.created" 
-                ? "subscription.created"
-                : evtType === "customer.subscription.updated"
-                ? "subscription.updated"
-                : "subscription.deleted";
-              
-              try {
-                await logAuditEvent({
-                  workspaceId: wsId,
-                  actorId: null,
-                  eventType: "billing",
-                  action,
-                  targetId: subscription.id,
-                  meta: {
-                    stripe_event_id: evtId,
-                    ...payload,
-                  },
-                });
-              } catch (auditErr) {
-                console.error("Error logging audit event:", auditErr);
-              }
-            },
-          );
-        } catch (err) {
-          console.error(`Error handling ${event.type}:`, err);
-        }
+        await handleSubscriptionEvent(subscription, event.type, supabase);
         break;
       }
+
       case "invoice.payment_succeeded":
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        try {
-          const workspaceId = await handleInvoiceEvent(invoice, event.type, supabase);
-          if (workspaceId) {
-            try {
-              const action = event.type === "invoice.payment_succeeded"
-                ? "invoice.payment_succeeded"
-                : "invoice.payment_failed";
-              
-              await logAuditEvent({
-                workspaceId,
-                actorId: null,
-                eventType: "billing",
-                action,
-                targetId: invoice.id,
-                meta: {
-                  stripe_event_id: event.id,
-                  invoice_id: invoice.id,
-                  subscription_id:
-                    typeof invoice.subscription === "string"
-                      ? invoice.subscription
-                      : invoice.subscription?.id,
-                  amount_paid: invoice.amount_paid,
-                  amount_due: invoice.amount_due,
-                  currency: invoice.currency,
-                  status: invoice.status,
-                },
-              });
-            } catch (auditErr) {
-              console.error("Error logging audit event:", auditErr);
-            }
-          }
-        } catch (err) {
-          console.error(`Error handling ${event.type}:`, err);
-        }
+        await handleInvoiceEvent(invoice, event.type, supabase);
         break;
       }
+
       default:
-        // Unhandled event types are acknowledged but not processed.
+        // acknowledge unhandled event types
         break;
     }
-
-    // Always return 200 to acknowledge receipt
-    return NextResponse.json({ received: true }, { status: 200 });
   } catch (err) {
-    // Catch-all: log but always return 200
-    const message = err instanceof Error ? err.message : "Stripe webhook processing error.";
-    console.error("Stripe webhook error:", message);
-    return NextResponse.json({ received: true }, { status: 200 });
+    // Acknowledge receipt even if processing fails to avoid Stripe retries storms.
+    // Logging can happen inside stripeHandlers.
+    console.error("stripe_webhook_processing_error", err);
   }
+
+  return res.status(200).json({ received: true });
 }

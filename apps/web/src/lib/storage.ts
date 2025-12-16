@@ -1,8 +1,11 @@
+// FILE: apps/web/src/lib/storage.ts
+// FINAL VERSION – Supabase signed upload URL helper
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// With this:
 const BUCKET_VIDEOS = "videos";
 const SIGNED_URL_TTL_SEC = 60 * 5; // 5 minutes
+
 import { getEnv } from "./env";
 import { getAdminClient } from "./supabase";
 
@@ -17,7 +20,9 @@ async function ensureBucket(admin: SupabaseClient, bucket: string): Promise<void
   }
 
   if (!data) {
-    const { error: createError } = await admin.storage.createBucket(bucket, { public: false });
+    const { error: createError } = await admin.storage.createBucket(bucket, {
+      public: false,
+    });
     if (createError && !/already exists/i.test(createError.message ?? "")) {
       throw createError;
     }
@@ -47,10 +52,15 @@ export async function getSignedUploadUrl(
   if (!env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
   }
+  if (!env.SUPABASE_URL) {
+    throw new Error("SUPABASE_URL missing");
+  }
 
   const baseUrl = env.SUPABASE_URL.replace(/\/+$/, "");
   const key = storageKey.replace(/^\/+/, "");
-  const requestUrl = new URL(`${baseUrl}/storage/v1/object/upload/sign/${bucket}/${key}`);
+  const requestUrl = new URL(
+    `${baseUrl}/storage/v1/object/upload/sign/${bucket}/${key}`,
+  );
 
   const response = await fetch(requestUrl, {
     method: "POST",
@@ -64,7 +74,9 @@ export async function getSignedUploadUrl(
 
   if (!response.ok) {
     const details = await parseError(response);
-    throw new Error(`failed_to_create_signed_upload_url: ${JSON.stringify(details)}`);
+    throw new Error(
+      `failed_to_create_signed_upload_url: ${JSON.stringify(details)}`,
+    );
   }
 
   const { url } = (await response.json()) as { url?: string };

@@ -10,7 +10,32 @@ const __dirname = dirname(__filename);
 const envPath = resolve(__dirname, "../../../.env.test");
 dotenv.config({ path: envPath });
 
-// Derive NODE_ENV for our test env config without mutating process.env.NODE_ENV
+/**
+ * ✅ Ensure NODE_ENV === "test" for shared getEnv()/auth fast-path.
+ * Some runtimes define process.env.NODE_ENV as non-writable; assignment throws.
+ * We only set it if missing, and do so via defineProperty.
+ */
+function ensureNodeEnvTest(): void {
+  if (process.env.NODE_ENV) return;
+
+  try {
+    Object.defineProperty(process.env, "NODE_ENV", {
+      value: "test",
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } catch {
+    // If we can't set it, tests that depend on shared auth debug fast-path will fail.
+    // Keep noise low but surface the root cause.
+    // eslint-disable-next-line no-console
+    console.warn("⚠️ Unable to define process.env.NODE_ENV='test' (read-only env).");
+  }
+}
+
+ensureNodeEnvTest();
+
+// Derive NODE_ENV for our test env config (should now be "test")
 const NODE_ENV = process.env.NODE_ENV ?? "test";
 
 // Set STRIPE_SECRET_KEY for tests (required by billing/checkout route)
@@ -20,6 +45,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 console.log(`✅ dotenv loaded from: ${envPath}`);
 console.log("🔎 process.env.SUPABASE_URL =", process.env.SUPABASE_URL);
+console.log("🔎 process.env.NODE_ENV =", process.env.NODE_ENV);
 
 export const env = {
   NODE_ENV,
@@ -62,6 +88,10 @@ export const supabaseTest =
     ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
     : null;
 
+// ✅ Deterministic test IDs used by multiple test suites
+const TEST_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+const TEST_OWNER_ID = "00000000-0000-0000-0000-000000000002";
+
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
   const payload = {
@@ -79,7 +109,74 @@ export function createTestJwt(userId: string, workspaceId: string) {
 }
 
 export async function resetDatabase() {
-  console.log("⚙️  resetDatabase() called (stubbed for local tests)");
+  if (!supabaseTest) {
+    console.warn("⚠️ resetDatabase() skipped: supabaseTest not configured");
+    return;
+  }
+
+  console.log("⚙️  resetDatabase() clearing jobs-related tables...");
+
+  // FK-safe order: job_events -> jobs
+  const { error: jobEventsError } = await supabaseTest
+    .from("job_events")
+    .delete()
+    .neq("id", 0);
+
+  if (jobEventsError) {
+    throw new Error(
+      `resetDatabase(): failed to clear job_events: ${jobEventsError.message}`,
+    );
+  }
+
+  // idempotency_keys may not be exposed via PostgREST schema cache in some local states
+  const { error: idemError } = await supabaseTest
+    .from("idempotency_keys")
+    .delete()
+    .neq("id", 0);
+
+  if (idemError) {
+    const msg = `${idemError.message ?? ""}`.toLowerCase();
+    const code = (idemError as any)?.code;
+
+    const ignorable =
+      msg.includes("could not find the table") || // PostgREST schema cache miss
+      msg.includes("does not exist") || // DB relation missing
+      code === "PGRST205"; // PostgREST "not found in schema cache" (common)
+
+    if (!ignorable) {
+      throw new Error(
+        `resetDatabase(): failed to clear idempotency_keys: ${idemError.message}`,
+      );
+    }
+  }
+
+  const { error: jobsError } = await supabaseTest
+    .from("jobs")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+
+  if (jobsError) {
+    throw new Error(`resetDatabase(): failed to clear jobs: ${jobsError.message}`);
+  }
+
+  // ✅ Seed deterministic workspace used by worker/job tests.
+  const { error: wsError } = await supabaseTest
+    .from("workspaces")
+    .upsert(
+      {
+        id: TEST_WORKSPACE_ID,
+        name: "Test Workspace",
+        owner_id: TEST_OWNER_ID,
+        org_id: null,
+      },
+      { onConflict: "id" },
+    );
+
+  if (wsError) {
+    throw new Error(`resetDatabase(): failed to seed workspaces: ${wsError.message}`);
+  }
+
+  console.log("✅ resetDatabase() done");
 }
 
 // Import clearEnvCache for test reset functionality
@@ -87,10 +184,6 @@ import { clearEnvCache } from "../src/env";
 
 /**
  * Test helper: reset any cached env-related state between tests.
- *
- * Clears the shared env cache so the next getEnv() call re-parses
- * from process.env. This allows tests to dynamically change env vars
- * and have them take effect immediately.
  */
 export function resetEnvForTesting(): void {
   clearEnvCache();
@@ -98,31 +191,20 @@ export function resetEnvForTesting(): void {
 
 /**
  * Checks if Supabase test client is configured and usable for real DB operations.
- * Returns false if:
- * - supabaseTest is null (missing credentials)
- * - SUPABASE_URL is a dashboard URL (contains '/dashboard/') instead of an API URL
- *
- * @returns true if Supabase is properly configured for tests, false otherwise
  */
 export function isSupabaseTestConfigured(): boolean {
   if (!supabaseTest) {
     return false;
   }
 
-  // Check if URL is a dashboard URL (not a real API URL)
-  // Dashboard URLs: https://supabase.com/dashboard/project/...
-  // API URLs: https://xxx.supabase.co or https://xxx.supabase.io
   const url = env.SUPABASE_URL || "";
   if (url.includes("/dashboard/")) {
     return false;
   }
 
-  // Check if it looks like a real Supabase API URL
-  // Real URLs typically end with .supabase.co or .supabase.io
   if (!url.match(/\.supabase\.(co|io)/)) {
     return false;
   }
 
   return true;
 }
-

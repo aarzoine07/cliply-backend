@@ -1,4 +1,4 @@
-import { PROJECT_STATUSES, CLIP_STATUSES } from "@cliply/shared/status";
+import { PROJECT_STATUSES, CLIP_STATUSES } from "@cliply/shared";
 import type { ClipStatus, ProjectStatus } from "@cliply/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,7 @@ vi.mock("@/lib/rate-limit", () => ({
 
 import { requireUser } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
-import handler from "../../src/pages/api/projects/[id].ts";
+import handler from "../../src/pages/api/projects/[id]";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 const requireUserMock = vi.mocked(requireUser);
@@ -97,7 +97,8 @@ describe("GET /api/projects/[id] - Lifecycle Status Verification", () => {
       return {};
     });
 
-    requireUserMock.mockResolvedValue({
+    // requireUser is synchronous, so use mockReturnValue (not mockResolvedValue)
+    requireUserMock.mockReturnValue({
       userId: "user-123",
       workspaceId,
       supabase: { from: fromSpy } as any,
@@ -211,7 +212,8 @@ describe("GET /api/projects/[id] - Lifecycle Status Verification", () => {
       return {};
     });
 
-    requireUserMock.mockResolvedValue({
+    // requireUser is synchronous, so use mockReturnValue (not mockResolvedValue)
+    requireUserMock.mockReturnValue({
       userId: "user-123",
       workspaceId,
       supabase: { from: fromSpy } as any,

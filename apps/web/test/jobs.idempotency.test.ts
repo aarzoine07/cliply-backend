@@ -1,99 +1,98 @@
 // @ts-nocheck
+/**
+ * Jobs Idempotency Tests
+ *
+ * Tests idempotent behavior for job creation:
+ * - First request creates a job
+ * - Second request with same idempotency key does not create duplicate
+ * - Response for subsequent identical requests matches the first
+ *
+ * Each test uses unique identifiers to ensure isolation from other tests.
+ */
 import crypto from "node:crypto";
-import * as path from "path";
-
-import { resetDatabase } from "@cliply/shared/test/setup";
 import { createClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-// ✅ Bulletproof dotenv for Vitest (CJS require avoids ESM wrapper quirks)
-const dotenv = require("dotenv");
-dotenv.config({ path: "../../.env.test", override: true });
-
-const envPath = path.resolve(process.cwd(), "../../.env.test");
-console.log(`✅ dotenv loaded from: ${envPath}`);
-console.log("🔎 SUPABASE_URL =", process.env.SUPABASE_URL);
+// Use shared test setup (env + optional resetDatabase)
+import { env, resetDatabase } from "../../../packages/shared/test/setup";
 
 // ✅ Supabase client (service-role)
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SUPABASE_URL = env.SUPABASE_URL!;
+const SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY!;
 const client = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
 const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const ROUTE = "jobs/enqueue";
-const KIND = "TRANSCRIBE";
-const PAYLOAD = { clip: "demo" };
+
+// We need a valid user_id for the idempotency table (NOT NULL + FK to users)
+let IDEMPOTENCY_USER_ID: string | null = null;
+
+// Track test-specific identifiers for cleanup
+const testJobIds: string[] = [];
+const testDedupeKeys: string[] = [];
 
 describe("Idempotency – Deduplication", () => {
   beforeAll(async () => {
     // Try the project reset hook (stubbed locally)
     await resetDatabase?.();
 
-    console.log("⚙️  Cleanup: removing old rows for this workspace/kind via service-role");
-
-    // 1) Find old jobs for this workspace + kind
-    const { data: oldJobs, error: findErr } = await client
-      .from("jobs")
+    // 0️⃣ Ensure we have at least one user to attach to idempotency records
+    const { data: users, error: usersErr } = await client
+      .from("users")
       .select("id")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("kind", KIND);
+      .limit(1);
 
-    if (findErr) {
-      console.error("❌ find old jobs error:", findErr);
+    if (usersErr) {
+      throw new Error(`Failed to fetch a user for idempotency tests: ${usersErr.message}`);
     }
 
-    const jobIds = (oldJobs ?? []).map((j) => j.id);
-
-    // 2) Delete related job_events first (FK safety)
-    if (jobIds.length > 0) {
-      const { error: delEventsErr } = await client
-        .from("job_events")
-        .delete()
-        .in("job_id", jobIds);
-      if (delEventsErr) {
-        console.error("❌ delete job_events error:", delEventsErr);
-      }
+    if (!users || users.length === 0) {
+      throw new Error(
+        "No users found in 'users' table for idempotency tests. Seed at least one user."
+      );
     }
 
-    // 3) Delete the old jobs
-    const { error: delJobsErr } = await client
-      .from("jobs")
-      .delete()
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("kind", KIND);
-    if (delJobsErr) {
-      console.error("❌ delete jobs error:", delJobsErr);
-    }
-
-    // 4) Delete any idempotency keys for this workspace/route
-    const { error: delKeysErr } = await client
-      .from("idempotency_keys")
-      .delete()
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("route", ROUTE);
-    if (delKeysErr) {
-      console.error("❌ delete idempotency_keys error:", delKeysErr);
-    }
-
-    console.log("✅ cleanup done for workspace/kind/route");
+    IDEMPOTENCY_USER_ID = users[0].id;
   });
 
-  // ✅ Hermetic idempotency test: pre-delete + upsert(ignoreDuplicates)
+  afterAll(async () => {
+    // Clean up test-specific data
+    if (testJobIds.length > 0) {
+      // Delete job_events first (FK safety)
+      await client.from("job_events").delete().in("job_id", testJobIds);
+      // Delete jobs
+      await client.from("jobs").delete().in("id", testJobIds);
+    }
+
+    if (testDedupeKeys.length > 0) {
+      // Delete idempotency records
+      for (const key of testDedupeKeys) {
+        await client.from("idempotency").delete().eq("route", ROUTE).eq("key", key);
+      }
+    }
+  });
+
+  // ✅ Hermetic idempotency test: one canonical record per (route, key)
   it("reuses same jobId for identical enqueue payloads", async () => {
+    // Use a unique test identifier to avoid conflicts
+    const testId = `test-reuse-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const KIND = "TRANSCRIBE";
+    const PAYLOAD = { clip: "demo", testId };
+
     const dedupeKey = crypto
       .createHash("sha256")
       .update(`${KIND}|${JSON.stringify(PAYLOAD)}`)
       .digest("hex");
+    testDedupeKeys.push(dedupeKey);
 
-    // 0️⃣ Pre-delete any leftover key from previous runs
+    // 0️⃣ Pre-delete any leftover record (shouldn't exist with unique testId)
     await client
-      .from("idempotency_keys")
+      .from("idempotency")
       .delete()
-      .eq("workspace_id", WORKSPACE_ID)
       .eq("route", ROUTE)
-      .eq("key_hash", dedupeKey);
+      .eq("key", dedupeKey);
 
     // 1️⃣ Insert first job
     const { data: firstJob, error: firstError } = await client
@@ -108,51 +107,65 @@ describe("Idempotency – Deduplication", () => {
       .single();
     expect(firstError).toBeNull();
     expect(firstJob).toBeTruthy();
+    testJobIds.push(firstJob!.id);
 
-    // 2️⃣ Upsert idempotency key, ignoring duplicates
+    // 2️⃣ Upsert idempotency record, ignoring duplicates
     const { error: upsertError } = await client
-      .from("idempotency_keys")
+      .from("idempotency")
       .upsert(
         {
-          workspace_id: WORKSPACE_ID,
+          user_id: IDEMPOTENCY_USER_ID,
           route: ROUTE,
-          key_hash: dedupeKey,
+          key: dedupeKey,
           response: { ok: true, jobId: firstJob!.id },
         },
-        { onConflict: "workspace_id,route,key_hash", ignoreDuplicates: true }
+        { onConflict: "route,key", ignoreDuplicates: true }
       );
     expect(upsertError).toBeNull();
 
-    // 3️⃣ Verify same key returns same jobId
+    // 3️⃣ Verify same key returns same jobId (simulating second request)
     const { data: existingKey, error: existingKeyError } = await client
-      .from("idempotency_keys")
+      .from("idempotency")
       .select("response")
-      .eq("workspace_id", WORKSPACE_ID)
       .eq("route", ROUTE)
-      .eq("key_hash", dedupeKey)
+      .eq("key", dedupeKey)
       .single();
     expect(existingKeyError).toBeNull();
     expect(existingKey?.response?.jobId).toBe(firstJob!.id);
 
-    // 4️⃣ Ensure only one job exists
-    const { count, error: jobCountError } = await client
+    // 4️⃣ Ensure only one job exists with our specific testId
+    const { data: jobs, error: jobsError } = await client
       .from("jobs")
-      .select("*", { count: "exact", head: true })
+      .select("id")
       .eq("workspace_id", WORKSPACE_ID)
-      .eq("kind", KIND);
-    expect(jobCountError).toBeNull();
-    expect(count).toBe(1);
+      .eq("kind", KIND)
+      .contains("payload", { testId });
+    expect(jobsError).toBeNull();
+    expect(jobs?.length).toBe(1);
   });
 
-  // ✅ Duplicate Job Prevention (Layer 2.3)
+  // ✅ Duplicate Job Prevention (guard via (route, key) idempotency)
   it("prevents creating duplicate jobs for same key (dedupe guard)", async () => {
+    // Use a unique test identifier
+    const testId = `test-dedupe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const KIND = "TRANSCRIBE";
+    const PAYLOAD = { clip: "demo", testId };
+
     const dedupeKey = crypto
       .createHash("sha256")
       .update(`${KIND}|${JSON.stringify(PAYLOAD)}`)
       .digest("hex");
+    testDedupeKeys.push(dedupeKey);
 
-    // simulate a second enqueue attempt with same key
-    const { data: dupJob, error: dupErr } = await client
+    // Ensure clean starting point
+    await client
+      .from("idempotency")
+      .delete()
+      .eq("route", ROUTE)
+      .eq("key", dedupeKey);
+
+    // 1️⃣ Simulate first enqueue attempt
+    const { data: firstJob, error: firstErr } = await client
       .from("jobs")
       .insert({
         workspace_id: WORKSPACE_ID,
@@ -162,45 +175,70 @@ describe("Idempotency – Deduplication", () => {
       })
       .select("*")
       .single();
+    expect(firstErr).toBeNull();
+    expect(firstJob).toBeTruthy();
+    testJobIds.push(firstJob!.id);
 
-    expect(dupErr).toBeNull();
-    expect(dupJob).toBeTruthy();
+    const firstJobId = firstJob!.id;
 
-    // attach same idempotency key again
-    const { error: upsertErr } = await client
-      .from("idempotency_keys")
+    // Attach idempotency record
+    const { error: firstUpsertErr } = await client
+      .from("idempotency")
       .upsert(
         {
-          workspace_id: WORKSPACE_ID,
+          user_id: IDEMPOTENCY_USER_ID,
           route: ROUTE,
-          key_hash: dedupeKey,
-          response: { ok: true, jobId: dupJob!.id },
+          key: dedupeKey,
+          response: { ok: true, jobId: firstJobId },
         },
-        { onConflict: "workspace_id,route,key_hash", ignoreDuplicates: true }
+        { onConflict: "route,key", ignoreDuplicates: true }
+      );
+    expect(firstUpsertErr).toBeNull();
+
+    // 2️⃣ Simulate second enqueue attempt with same key
+    // Note: In production, the idempotency check would happen BEFORE inserting the job.
+    // This test simulates what happens at the DB level when idempotency is used.
+    const { data: secondJob, error: secondErr } = await client
+      .from("jobs")
+      .insert({
+        workspace_id: WORKSPACE_ID,
+        kind: KIND,
+        state: "queued",
+        payload: PAYLOAD,
+      })
+      .select("*")
+      .single();
+    expect(secondErr).toBeNull();
+    expect(secondJob).toBeTruthy();
+    testJobIds.push(secondJob!.id);
+
+    // Attach same idempotency key again – onConflict(route,key) should ignore the update
+    const { error: upsertErr } = await client
+      .from("idempotency")
+      .upsert(
+        {
+          user_id: IDEMPOTENCY_USER_ID,
+          route: ROUTE,
+          key: dedupeKey,
+          response: { ok: true, jobId: secondJob!.id },
+        },
+        { onConflict: "route,key", ignoreDuplicates: true }
       );
     expect(upsertErr).toBeNull();
 
-    // verify there’s still exactly one job for this workspace+kind
-    const { count, error: jobCountErr } = await client
-      .from("jobs")
-      .select("*", { count: "exact", head: true })
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("kind", KIND);
+    // 3️⃣ Verify the canonical idempotency record still points to the FIRST job
+    // (ignoreDuplicates means the second upsert doesn't overwrite)
+    const { data: existingKey, error: existingKeyErr } = await client
+      .from("idempotency")
+      .select("response")
+      .eq("route", ROUTE)
+      .eq("key", dedupeKey)
+      .single();
+    expect(existingKeyErr).toBeNull();
+    expect(existingKey?.response?.jobId).toBe(firstJobId);
 
- expect(jobCountErr).toBeNull();
-
-// ✅ job count may be >1 physically, but the canonical idempotency key must still point to a single jobId
-expect(count).toBeGreaterThanOrEqual(1);
-
-const { data: existingKey, error: existingKeyErr } = await client
-  .from("idempotency_keys")
-  .select("response")
-  .eq("workspace_id", WORKSPACE_ID)
-  .eq("route", ROUTE)
-  .eq("key_hash", dedupeKey)
-  .single();
-expect(existingKeyErr).toBeNull();
-expect(existingKey?.response?.jobId).toBeTruthy();
-
+    // Note: In this test, we created 2 jobs in the DB (simulating what would happen
+    // if idempotency check was bypassed). The key assertion is that the idempotency
+    // record still points to the FIRST job's ID.
   });
 });

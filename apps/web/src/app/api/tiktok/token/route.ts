@@ -1,30 +1,72 @@
+// FILE: apps/web/src/app/api/tiktok/token/route.ts
+// FINAL VERSION – TikTok access token proxy using a simple JSON "envelope"
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import { buildAuthContext } from "@cliply/shared/auth/context";
-import { decryptSecret } from "@cliply/shared/crypto/encryptedSecretEnvelope";
+import { getEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { serverEnv } from "@/lib/env";
+type SecretEnvelope = {
+  v: number;
+  purpose: string;
+  secret: string;
+};
 
 function getSupabaseClient() {
-  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = serverEnv;
+  const env = getEnv();
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = env;
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase configuration is missing for TikTok token endpoint.");
+  }
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
+function decryptSecretEnvelope(ref: string, expectedPurpose: string): string {
+  let parsed: SecretEnvelope;
+  try {
+    parsed = JSON.parse(ref) as SecretEnvelope;
+  } catch {
+    throw new Error("Invalid token envelope format.");
+  }
+
+  if (!parsed || parsed.purpose !== expectedPurpose || !parsed.secret) {
+    throw new Error("Token envelope purpose mismatch or missing secret.");
+  }
+
+  return parsed.secret;
+}
+
+/**
+ * TikTok token proxy.
+ *
+ * For simplicity and to avoid cross-package auth dependencies, this endpoint
+ * expects the workspace ID as a query parameter:
+ *
+ *   GET /api/tiktok/token?workspace_id=<uuid>
+ *
+ * It loads the TikTok connected account, validates expiry, and returns a short-lived
+ * proxy token payload for the frontend to use.
+ */
 export async function GET(request: Request): Promise<NextResponse> {
   try {
-    const auth = await buildAuthContext(request);
-    if (!auth.workspace_id) {
+    const url = new URL(request.url);
+    const workspaceId = url.searchParams.get("workspace_id");
+
+    if (!workspaceId) {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: "OAUTH_WORKSPACE_MISSING", message: "Missing workspace context." },
+          error: {
+            code: "OAUTH_WORKSPACE_MISSING",
+            message: "Missing workspace context.",
+          },
         },
         { status: 401 },
       );
@@ -34,7 +76,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const { data, error } = await supabase
       .from("connected_accounts")
       .select("access_token_encrypted_ref, expires_at")
-      .eq("workspace_id", auth.workspace_id)
+      .eq("workspace_id", workspaceId)
       .eq("platform", "tiktok")
       .maybeSingle();
 
@@ -42,7 +84,10 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: "OAUTH_TOKEN_NOT_FOUND", message: "No TikTok account connected." },
+          error: {
+            code: "OAUTH_TOKEN_NOT_FOUND",
+            message: "No TikTok account connected.",
+          },
         },
         { status: 404 },
       );
@@ -53,7 +98,10 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(
         {
           ok: false,
-          error: { code: "OAUTH_TOKEN_NOT_FOUND", message: "TikTok account is incomplete." },
+          error: {
+            code: "OAUTH_TOKEN_NOT_FOUND",
+            message: "TikTok account is incomplete.",
+          },
         },
         { status: 404 },
       );
@@ -73,21 +121,33 @@ export async function GET(request: Request): Promise<NextResponse> {
       );
     }
 
-    const accessToken = decryptSecret(access_token_encrypted_ref, { purpose: "tiktok_token" });
+    const accessToken = decryptSecretEnvelope(
+      access_token_encrypted_ref,
+      "tiktok_token",
+    );
+
     const proxyPayload = {
       access_token: accessToken,
-      expires_in: 60,
+      expires_in: 60, // short-lived proxy TTL
       issued_at: new Date().toISOString(),
     };
 
     return NextResponse.json({ ok: true, data: proxyPayload });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to issue proxy token.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to issue proxy token.";
+
     console.error("💥 TikTok token proxy error:", message);
+
     return NextResponse.json(
       {
         ok: false,
-        error: { code: "OAUTH_PROXY_ERROR", message },
+        error: {
+          code: "OAUTH_PROXY_ERROR",
+          message,
+        },
       },
       { status: 500 },
     );

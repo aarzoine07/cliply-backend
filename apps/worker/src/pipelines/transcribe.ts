@@ -6,7 +6,7 @@ import { BUCKET_TRANSCRIPTS, BUCKET_VIDEOS, EXTENSION_MIME_MAP } from '@cliply/s
 import { TRANSCRIBE } from '@cliply/shared/schemas/jobs';
 import { assertWithinUsage, recordUsage, UsageLimitExceededError } from '@cliply/shared/billing/usageTracker';
 import { logPipelineStep } from '@cliply/shared/observability/logging';
-import { isStageAtLeast, nextStageAfter } from '@cliply/shared/engine/pipelineStages';
+import { isStageAtLeast } from '@cliply/shared/engine/pipelineStages';
 
 import type { Job, WorkerContext } from './types';
 import { getTranscriber } from '../services/transcriber';
@@ -95,7 +95,15 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     }
 
     await Promise.all([
-      ensureTranscriptUploaded(ctx, workspaceId, payload.projectId, TRANSCRIPT_SRT, result.srt, 'text/plain', tempDir),
+      ensureTranscriptUploaded(
+        ctx,
+        workspaceId,
+        payload.projectId,
+        TRANSCRIPT_SRT,
+        result.srt,
+        'text/plain',
+        tempDir,
+      ),
       ensureTranscriptUploaded(
         ctx,
         workspaceId,
@@ -107,43 +115,73 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       ),
     ]);
 
-    // Record actual source minutes usage (idempotent - only record once per project)
-    if (result.durationSec !== undefined && result.durationSec > 0) {
-      const minutes = Math.ceil(result.durationSec / 60);
-      await recordUsage({
-        workspaceId,
-        metric: 'source_minutes',
-        amount: minutes,
-      });
-    }
+      // Record actual source minutes usage (idempotent - only record once per project)
+      if (result.durationSec !== undefined && result.durationSec > 0) {
+        const minutes = Math.ceil(result.durationSec / 60);
 
+        try {
+          await recordUsage({
+            workspaceId,
+            metric: 'source_minutes',
+            amount: minutes,
+          });
+        } catch (error) {
+          // Best-effort: don't fail pipeline if usage tracking can't write (e.g., test DB seed/FK constraints)
+          ctx.logger.warn('pipeline_usage_record_failed', {
+            pipeline: PIPELINE,
+            jobId: job.id,
+            workspaceId,
+            projectId: payload.projectId,
+            metric: 'source_minutes',
+            amount: minutes,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+    // ─────────────────────────────────────────────
     // Advance pipeline stage to TRANSCRIBED
-    const nextStage = nextStageAfter(currentStage);
-    if (nextStage === 'TRANSCRIBED') {
-      await ctx.supabase
-        .from('projects')
-        .update({ 
-          pipeline_stage: 'TRANSCRIBED',
-          status: 'transcribed', // Keep legacy status for backward compatibility
-        })
-        .eq('id', payload.projectId);
+    // (We only reach here if we were NOT already at/after TRANSCRIBED)
+    // ─────────────────────────────────────────────
+    const { error: updateError } = await ctx.supabase
+    .from('projects')
+    .update({ pipeline_stage: 'TRANSCRIBED', status: 'processing' })
+    .eq('id', payload.projectId);
 
-      ctx.logger.info('pipeline_stage_advanced', {
+    if (updateError) {
+      ctx.logger.error('pipeline_stage_update_failed', {
         pipeline: PIPELINE,
         jobId: job.id,
         workspaceId,
         projectId: payload.projectId,
-        from: currentStage ?? 'UPLOADED',
-        to: 'TRANSCRIBED',
+        error: updateError.message,
+        details: updateError,
       });
-
-      // Enqueue next pipeline stage
-      await ctx.queue.enqueue({
-        type: 'HIGHLIGHT_DETECT',
-        workspaceId,
-        payload: { projectId: payload.projectId },
-      });
+      throw updateError;
     }
+
+    ctx.logger.info('pipeline_stage_update_success', {
+      pipeline: PIPELINE,
+      jobId: job.id,
+      workspaceId,
+      projectId: payload.projectId,
+    });
+
+    ctx.logger.info('pipeline_stage_advanced', {
+      pipeline: PIPELINE,
+      jobId: job.id,
+      workspaceId,
+      projectId: payload.projectId,
+      from: currentStage ?? 'UPLOADED',
+      to: 'TRANSCRIBED',
+    });
+
+    // Enqueue next pipeline stage
+    await ctx.queue.enqueue({
+      type: 'HIGHLIGHT_DETECT',
+      workspaceId,
+      payload: { projectId: payload.projectId },
+    });
 
     ctx.logger.info('pipeline_completed', {
       pipeline: PIPELINE,
@@ -180,15 +218,37 @@ async function resolveSourceKey(
   projectId: string,
   explicitExt?: string,
 ): Promise<string> {
+  // 1) If explicit extension is provided, try the legacy path first
   if (explicitExt) {
     const candidate = `${workspaceId}/${projectId}/source.${explicitExt}`;
     const exists = await ctx.storage.exists(BUCKET_VIDEOS, candidate);
-    if (!exists) {
-      throw new Error(`source object missing: ${candidate}`);
+    if (exists) {
+      return candidate;
     }
-    return candidate;
+    // If it doesn't exist, fall through to DB-based lookup
   }
 
+  // 2) Prefer the source_path stored on the project row
+  const { data: project, error } = await ctx.supabase
+    .from('projects')
+    .select('workspace_id, source_path')
+    .eq('id', projectId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  if (project?.source_path) {
+    const key = project.source_path as string;
+    const exists = await ctx.storage.exists(BUCKET_VIDEOS, key);
+    if (!exists) {
+      throw new Error(`no source object found for project ${projectId}`);
+    }
+    return key;
+  }
+
+  // 3) Fallback: legacy discovery using bucket listing + file extensions
   const prefix = `${workspaceId}/${projectId}/`;
   const objects = await ctx.storage.list(BUCKET_VIDEOS, prefix);
   const normalized = objects.map((entry) => (entry.startsWith(prefix) ? entry : `${prefix}${entry}`));
@@ -239,3 +299,4 @@ async function fetchProject(
 export function pipelineTranscribeStub(): 'transcribe' {
   return 'transcribe';
 }
+

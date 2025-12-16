@@ -1,7 +1,7 @@
-/**
- * Pages Router plan gating helper for Next.js API routes
- * Works with buildAuthContext from @/lib/auth/context
- */
+// FILE: apps/web/src/lib/billing/withPlanGate.ts
+// Pages Router plan gating helper for Next.js API routes
+// Works with buildAuthContext from @/lib/auth/context
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import type { AuthContext } from "@cliply/shared/auth/context";
 import {
@@ -11,10 +11,26 @@ import {
   enforcePlanAccess,
 } from "@cliply/shared/billing/planGate";
 import type { PlanLimits } from "@cliply/shared/billing/planMatrix";
-import { AuthErrorCode, authErrorResponse, type PlanName } from "@cliply/shared/types/auth";
-import { err } from "@/lib/http";
+import {
+  AuthErrorCode,
+  type AuthErrorCode as AuthErrorCodeType,
+  authErrorResponse,
+  type PlanName,
+} from "@cliply/shared/types/auth";
 
 type ApiHandler = (req: NextApiRequest, res: NextApiResponse) => Promise<void>;
+
+/**
+ * Local helper to build billing-style error payloads using the auth error helper.
+ * This keeps runtime behavior the same while relaxing TypeScript's type expectations.
+ */
+function billingError(
+  code: string,
+  message: string,
+  status: number,
+) {
+  return authErrorResponse(code as AuthErrorCodeType, message, status);
+}
 
 /**
  * Wrap an API handler with plan gating based on a specific feature flag or limit.
@@ -31,7 +47,7 @@ type ApiHandler = (req: NextApiRequest, res: NextApiResponse) => Promise<void>;
  *     return;
  *   }
  *
- *   return withPlanGate(auth, 'uploads_per_day', async (req, res) => {
+ *   return withPlanGate(auth, "uploads_per_day", async (req, res) => {
  *     // Handler logic here
  *   })(req, res);
  * });
@@ -46,7 +62,7 @@ export function withPlanGate(
     // 1. Ensure auth context and plan are available before gating features.
     const plan = auth.plan;
     if (!plan) {
-      const payload = authErrorResponse(
+      const payload = billingError(
         BILLING_PLAN_REQUIRED,
         "No active plan found.",
         403,
@@ -57,12 +73,11 @@ export function withPlanGate(
     }
 
     // AuthContext.plan can be either a string PlanName or an object with planId.
-    // Help TypeScript by explicitly narrowing and casting the object case.
     const planName: PlanName =
       typeof plan === "string" ? (plan as PlanName) : (plan as any).planId;
 
     if (!planName) {
-      const payload = authErrorResponse(
+      const payload = billingError(
         BILLING_PLAN_REQUIRED,
         "No active plan found.",
         403,
@@ -80,7 +95,7 @@ export function withPlanGate(
         const status = code === BILLING_PLAN_LIMIT ? 429 : 403;
         const message =
           gate.message ?? `${String(feature)} not available on current plan.`;
-        const payload = authErrorResponse(code, message, status);
+        const payload = billingError(code, message, status);
         const httpStatus = payload.status ?? status;
         res.status(httpStatus).json({ ok: false, error: payload.error });
         return;
@@ -102,7 +117,7 @@ export function withPlanGate(
           const message =
             enforceError.message ??
             `${String(feature)} not available on current plan.`;
-          const payload = authErrorResponse(code, message, status);
+          const payload = billingError(code, message, status);
           const httpStatus = payload.status ?? status;
           res.status(httpStatus).json({ ok: false, error: payload.error });
           return;
@@ -114,7 +129,7 @@ export function withPlanGate(
       // 4. Delegate to the downstream handler when gating succeeds.
       await handler(req, res);
     } catch (error) {
-      // 5. Normalize unexpected failures into a billing internal error response.
+      // 5. Normalize unexpected failures into an INTERNAL_ERROR auth response.
       let message = "Plan gate failed unexpectedly.";
       if (error instanceof Error) {
         message = error.message;

@@ -26,13 +26,28 @@ ALTER TABLE public.connected_accounts
   ON DELETE CASCADE;
 
 -- Base unique constraints
-ALTER TABLE public.connected_accounts
-  ADD CONSTRAINT connected_accounts_provider_external_id_key
-  UNIQUE (provider, external_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'connected_accounts_provider_external_id_key'
+  ) THEN
+    ALTER TABLE public.connected_accounts
+      ADD CONSTRAINT connected_accounts_provider_external_id_key
+      UNIQUE (provider, external_id);
+  END IF;
+END$$;
 
-ALTER TABLE public.connected_accounts
-  ADD CONSTRAINT connected_accounts_workspace_platform_key
-  UNIQUE (workspace_id, platform);
+DO $$
+BEGIN
+  -- Guard on any existing relation (index or constraint) with this name
+  IF to_regclass('public.connected_accounts_workspace_platform_key') IS NULL THEN
+    ALTER TABLE public.connected_accounts
+      ADD CONSTRAINT connected_accounts_workspace_platform_key
+      UNIQUE (workspace_id, platform);
+  END IF;
+END$$;
 
 -- Index to support expiry-based cleanup / queries
 CREATE INDEX IF NOT EXISTS idx_connected_accounts_expires_at
@@ -43,7 +58,17 @@ ALTER TABLE public.connected_accounts
   ENABLE ROW LEVEL SECURITY;
 
 -- Basic updated_at trigger (later migrations may adjust, but this is safe base behavior)
-CREATE TRIGGER trg_connected_accounts_updated_at
-  BEFORE UPDATE ON public.connected_accounts
-  FOR EACH ROW
-  EXECUTE FUNCTION moddatetime('updated_at');
+-- Basic updated_at trigger (later migrations may adjust, but this is safe base behavior)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_connected_accounts_updated_at'
+  ) THEN
+    CREATE TRIGGER trg_connected_accounts_updated_at
+      BEFORE UPDATE ON public.connected_accounts
+      FOR EACH ROW
+      EXECUTE FUNCTION moddatetime('updated_at');
+  END IF;
+END$$;

@@ -79,26 +79,26 @@ describe("GET /api/admin/readyz", () => {
     expect(mockJson).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
-        error: "Method not allowed",
+        error: { message: "method_not_allowed" },
       }),
     );
   });
 
-  it("returns 503 on fatal error", async () => {
+  it("returns 500 on fatal error", async () => {
     (buildBackendReadinessReport as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Fatal error"),
     );
 
     await adminReadyzHandler(mockReq as NextApiRequest, mockRes as NextApiResponse);
 
-    expect(mockStatus).toHaveBeenCalledWith(503);
+    expect(mockStatus).toHaveBeenCalledWith(500);
     expect(mockJson).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
-        fatal: true,
-        error: "Fatal error",
+        error: { message: "internal_error" },
       }),
     );
   });
 });
+
 

@@ -46,10 +46,14 @@ Push-Location "server"
 $prismaV = (& pnpm prisma -v) 2>&1
 $prismaG = (& pnpm prisma generate) 2>&1
 $prismaS = (& pnpm prisma migrate status) 2>&1
-# --- Final migrate flag ---
-$migrateFlag = "FAIL"
-if (($prismaS -join $newline) -match "Database schema is up to date|No pending migrations|Following migration") { $migrateFlag = "PASS" }
-elseif ($migrateSqlPass) { $migrateFlag = "PASS" }
+# --- Final migrate flag ---
+
+$migrateFlag = "FAIL"
+
+if (($prismaS -join $newline) -match "Database schema is up to date|No pending migrations|Following migration") { $migrateFlag = "PASS" }
+
+elseif ($migrateSqlPass) { $migrateFlag = "PASS" }
+
 Add-Section "Prisma & Migrations" ( ($prismaV -join $newline) + "$newline---$newline" + ($prismaG -join $newline) + "$newline---$newline" + ($prismaS -join $newline))
 
 # 7) Supabase CLI
@@ -67,32 +71,58 @@ Add-Section "FFmpeg/ffprobe" ($ffmpeg + $newline + $ffprobe)
 Push-Location "server"
 $build = (& pnpm build) 2>&1
 Add-Section "Build" ($build -join $newline)
-$ports = 3001,3000,8787
-$detected = "unknown"
-foreach ($p in $ports) {
-  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
-  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
-}
-if ($detected -eq "unknown") {
-  $log = Join-Path $env:TEMP "cliply-snap-dev.log"
-  if (Test-Path $log) { Remove-Item $log -Force }
-  $repoDir = (Get-Location).Path
-  if ((Split-Path $repoDir -Leaf) -eq 'server') { $repoDir = Split-Path $repoDir -Parent }
-  $job = Start-Job -ScriptBlock {
-    param($dir,$logPath)
-    Set-Location $dir
-    $env:PORT = 3001
-    pnpm run dev:web *>> $logPath
-  } -ArgumentList $repoDir,$log
-  for ($i=0;$i -lt 12;$i++){
-    Start-Sleep 1
-    try { $r = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "3001"; break } } catch {}
-  }
-  try { Stop-Job $job -Force -ErrorAction SilentlyContinue } catch {}
-  try { Receive-Job $job -ErrorAction SilentlyContinue | Out-Null } catch {}
-  try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
-}
-Add-Section "Dev server" ("DETECTED_PORT=$detected")
+$ports = 3001,3000,8787
+
+$detected = "unknown"
+
+foreach ($p in $ports) {
+
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/api/health" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+
+  try { $r = Invoke-WebRequest -Uri ("http://localhost:{0}/" -f $p) -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "$p"; break } } catch {}
+
+}
+
+if ($detected -eq "unknown") {
+
+  $log = Join-Path $env:TEMP "cliply-snap-dev.log"
+
+  if (Test-Path $log) { Remove-Item $log -Force }
+
+  $repoDir = (Get-Location).Path
+
+  if ((Split-Path $repoDir -Leaf) -eq 'server') { $repoDir = Split-Path $repoDir -Parent }
+
+  $job = Start-Job -ScriptBlock {
+
+    param($dir,$logPath)
+
+    Set-Location $dir
+
+    $env:PORT = 3001
+
+    pnpm run dev:web *>> $logPath
+
+  } -ArgumentList $repoDir,$log
+
+  for ($i=0;$i -lt 12;$i++){
+
+    Start-Sleep 1
+
+    try { $r = Invoke-WebRequest -Uri "http://localhost:3001/api/health" -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode) { $detected = "3001"; break } } catch {}
+
+  }
+
+  try { Stop-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+
+  try { Receive-Job $job -ErrorAction SilentlyContinue | Out-Null } catch {}
+
+  try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
+
+}
+
+Add-Section "Dev server" ("DETECTED_PORT=$detected")
+
 
 
 # 10) Health

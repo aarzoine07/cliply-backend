@@ -1,6 +1,8 @@
 ﻿// C2: YouTube OAuth start endpoint
 import type { NextApiRequest, NextApiResponse } from 'next';
 
+import { getEnv } from '@cliply/shared/env';
+
 import { handler, ok, err } from '@/lib/http';
 import { logger } from '@/lib/logger';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -26,7 +28,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
       return;
     }
 
-    // ✅ New: make sure userId is present and narrow its type to `string`
     if (!userId) {
       logger.warn('oauth_google_start_missing_user', {
         workspaceId,
@@ -39,11 +40,28 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
     await checkRateLimit(userId, 'oauth:google:start');
 
-    const redirectUri = req.query.redirect_uri as string | undefined;
+    // Enforce a single redirect URI (must match the one used during token exchange in the callback)
+    const env = getEnv();
+    const configuredRedirect = env.YOUTUBE_OAUTH_REDIRECT_URL;
+
+    const requestedRedirect = req.query.redirect_uri as string | undefined;
+    if (requestedRedirect && configuredRedirect && requestedRedirect !== configuredRedirect) {
+      logger.warn('oauth_google_start_redirect_uri_mismatch', {
+        workspaceId,
+        userId,
+        requestedRedirect,
+        configuredRedirect,
+        durationMs: Date.now() - started,
+      });
+
+      res.status(400).json(err('invalid_request', 'redirect_uri mismatch'));
+      return;
+    }
+
     const authUrl = buildYouTubeAuthUrl({
       workspaceId,
-      userId,
-      redirectUri,
+      userId: String(userId),
+      redirectUri: configuredRedirect,
     });
 
     logger.info('oauth_google_start', {
@@ -54,7 +72,6 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
     res.status(200).json(ok({ url: authUrl }));
   } catch (error) {
-    // Handle auth errors
     if (error && typeof error === 'object' && 'code' in error && 'status' in error) {
       handleAuthError(error, res);
       return;

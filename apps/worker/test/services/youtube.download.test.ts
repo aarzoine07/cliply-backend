@@ -26,12 +26,18 @@ describe("youtube download service", () => {
   let tempDir: string;
 
   beforeEach(async () => {
+    // IMPORTANT: restore spies (mkdtemp/readdir/stat/rm) so they don't leak across tests
+    vi.restoreAllMocks();
     vi.clearAllMocks();
-    // Create a temp directory for each test
+
+    // Create a temp directory for each test using the REAL mkdtemp
     tempDir = await fs.mkdtemp(join(tmpdir(), "cliply-test-"));
   });
 
   afterEach(async () => {
+    // Ensure cleanup uses real fs methods (not mocked)
+    vi.restoreAllMocks();
+
     // Clean up temp directory
     if (tempDir) {
       try {
@@ -76,10 +82,13 @@ describe("youtube download service", () => {
 
     expect(result.localPath).toBe(videoPath);
     expect(result.sizeBytes).toBe(mockVideoContent.length);
-    expect(ytDlp).toHaveBeenCalledWith(YOUTUBE_URL, expect.objectContaining({
-      output: expect.stringContaining("video.%(ext)s"),
-      format: expect.any(String),
-    }));
+    expect(ytDlp).toHaveBeenCalledWith(
+      YOUTUBE_URL,
+      expect.objectContaining({
+        output: expect.stringContaining("video.%(ext)s"),
+        format: expect.any(String),
+      }),
+    );
   });
 
   it("handles download failure and cleans up", async () => {
@@ -162,9 +171,12 @@ describe("youtube download service", () => {
 
   it("handles different video file extensions", async () => {
     const extensions = ["mp4", "webm", "mkv"];
-    
+
     for (const ext of extensions) {
+      // IMPORTANT: restore spies each iteration so mkdtemp/readdir/stat don't leak between loop runs
+      vi.restoreAllMocks();
       vi.clearAllMocks();
+
       const videoFileName = `video.${ext}`;
       const videoPath = join(tempDir, videoFileName);
       const mockContent = Buffer.from(`fake ${ext} content`);
@@ -178,6 +190,7 @@ describe("youtube download service", () => {
         _filename: videoFileName,
         title: "Test Video",
       } as unknown);
+
       vi.spyOn(fs, "readdir").mockResolvedValue([videoFileName]);
       vi.spyOn(fs, "stat").mockResolvedValue({
         size: mockContent.length,
@@ -197,4 +210,3 @@ describe("youtube download service", () => {
     }
   });
 });
-

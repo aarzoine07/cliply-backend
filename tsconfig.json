@@ -14,8 +14,6 @@
     "baseUrl": ".",
 
     "paths": {
-      "@cliply/shared": ["packages/shared/dist/index.js"],
-      "@cliply/shared/*": ["packages/shared/dist/*"],
       "@cliply/generated/*": ["supabase/*"]
     }
   },
@@ -24,4 +22,3 @@
     { "path": "./apps/worker" }
   ]
 }
-

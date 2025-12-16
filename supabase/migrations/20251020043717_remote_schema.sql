@@ -499,9 +499,31 @@ alter table "public"."workspace_members" alter column "role" set not null;
 
 alter table "public"."workspace_members" alter column "workspace_id" set not null;
 
-alter table "public"."workspaces" add column "org_id" uuid;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'workspaces'
+      AND column_name = 'org_id'
+  ) THEN
+    ALTER TABLE public.workspaces ADD COLUMN org_id uuid;
+  END IF;
+END$$;
 
-alter table "public"."workspaces" add column "owner_id" uuid not null;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'workspaces'
+      AND column_name = 'owner_id'
+  ) THEN
+    ALTER TABLE public.workspaces ADD COLUMN owner_id uuid not null;
+  END IF;
+END$$;
 
 alter table "public"."workspaces" alter column "created_at" set not null;
 

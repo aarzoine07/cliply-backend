@@ -45,7 +45,49 @@ function createMockSupabase() {
     subscriptions,
     from: vi.fn((table: string) => {
       if (table === "subscriptions") {
+        const upsert = vi.fn(async (data: unknown, options?: unknown) => {
+          const subData = data as typeof subscriptions[0];
+          const existingIndex = subscriptions.findIndex(
+            (s) =>
+              s.workspace_id === subData.workspace_id &&
+              s.stripe_subscription_id === subData.stripe_subscription_id,
+          );
+          if (existingIndex >= 0) {
+            subscriptions[existingIndex] = { ...subscriptions[existingIndex], ...subData };
+          } else {
+            subscriptions.push(subData);
+          }
+          return { error: null };
+        });
+
+        const update = vi.fn((data: unknown) => ({
+          eq: vi.fn(async (column: string, value: unknown) => {
+            const index = subscriptions.findIndex(
+              (s) => s[column as keyof typeof subscriptions[0]] === value,
+            );
+            if (index >= 0) {
+              subscriptions[index] = { ...subscriptions[index], ...(data as object) };
+            }
+            return { error: null };
+          }),
+        }));
+
+        const del = vi.fn(() => ({
+          eq: vi.fn(async (column: string, value: unknown) => {
+            const index = subscriptions.findIndex(
+              (s) => s[column as keyof typeof subscriptions[0]] === value,
+            );
+            if (index >= 0) {
+              subscriptions.splice(index, 1);
+            }
+            return { error: null };
+          }),
+        }));
+
         return {
+          upsert,
+          update,
+          delete: del,
           select: vi.fn((columns: string) => ({
             eq: vi.fn((column: string, value: unknown) => ({
               in: vi.fn((column: string, values: unknown[]) => ({
@@ -67,52 +109,19 @@ function createMockSupabase() {
                 return { data: sub ?? null, error: null };
               }),
             })),
-            upsert: vi.fn(async (data: unknown, options?: unknown) => {
-              const subData = data as typeof subscriptions[0];
-              const existingIndex = subscriptions.findIndex(
-                (s) =>
-                  s.workspace_id === subData.workspace_id &&
-                  s.stripe_subscription_id === subData.stripe_subscription_id,
-              );
-              if (existingIndex >= 0) {
-                subscriptions[existingIndex] = { ...subscriptions[existingIndex], ...subData };
-              } else {
-                subscriptions.push(subData);
-              }
-              return { error: null };
-            }),
-            update: vi.fn((data: unknown) => ({
-              eq: vi.fn(async (column: string, value: unknown) => {
-                const index = subscriptions.findIndex(
-                  (s) => s[column as keyof typeof subscriptions[0]] === value,
-                );
-                if (index >= 0) {
-                  subscriptions[index] = { ...subscriptions[index], ...(data as object) };
-                }
-                return { error: null };
-              }),
-            })),
-            delete: vi.fn(() => ({
-              eq: vi.fn(async (column: string, value: unknown) => {
-                const index = subscriptions.findIndex(
-                  (s) => s[column as keyof typeof subscriptions[0]] === value,
-                );
-                if (index >= 0) {
-                  subscriptions.splice(index, 1);
-                }
-                return { error: null };
-              }),
-            })),
+            upsert,
+            update,
+            delete: del,
           })),
         };
       }
+
       return {
         select: vi.fn(() => ({ eq: vi.fn(() => ({ data: null, error: null })) })),
       };
     }),
   };
 }
-
 function createMockStripe() {
   return {
     subscriptions: {

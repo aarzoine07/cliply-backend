@@ -1,13 +1,15 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
+import type { NextApiRequest, NextApiResponse } from "next";
 
-import { CreateConnectedAccountInput, ConnectedAccountPlatform } from '@cliply/shared/schemas/accounts';
+import {
+  CreateConnectedAccountInput,
+  ConnectedAccountPlatform,
+} from "@cliply/shared/schemas/accounts";
 
-import { HttpError } from '@/lib/errors';
-import { handler, ok, err } from '@/lib/http';
-import { logger } from '@/lib/logger';
-import { getAdminClient } from '@/lib/supabase';
-import * as connectedAccountsService from '@/lib/accounts/connectedAccountsService';
-import { buildAuthContext, handleAuthError } from '@/lib/auth/context';
+import { handler, ok, err } from "@/lib/http";
+import { logger } from "@/lib/logger";
+import { getRlsClient } from "@/lib/supabase";
+import * as connectedAccountsService from "@/lib/accounts/connectedAccountsService";
+import { buildAuthContext, handleAuthError } from "@/lib/auth/context";
 
 export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   let auth;
@@ -18,21 +20,45 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const userId = auth.userId || auth.user_id;
-  const workspaceId = auth.workspaceId || auth.workspace_id;
+  const userId = (auth as any).userId || (auth as any).user_id;
+  const workspaceId = (auth as any).workspaceId || (auth as any).workspace_id;
 
   if (!workspaceId) {
-    res.status(400).json(err('invalid_request', 'workspace required'));
+    res.status(400).json(err("invalid_request", "workspace required"));
     return;
   }
 
-  const supabase = getAdminClient();
+  // Prefer the prebuilt RLS client from auth context (used by test harness).
+  // Fallback to building an RLS client from an access token (prod path).
+  const supabaseFromAuth = (auth as any).supabase;
+  const accessToken =
+    typeof (auth as any).accessToken === "string"
+      ? (auth as any).accessToken
+      : typeof (auth as any).access_token === "string"
+        ? (auth as any).access_token
+        : typeof (auth as any).session?.access_token === "string"
+          ? (auth as any).session.access_token
+          : typeof (auth as any).session?.accessToken === "string"
+            ? (auth as any).session.accessToken
+            : null;
 
-  if (req.method === 'GET') {
+  const supabase =
+    supabaseFromAuth && typeof supabaseFromAuth.from === "function"
+      ? supabaseFromAuth
+      : accessToken
+        ? getRlsClient(accessToken)
+        : null;
+
+  if (!supabase) {
+    res.status(401).json(err("unauthorized", "Missing access token"));
+    return;
+  }
+
+  if (req.method === "GET") {
     try {
       const platform = req.query.platform as ConnectedAccountPlatform | undefined;
       if (platform && !ConnectedAccountPlatform.safeParse(platform).success) {
-        res.status(400).json(err('invalid_request', 'Invalid platform'));
+        res.status(400).json(err("invalid_request", "Invalid platform"));
         return;
       }
 
@@ -44,7 +70,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         { supabase },
       );
 
-      logger.info('accounts_listed', {
+      logger.info("accounts_listed", {
         workspaceId,
         platform,
         count: accounts.length,
@@ -52,29 +78,31 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
       res.status(200).json(ok({ accounts }));
     } catch (error) {
-      logger.error('accounts_list_failed', {
+      logger.error("accounts_list_failed", {
         workspaceId,
-        message: (error as Error)?.message ?? 'unknown',
+        message: (error as Error)?.message ?? "unknown",
       });
-      res.status(500).json(err('internal_error', 'Failed to list accounts'));
+      res.status(500).json(err("internal_error", "Failed to list accounts"));
     }
     return;
   }
 
-  if (req.method === 'POST') {
+  if (req.method === "POST") {
     let body: unknown = req.body;
-    if (typeof body === 'string') {
+    if (typeof body === "string") {
       try {
         body = JSON.parse(body);
       } catch {
-        res.status(400).json(err('invalid_request', 'Invalid JSON payload'));
+        res.status(400).json(err("invalid_request", "Invalid JSON payload"));
         return;
       }
     }
 
     const parsed = CreateConnectedAccountInput.safeParse(body);
     if (!parsed.success) {
-      res.status(400).json(err('invalid_request', 'Invalid payload', parsed.error.flatten()));
+      res
+        .status(400)
+        .json(err("invalid_request", "Invalid payload", parsed.error.flatten()));
       return;
     }
 
@@ -88,7 +116,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
         { supabase },
       );
 
-      logger.info('account_created_or_updated', {
+      logger.info("account_created_or_updated", {
         workspaceId,
         accountId: account.id,
         platform: account.platform,
@@ -96,17 +124,17 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
       res.status(200).json(ok(account));
     } catch (error) {
-      logger.error('account_create_failed', {
+      logger.error("account_create_failed", {
         workspaceId,
-        message: (error as Error)?.message ?? 'unknown',
+        message: (error as Error)?.message ?? "unknown",
       });
-      res.status(500).json(err('internal_error', 'Failed to create or update account'));
+      res
+        .status(500)
+        .json(err("internal_error", "Failed to create or update account"));
     }
     return;
   }
 
-  res.setHeader('Allow', 'GET, POST');
-  res.status(405).json(err('method_not_allowed', 'Method not allowed'));
+  res.setHeader("Allow", "GET, POST");
+  res.status(405).json(err("method_not_allowed", "Method not allowed"));
 });
-
-

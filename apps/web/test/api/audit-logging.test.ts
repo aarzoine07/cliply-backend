@@ -6,6 +6,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { resetDatabase } from "@cliply/shared/test/setup";
 import { logAuditEvent } from "@cliply/shared/logging/audit";
 
+// apps/web/test/api/audit-logging.test.ts
+
 const dotenv = require("dotenv");
 
 // Load .env.test
@@ -23,7 +25,9 @@ const client = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 
 // Seeded IDs
 const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-const ACTOR_ID = "00000000-0000-0000-0000-000000000002";
+
+// NOTE: actor is resolved dynamically from the database to satisfy FK
+let ACTOR_ID: string | null = null;
 
 // Valid UUIDs ONLY — must match seed.sql
 const TARGET_ID = "00000000-0000-0000-0000-000000000003";
@@ -32,6 +36,24 @@ const BILLING_TARGET_ID = "00000000-0000-0000-0000-000000000301";
 describe("🧩 Audit Logging", () => {
   beforeAll(async () => {
     await resetDatabase?.();
+
+    // Resolve a real user from the seeded database so FK passes
+    const { data: users, error } = await client
+      .from("users")
+      .select("id")
+      .limit(1);
+
+    if (error) {
+      console.error("Failed to load user for ACTOR_ID in audit tests", error);
+      throw error;
+    }
+
+    if (!users || users.length === 0) {
+      throw new Error("No users found in database for audit logging tests");
+    }
+
+    ACTOR_ID = users[0].id;
+    console.log("✅ Using ACTOR_ID for audit tests:", ACTOR_ID);
   });
 
   it("inserts audit event into events_audit table", async () => {
@@ -106,3 +128,4 @@ describe("🧩 Audit Logging", () => {
     expect(event?.payload?.meta?.status).toBe("active");
   });
 });
+

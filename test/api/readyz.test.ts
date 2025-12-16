@@ -1,105 +1,96 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// FILE: test/api/readyz.test.ts
 
-import readyzRoute from '../../apps/web/src/pages/api/readyz';
-import { supertestHandler } from '../utils/supertest-next';
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import readyzRoute from "../../apps/web/src/pages/api/readyz";
+import { supertestHandler } from "../utils/supertest-next";
 
-// Mock the modules before importing them
-vi.mock('@cliply/shared/health/readyChecks.js', () => ({
-  checkEnvForApi: vi.fn(),
-  checkSupabaseConnection: vi.fn(),
+vi.mock("@cliply/shared/readiness/backendReadiness", () => ({
+  buildBackendReadinessReport: vi.fn(),
 }));
 
-vi.mock('../../apps/web/src/lib/supabase', () => ({
-  getAdminClient: vi.fn(),
-}));
+import { buildBackendReadinessReport } from "@cliply/shared/readiness/backendReadiness";
 
-import { checkEnvForApi, checkSupabaseConnection } from '@cliply/shared/health/readyChecks.js';
-import { getAdminClient } from '../../apps/web/src/lib/supabase';
+const toApiHandler = (handler: typeof readyzRoute) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
 
-const toApiHandler = (handler: typeof readyzRoute) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
-
-describe('GET /api/readyz', () => {
+describe("GET /api/readyz (legacy contract)", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
-  it('returns 200 when all checks pass', async () => {
-    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
-    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
-    vi.mocked(getAdminClient).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue({ error: null }),
-        }),
-      }),
-    } as any);
+  it("returns 200 when all checks pass", async () => {
+    vi.mocked(buildBackendReadinessReport).mockResolvedValue({
+      ok: true,
+      checks: {
+        env: { ok: true },
+        db: { ok: true },
+        worker: { ok: true },
+      },
+      queue: {
+        length: 1,
+        oldestJobAge: 3000,
+        warning: false,
+      },
+      ffmpeg: {
+        ok: true,
+      },
+    });
 
-    const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
+    const res = await supertestHandler(toApiHandler(readyzRoute), "get").get(
+      "/",
+    );
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('ok', true);
-    expect(res.body).toHaveProperty('service', 'api');
-    expect(res.body).toHaveProperty('checks');
-    expect(res.body.checks).toHaveProperty('env', true);
-    expect(res.body.checks).toHaveProperty('db', true);
-    expect(res.body).toHaveProperty('ts');
+    expect(res.body).toHaveProperty("ok", true);
+    expect(res.body).toHaveProperty("checks");
+    expect(res.body).toHaveProperty("queue");
+    expect(res.body).toHaveProperty("ffmpeg");
+    expect(res.body.queue).toHaveProperty("length", 1);
+    expect(res.body.queue).toHaveProperty("oldestJobAge", 3000);
   });
 
-  it('returns 503 when env check fails', async () => {
-    vi.mocked(checkEnvForApi).mockReturnValue({
+  it("returns 503 when database check fails", async () => {
+    vi.mocked(buildBackendReadinessReport).mockResolvedValue({
       ok: false,
-      missing: ['SUPABASE_URL'],
+      checks: {
+        env: { ok: true },
+        db: { ok: false, message: "Connection timeout" },
+        worker: { ok: true },
+      },
+      queue: {
+        length: 0,
+        oldestJobAge: null,
+        warning: false,
+      },
+      ffmpeg: {
+        ok: true,
+      },
     });
-    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
 
-    const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
+    const res = await supertestHandler(toApiHandler(readyzRoute), "get").get(
+      "/",
+    );
 
     expect(res.status).toBe(503);
-    expect(res.body).toHaveProperty('ok', false);
-    expect(res.body).toHaveProperty('checks');
-    expect(res.body.checks).toHaveProperty('env', false);
-    expect(res.body).toHaveProperty('errors');
-    expect(res.body.errors).toHaveProperty('env');
+    expect(res.body).toHaveProperty("ok", false);
+    expect(res.body.checks.db).toHaveProperty("ok", false);
+    expect(res.body.checks.db).toHaveProperty(
+      "message",
+      "Connection timeout",
+    );
   });
 
-  it('returns 503 when DB check fails', async () => {
-    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
-    vi.mocked(checkSupabaseConnection).mockResolvedValue({
-      ok: false,
-      error: 'connection_timeout',
-    });
-    vi.mocked(getAdminClient).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue({ error: null }),
-        }),
-      }),
-    } as any);
+  it("returns 500 on unexpected exception", async () => {
+    vi.mocked(buildBackendReadinessReport).mockRejectedValue(
+      new Error("boom"),
+    );
 
-    const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
+    const res = await supertestHandler(toApiHandler(readyzRoute), "get").get(
+      "/",
+    );
 
-    expect(res.status).toBe(503);
-    expect(res.body).toHaveProperty('ok', false);
-    expect(res.body).toHaveProperty('checks');
-    expect(res.body.checks).toHaveProperty('env', true);
-    expect(res.body.checks).toHaveProperty('db', false);
-    expect(res.body).toHaveProperty('errors');
-    expect(res.body.errors).toHaveProperty('db');
-  });
-
-  it('skips DB check in test mode', async () => {
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'test';
-
-    vi.mocked(checkEnvForApi).mockReturnValue({ ok: true });
-    vi.mocked(checkSupabaseConnection).mockResolvedValue({ ok: true });
-
-    const res = await supertestHandler(toApiHandler(readyzRoute), 'get').get('/');
-
-    expect(res.status).toBe(200);
-    expect(res.body.checks.db).toBe(true);
-
-    process.env.NODE_ENV = originalEnv;
+    expect(res.status).toBe(500);
+    expect(res.body).toHaveProperty("ok", false);
+    expect(res.body).toHaveProperty("error");
   });
 });
-

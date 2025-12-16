@@ -18,6 +18,52 @@
       "require": "./dist/env.js",
       "types": "./dist/env.d.ts"
     },
+
+    "./errorCodes": {
+    "import": "./dist/src/errorCodes.js",
+    "require": "./dist/src/errorCodes.js",
+    "types": "./dist/src/errorCodes.d.ts"
+    },
+
+    "./sentry": {
+      "import": "./dist/sentry.js",
+      "require": "./dist/sentry.js",
+      "types": "./dist/sentry.d.ts"
+    },
+
+      "./job-kinds": {
+      "import": "./dist/src/job-kinds.js",
+      "require": "./dist/src/job-kinds.js",
+      "types": "./dist/src/job-kinds.d.ts"
+    },
+
+    "./constants": {
+      "import": "./dist/src/constants.js",
+      "require": "./dist/src/constants.js",
+      "types": "./dist/src/constants.d.ts"
+    },
+
+    "./logging": {
+      "import": "./dist/logging/index.js",
+      "require": "./dist/logging/index.js",
+      "types": "./dist/logging/index.d.ts"
+    },
+    "./errors": {
+      "import": "./dist/src/errors.js",
+      "require": "./dist/src/errors.js",
+      "types": "./dist/src/errors.d.ts"
+    },
+    "./errors/*": {
+      "import": "./dist/src/errors/*.js",
+      "require": "./dist/src/errors/*.js",
+      "types": "./dist/src/errors/*.d.ts"
+    },
+    
+    "./test/setup": {
+      "import": "./test/setup.ts",
+      "require": "./test/setup.ts"
+    },
+
     "./auth/*": {
       "import": "./dist/src/auth/*.js",
       "require": "./dist/src/auth/*.js",
@@ -63,6 +109,11 @@
       "require": "./dist/src/storage/*.js",
       "types": "./dist/src/storage/*.d.ts"
     },
+    "./services/*": {
+      "import": "./dist/src/services/*.js",
+      "require": "./dist/src/services/*.js",
+      "types": "./dist/src/services/*.d.ts"
+    },
     "./schemas": {
       "import": "./dist/src/schemas.js",
       "require": "./dist/src/schemas.js",
@@ -92,6 +143,11 @@
       "import": "./dist/src/engine/*.js",
       "require": "./dist/src/engine/*.js",
       "types": "./dist/src/engine/*.d.ts"
+    },
+    "./idempotency/*": {
+      "import": "./dist/src/idempotency/*.js",
+      "require": "./dist/src/idempotency/*.js",
+      "types": "./dist/src/idempotency/*.d.ts"
     }
   },
 
@@ -111,5 +167,3 @@
     "stripe": "^19.2.0"
   }
 }
-
-

@@ -58,7 +58,7 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
         sourceKind: videoSource.kind,
       });
       throw new InvalidVideoUrlError(
-        `Only YouTube URLs are supported, got ${videoSource.kind}`,
+        `Invalid YouTube URL: Only YouTube URLs are supported, got ${videoSource.kind}`,
         youtubeUrl,
         "not_youtube",
       );
