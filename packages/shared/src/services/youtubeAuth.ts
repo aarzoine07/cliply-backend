@@ -1,5 +1,6 @@
 // C2: YouTube OAuth & token management service
 // Shared between web and worker for token refresh
+import { Buffer } from "node:buffer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getEnv } from "../env";
@@ -24,6 +25,59 @@ export interface YouTubeTokenData {
 export interface YouTubeChannelInfo {
   channelId: string;
   channelTitle: string;
+}
+
+/**
+ * Decrypt YouTube token from stored format.
+ * Supports:
+ * - App Router format: `enc:{base64url({v:1, p:purpose, d:data})}`
+ * - Plain tokens (for backward compatibility with Pages Router)
+ */
+function decryptYouTubeToken(stored: string): string {
+  if (!stored || typeof stored !== "string") {
+    throw new Error("decryptYouTubeToken: stored must be a non-empty string");
+  }
+
+  // Check for App Router format: enc:{base64url(...)}
+  if (stored.startsWith("enc:")) {
+    try {
+      const base64Data = stored.slice(4); // Remove "enc:" prefix
+      const decoded = Buffer.from(base64Data, "base64url").toString("utf8");
+      const parsed = JSON.parse(decoded) as { v?: number; p?: string; d?: string };
+      
+      if (parsed.v === 1 && parsed.d) {
+        return parsed.d; // Extract the data field
+      }
+      // If format doesn't match, fall through to return as-is
+    } catch (error) {
+      // If decoding fails, fall through to return as-is (backward compatibility)
+      logger.error("youtube_token_decrypt_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // For backward compatibility, return as-is (assumes plain token from Pages Router)
+  return stored;
+}
+
+/**
+ * Encrypt YouTube token using App Router format.
+ * Format: `enc:{base64url({v:1, p:purpose, d:data})}`
+ */
+function encryptYouTubeToken(plaintext: string, purpose: string): string {
+  if (!plaintext || typeof plaintext !== "string") {
+    throw new Error("encryptYouTubeToken: plaintext must be a non-empty string");
+  }
+
+  const envelope = {
+    v: 1,
+    p: purpose,
+    d: plaintext,
+  };
+  const json = JSON.stringify(envelope);
+  const base64 = Buffer.from(json, "utf8").toString("base64url");
+  return `enc:${base64}`;
 }
 
 /**
@@ -267,7 +321,8 @@ export async function getFreshYouTubeAccessToken(
   const needsRefresh = !expiresAt || expiresAt.getTime() < now.getTime() + 5 * 60 * 1000;
 
   if (!needsRefresh) {
-    return account.access_token_encrypted_ref; // Return existing token
+    // Decrypt and return existing token
+    return decryptYouTubeToken(account.access_token_encrypted_ref);
   }
 
   // Need to refresh
@@ -280,13 +335,18 @@ export async function getFreshYouTubeAccessToken(
     expiresAt: account.expires_at,
   });
 
-  const refreshed = await refreshYouTubeAccessToken(account.refresh_token_encrypted_ref);
+  // Decrypt refresh token before using it
+  const refreshTokenPlaintext = decryptYouTubeToken(account.refresh_token_encrypted_ref);
+  const refreshed = await refreshYouTubeAccessToken(refreshTokenPlaintext);
 
-  // Update account with new token
+  // Encrypt new access token before storing (matching App Router callback format)
+  const encryptedAccessToken = encryptYouTubeToken(refreshed.accessToken, "youtube_token");
+
+  // Update account with new encrypted token
   const { error: updateError } = await ctx.supabase
     .from("connected_accounts")
     .update({
-      access_token_encrypted_ref: refreshed.accessToken,
+      access_token_encrypted_ref: encryptedAccessToken,
       expires_at: refreshed.expiresAt,
       updated_at: new Date().toISOString(),
     })
@@ -305,6 +365,7 @@ export async function getFreshYouTubeAccessToken(
     newExpiresAt: refreshed.expiresAt,
   });
 
+  // Return plaintext token (ready for use in Authorization header)
   return refreshed.accessToken;
 }
 

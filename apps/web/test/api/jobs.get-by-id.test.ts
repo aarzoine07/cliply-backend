@@ -29,13 +29,13 @@ describe("GET /api/jobs/:id (in-process)", () => {
   beforeAll(async () => {
     await resetDatabase?.();
 
-    // 🔹 Insert a demo job with valid enum state
+    // 🔹 Insert a demo job with valid enum status
     const { data, error } = await client
       .from("jobs")
       .insert({
         workspace_id: WORKSPACE_ID,
         kind: KIND,
-        state: "queued", // ✅ valid state for constraint
+        status: "queued", // ✅ valid status for constraint
         payload: { clip: "demo" },
       })
       .select("id")

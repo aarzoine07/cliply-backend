@@ -1,12 +1,6 @@
 import { getEnv } from "../env";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// Re-export thresholds from backendReadiness for consistency
-export {
-  QUEUE_AGE_WARNING_MS,
-  QUEUE_AGE_HARD_FAIL_MS,
-} from "../readiness/backendReadiness";
-
 /**
  * Check if required environment variables for API are present
  */

@@ -1,5 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { getEnv } from '@cliply/shared/env';
+import type {
+  TikTokUploadParams,
+  TikTokUploadResult,
+  TikTokClientErrorCode,
+  TikTokClientErrorDetails,
+} from './types';
 
 export interface UploadVideoParams {
   filePath: string;
@@ -40,6 +47,81 @@ export class TikTokApiError extends Error {
   }
 }
 
+/**
+ * Maps a TikTokApiError to TikTokClientErrorDetails with appropriate error code.
+ */
+function mapTikTokApiErrorToErrorDetails(error: TikTokApiError): TikTokClientErrorDetails {
+  let code: TikTokClientErrorCode = 'UNKNOWN';
+
+  // Map HTTP status codes to error codes
+  if (error.status === 401) {
+    code = 'INVALID_TOKEN';
+  } else if (error.status === 403) {
+    // Could be insufficient scope or forbidden (account restrictions)
+    // Check error message/code for more specific classification
+    if (error.tiktokErrorCode?.toLowerCase().includes('scope') || 
+        error.tiktokErrorMessage?.toLowerCase().includes('scope')) {
+      code = 'INSUFFICIENT_SCOPE';
+    } else {
+      code = 'FORBIDDEN';
+    }
+  } else if (error.status === 429) {
+    code = 'RATE_LIMITED';
+  } else if (error.status === 400) {
+    // Could be bad request or upload URL expired
+    if (error.tiktokErrorCode?.toLowerCase().includes('expired') ||
+        error.tiktokErrorMessage?.toLowerCase().includes('expired')) {
+      code = 'UPLOAD_URL_EXPIRED';
+    } else {
+      code = 'BAD_REQUEST';
+    }
+  } else if (error.status === 404) {
+    code = 'PUBLISH_ID_NOT_FOUND';
+  } else if (error.status === 410) {
+    code = 'UPLOAD_URL_EXPIRED';
+  } else if (error.status >= 500) {
+    code = 'TIKTOK_5XX';
+  } else if (error.status === 408 || error.message.toLowerCase().includes('timeout')) {
+    code = 'TIMEOUT';
+  } else if (error.message.toLowerCase().includes('network') || 
+             error.message.toLowerCase().includes('connection')) {
+    code = 'TRANSIENT_NETWORK';
+  }
+
+  return {
+    code,
+    message: error.message,
+    httpStatus: error.status,
+    tiktokErrorCode: error.tiktokErrorCode,
+    tiktokErrorMessage: error.tiktokErrorMessage,
+    isRetryable: error.retryable,
+  };
+}
+
+/**
+ * Adapter from public UploadVideoParams to internal TikTokUploadParams.
+ * Note: workspaceId and connectedAccountId are not available in the current public API,
+ * so they are set to empty strings. These are primarily used for logging/telemetry.
+ */
+function mapToTikTokUploadParams(
+  params: UploadVideoParams,
+  workspaceId: string = '',
+  connectedAccountId: string = '',
+): TikTokUploadParams {
+  return {
+    workspaceId,
+    connectedAccountId,
+    videoPath: params.filePath,
+    caption: params.caption,
+    privacyLevel: params.privacyLevel,
+    // Defaults match current behavior in initUpload/publishVideo
+    disableDuet: false,
+    disableComment: false,
+    disableStitch: false,
+    videoCoverTimestampMs: 1000,
+  };
+}
+
 export class TikTokClient {
   private readonly accessToken: string;
   private readonly baseUrl: string;
@@ -65,28 +147,100 @@ export class TikTokClient {
    * 1. Initialize upload (get upload URL)
    * 2. Upload video file to the upload URL
    * 3. Publish video
+   * 
+   * Behavior is controlled by TIKTOK_UPLOAD_MODE env var:
+   * - "stub" (default): Returns fake post ID without network calls
+   * - "real": Calls TikTok Content Posting API
    */
   async uploadVideo(params: UploadVideoParams): Promise<UploadVideoResult> {
-    // Step 1: Initialize upload
-    const initResult = await this.initUpload(params);
-    const { upload_url, publish_id } = initResult;
+    // Check upload mode from environment
+    const env = getEnv();
+    const mode = env.TIKTOK_UPLOAD_MODE ?? "stub";
 
-    // Step 2: Upload video file
-    await this.uploadFile(upload_url, params.filePath);
+    // Real upload path: requires mode set to "real"
+    if (mode === "real") {
+      // Convert to internal params (workspaceId/connectedAccountId not available in public API)
+      const internalParams = mapToTikTokUploadParams(params);
 
-    // Step 3: Publish video
-    const publishResult = await this.publishVideo(publish_id, params);
+      // Perform upload using internal function that returns TikTokUploadResult
+      const result = await this.performTikTokUpload(internalParams);
 
+      // Convert result back to public API format
+      if (result.ok) {
+        return {
+          videoId: result.postId,
+          rawResponse: { video_id: result.postId, publishedAt: result.publishedAt },
+        };
+      }
+
+      // Convert error result back to TikTokApiError to preserve existing behavior
+      const errorDetails = result.error;
+      throw new TikTokApiError(
+        errorDetails.message,
+        errorDetails.httpStatus ?? 500,
+        {
+          tiktokErrorCode: errorDetails.tiktokErrorCode,
+          tiktokErrorMessage: errorDetails.tiktokErrorMessage,
+          retryable: errorDetails.isRetryable,
+        },
+      );
+    }
+
+    // Stub path: default and when mode is not "real"
+    const fakePostId = `dryrun_${randomUUID()}`;
     return {
-      videoId: publishResult.video_id,
-      rawResponse: publishResult,
+      videoId: fakePostId,
+      rawResponse: { video_id: fakePostId, publishedAt: null },
     };
   }
 
   /**
-   * Step 1: Initialize upload to get upload URL and publish ID
+   * Internal upload function that returns TikTokUploadResult.
+   * This is the new typed interface, but kept private to maintain public API compatibility.
    */
-  private async initUpload(params: UploadVideoParams): Promise<{
+  private async performTikTokUpload(params: TikTokUploadParams): Promise<TikTokUploadResult> {
+    try {
+      // Step 1: Initialize upload
+      const initResult = await this.initUploadInternal(params);
+      const { upload_url, publish_id } = initResult;
+
+      // Step 2: Upload video file
+      await this.uploadFile(upload_url, params.videoPath);
+
+      // Step 3: Publish video
+      const publishResult = await this.publishVideoInternal(publish_id, params);
+
+      return {
+        ok: true,
+        postId: publishResult.video_id,
+        publishedAt: null, // TikTok API doesn't return publishedAt in the response
+      };
+    } catch (error) {
+      // Convert TikTokApiError to TikTokUploadErrorResult
+      if (error instanceof TikTokApiError) {
+        return {
+          ok: false,
+          error: mapTikTokApiErrorToErrorDetails(error),
+        };
+      }
+
+      // For unexpected errors, wrap in UNKNOWN error code
+      return {
+        ok: false,
+        error: {
+          code: 'UNKNOWN',
+          message: error instanceof Error ? error.message : String(error),
+          isRetryable: false,
+        },
+      };
+    }
+  }
+
+  /**
+   * Step 1: Initialize upload to get upload URL and publish ID
+   * Internal version that uses TikTokUploadParams.
+   */
+  private async initUploadInternal(params: TikTokUploadParams): Promise<{
     upload_url: string;
     publish_id: string;
   }> {
@@ -96,10 +250,10 @@ export class TikTokClient {
       post_info: {
         title: params.caption || '',
         privacy_level: params.privacyLevel || 'PUBLIC_TO_EVERYONE',
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
+        disable_duet: params.disableDuet ?? false,
+        disable_comment: params.disableComment ?? false,
+        disable_stitch: params.disableStitch ?? false,
+        video_cover_timestamp_ms: params.videoCoverTimestampMs ?? 1000,
       },
       source_info: {
         source: 'FILE_UPLOAD',
@@ -184,10 +338,11 @@ export class TikTokClient {
 
   /**
    * Step 3: Publish the uploaded video
+   * Internal version that uses TikTokUploadParams.
    */
-  private async publishVideo(
+  private async publishVideoInternal(
     publishId: string,
-    params: UploadVideoParams,
+    params: TikTokUploadParams,
   ): Promise<{
     video_id: string;
   }> {
@@ -198,10 +353,10 @@ export class TikTokClient {
       post_info: {
         title: params.caption || '',
         privacy_level: params.privacyLevel || 'PUBLIC_TO_EVERYONE',
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
+        disable_duet: params.disableDuet ?? false,
+        disable_comment: params.disableComment ?? false,
+        disable_stitch: params.disableStitch ?? false,
+        video_cover_timestamp_ms: params.videoCoverTimestampMs ?? 1000,
       },
     };
 

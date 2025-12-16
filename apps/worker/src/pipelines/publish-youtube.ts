@@ -183,6 +183,8 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
     const tempPath = await ctx.storage.download("renders", downloadPath, downloadPath.split("/").pop() ?? "video.mp4");
 
     // Get fresh access token (refreshes if needed)
+    // Note: In "real" mode, YouTubeClient will fetch the token internally.
+    // We still fetch it here for backward compatibility, but pass supabase so client can use it.
     let accessToken: string;
     try {
       accessToken = await getFreshYouTubeAccessToken(payload.connectedAccountId, { supabase: ctx.supabase });
@@ -196,8 +198,10 @@ export async function run(job: Job<unknown>, ctx: WorkerContext): Promise<void> 
       throw new Error(`Failed to get YouTube access token: ${(error as Error)?.message ?? "unknown"}`);
     }
 
-    const youtube = new YouTubeClient({ accessToken });
+    const youtube = new YouTubeClient({ accessToken, supabase: ctx.supabase });
     const response = await youtube.uploadShort({
+      workspaceId: job.workspaceId,
+      connectedAccountId: payload.connectedAccountId,
       filePath: tempPath,
       title: payload.title ?? "Cliply Short",
       description: payload.description,

@@ -6,8 +6,10 @@
 
     "paths": {
       "@/*": ["src/*"],
-      "@cliply/shared": ["../../packages/shared/dist/index.js"],
-      "@cliply/shared/*": ["../../packages/shared/dist/*"]
+
+      // Next.js build: use compiled dist output (not src) to avoid bundling TS source
+      "@cliply/shared": ["../../packages/shared/dist/src/index"],
+      "@cliply/shared/*": ["../../packages/shared/dist/src/*"]
     },
 
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -38,8 +40,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "test/**/*.ts",
-    ".next/types/**/*.ts",
-    "types/**/*.d.ts"
+    ".next/types/**/*.ts"
   ],
 
   "exclude": [
@@ -48,3 +49,5 @@
     "**/.next/**"
   ]
 }
+
+

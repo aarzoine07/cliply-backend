@@ -69,6 +69,7 @@ export * from "./auth/context";
 export * from "./types/supabase";
 export * from "./types/auth";
 export * from "./types/billing";
+export * from "./types/health";
 
 // ─────────────────────────────────────────────
 // Database Types & Accessors

@@ -42,7 +42,7 @@ describe("GET /api/jobs/search (in-process)", () => {
     const inserts = Array.from({ length: 3 }).map((_, i) => ({
       workspace_id: WORKSPACE_ID,
       kind: "TRANSCRIBE",
-      state: "queued",
+      status: "queued",
       payload: { clip: "demo", testMarker, index: i },
     }));
 

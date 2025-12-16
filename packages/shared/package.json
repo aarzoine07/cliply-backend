@@ -14,9 +14,9 @@
       "types": "./dist/src/index.d.ts"
     },
     "./env": {
-      "import": "./dist/env.js",
-      "require": "./dist/env.js",
-      "types": "./dist/env.d.ts"
+      "import": "./dist/src/env.js",
+      "require": "./dist/src/env.js",
+      "types": "./dist/src/env.d.ts"
     },
 
     "./errorCodes": {
@@ -148,6 +148,11 @@
       "import": "./dist/src/idempotency/*.js",
       "require": "./dist/src/idempotency/*.js",
       "types": "./dist/src/idempotency/*.d.ts"
+    },
+    "./services/*": {
+      "import": "./dist/src/services/*.js",
+      "require": "./dist/src/services/*.js",
+      "types": "./dist/src/services/*.d.ts"
     }
   },
 

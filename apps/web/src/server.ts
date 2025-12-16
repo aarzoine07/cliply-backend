@@ -15,6 +15,11 @@ app.get("/api/_routes", (_req, res) => {
 });
 
 app.get("/api/health", async (_req, res) => {
+  // Set deprecation headers pointing to canonical liveness endpoint
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", "2026-03-01");
+  res.setHeader("Link", '</api/healthz>; rel="successor-version"');
+
   const payload: any = {
     ok: true,
     service: "api",

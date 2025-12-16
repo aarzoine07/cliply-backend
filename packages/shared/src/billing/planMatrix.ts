@@ -42,6 +42,15 @@ export interface PlanLimits extends PlanFeature {
    * the daily limits enforced by postingGuard (which are per-account, not per-workspace).
    */
   posts_per_month?: number;
+  /**
+   * Maximum posts per day per account (enforced by posting guard).
+   * Per-account, not per-workspace. Should be comfortably below posts_per_month.
+   */
+  posting_max_per_day?: number;
+  /**
+   * Minimum milliseconds between consecutive posts per account.
+   */
+  posting_min_interval_ms?: number;
 }
 
 /** Aggregate plan configuration combining feature flags and limits. */
@@ -72,6 +81,8 @@ export const PLAN_MATRIX: PlanMatrix = {
       clips_per_month: 450, // 5 uploads/day * 30 days * 3 clips/project
       projects_per_month: 150, // 5 uploads/day * 30 days
       posts_per_month: 300, // ~10 posts/day * 30 days (comfortably above postingGuard daily limit of 10)
+      posting_max_per_day: 10,
+      posting_min_interval_ms: 300_000, // 5 minutes
     },
   },
   /** Pro — small teams scaling their content workflows. */
@@ -91,6 +102,8 @@ export const PLAN_MATRIX: PlanMatrix = {
       clips_per_month: 10800, // 30 uploads/day * 30 days * 12 clips/project
       projects_per_month: 900, // 30 uploads/day * 30 days
       posts_per_month: 900, // ~30 posts/day * 30 days (comfortably above postingGuard daily limit of 30)
+      posting_max_per_day: 30,
+      posting_min_interval_ms: 120_000, // 2 minutes
     },
   },
   /** Premium — agencies managing multiple clients with high volume demands. */
@@ -110,6 +123,64 @@ export const PLAN_MATRIX: PlanMatrix = {
       clips_per_month: 180000, // 150 uploads/day * 30 days * 40 clips/project
       projects_per_month: 4500, // 150 uploads/day * 30 days
       posts_per_month: 1500, // ~50 posts/day * 30 days (comfortably above postingGuard daily limit of 50)
+      posting_max_per_day: 50,
+      posting_min_interval_ms: 60_000, // 1 minute
     },
   },
 } as const;
+
+/**
+ * Posting rate limits for an account.
+ * Matches the interface used by postingGuard.ts.
+ */
+export interface PostingLimits {
+  /** Maximum posts per 24-hour rolling window */
+  maxPerDay: number;
+  /** Minimum milliseconds between consecutive posts */
+  minIntervalMs: number;
+}
+
+/**
+ * Default posting limits by plan tier.
+ * Used as fallback when planMatrix fields are missing.
+ */
+const DEFAULT_LIMITS_BY_PLAN: Record<PlanName, PostingLimits> = {
+  basic: { maxPerDay: 10, minIntervalMs: 300_000 },
+  pro: { maxPerDay: 30, minIntervalMs: 120_000 },
+  premium: { maxPerDay: 50, minIntervalMs: 60_000 },
+};
+
+/**
+ * Returns posting limits for a given plan from the plan matrix.
+ * 
+ * @param planName - Plan tier: 'basic', 'pro', 'premium', or undefined
+ * @returns Posting limits for the plan, or default limits if plan not found
+ * 
+ * @example
+ * const limits = getPostingLimitsForPlan('pro');
+ * // { maxPerDay: 30, minIntervalMs: 120_000 }
+ */
+export function getPostingLimitsForPlan(planName?: PlanName): PostingLimits {
+  // Normalize planName: undefined/null/empty/unknown → 'basic'
+  const normalizedPlan: PlanName = 
+    planName && (planName === 'basic' || planName === 'pro' || planName === 'premium')
+      ? planName
+      : 'basic';
+
+  // Get default limits for the resolved plan
+  const defaultLimits = DEFAULT_LIMITS_BY_PLAN[normalizedPlan];
+
+  // Look up plan in PLAN_MATRIX
+  const plan = PLAN_MATRIX[normalizedPlan];
+  
+  if (!plan) {
+    // Plan not found in matrix, return defaults
+    return defaultLimits;
+  }
+
+  // Extract posting limits from plan, with fallback to defaults
+  return {
+    maxPerDay: plan.limits.posting_max_per_day ?? defaultLimits.maxPerDay,
+    minIntervalMs: plan.limits.posting_min_interval_ms ?? defaultLimits.minIntervalMs,
+  };
+}

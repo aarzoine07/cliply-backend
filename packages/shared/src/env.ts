@@ -39,6 +39,12 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   YOUTUBE_OAUTH_REDIRECT_URL: z.string().url().optional(),
+  YOUTUBE_UPLOAD_MODE: z
+    .enum(["stub", "real"])
+    .default("stub")
+    .describe(
+      "Controls YouTube uploads: 'stub' to generate fake video IDs (no network), 'real' to call YouTube Data API.",
+    ),
 
   // ─── TikTok OAuth (optional for test, required for production) ────────────────────────────
   TIKTOK_CLIENT_ID: z.string().optional(),
@@ -50,6 +56,12 @@ const EnvSchema = z.object({
     .min(1, "TIKTOK_ENCRYPTION_KEY is required for TikTok token encryption")
     .optional()
     .describe("Base64-encoded 32-byte key for encrypting TikTok tokens at rest"),
+  TIKTOK_UPLOAD_MODE: z
+    .enum(["stub", "real"])
+    .default("stub")
+    .describe(
+      "Controls TikTok uploads: 'stub' to generate fake post IDs (no network), 'real' to call TikTok Content Posting API.",
+    ),
 
   // ─── Cron & Automation ────────────────────────────────────────────────
   CRON_SECRET: z.string().optional(),
@@ -60,6 +72,7 @@ const EnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   NEXT_PUBLIC_TIKTOK_REDIRECT_URL: z.string().url().optional(),
+  NEXT_PUBLIC_YOUTUBE_REDIRECT_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
 });
