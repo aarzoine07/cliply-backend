@@ -91,6 +91,7 @@ export const supabaseTest =
 // ✅ Deterministic test IDs used by multiple test suites
 const TEST_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const TEST_OWNER_ID = "00000000-0000-0000-0000-000000000002";
+const TEST_WORKSPACE_WKA = "123e4567-e89b-12d3-a456-426614174000";
 
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
@@ -163,12 +164,20 @@ export async function resetDatabase() {
   const { error: wsError } = await supabaseTest
     .from("workspaces")
     .upsert(
-      {
-        id: TEST_WORKSPACE_ID,
-        name: "Test Workspace",
-        owner_id: TEST_OWNER_ID,
-        org_id: null,
-      },
+      [
+        {
+          id: TEST_WORKSPACE_ID,
+          name: "Test Workspace",
+          owner_id: TEST_OWNER_ID,
+          org_id: null,
+        },
+        {
+          id: TEST_WORKSPACE_WKA,
+          name: "Test Workspace A",
+          owner_id: TEST_OWNER_ID,
+          org_id: null,
+        },
+      ],
       { onConflict: "id" },
     );
 
