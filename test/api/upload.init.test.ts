@@ -1,26 +1,150 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as usageTracker from '@cliply/shared/billing/usageTracker';
+import * as usageTracker from '../../packages/shared/src/billing/usageTracker';
 import * as storage from '../../apps/web/src/lib/storage';
 import * as supabaseAdmin from '../../apps/web/src/lib/supabase';
 import uploadInit from '../../apps/web/src/pages/api/upload/init';
 import { supertestHandler } from '../utils/supertest-next';
 
-const commonHeaders = {
+// Mock Supabase createClient (used by RLS/auth context construction)
+const { mockSupabaseClientFactory } = vi.hoisted(() => ({
+  mockSupabaseClientFactory: vi.fn(),
+}));
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: mockSupabaseClientFactory,
+}));
+
+const toApiHandler = (handler: typeof uploadInit) =>
+  handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+
+// IMPORTANT: upload/init expects an auth-style header.
+// Keep x-debug-* AND Authorization.
+const commonHeaders: Record<string, string> = {
   'x-debug-user': '00000000-0000-0000-0000-000000000001',
   'x-debug-workspace': '11111111-1111-1111-1111-111111111111',
+  authorization: 'Bearer test-access-token',
 };
 
-type AdminMock = {
-  inserted: Array<Record<string, unknown>>;
+type SupabaseMock = {
+  inserted: Array<Record<string, any>>;
   rpc: ReturnType<typeof vi.fn>;
   from: ReturnType<typeof vi.fn>;
+  auth: {
+    getUser: ReturnType<typeof vi.fn>;
+  };
 };
 
-const toApiHandler = (handler: typeof uploadInit) => handler as unknown as (req: unknown, res: unknown) => Promise<void>;
+let _uuidCounter = 1;
+function nextUuid(): string {
+  const tail = String(_uuidCounter++).padStart(12, '0');
+  return `00000000-0000-0000-0000-${tail}`;
+}
+
+function makeInsertResult<T>(data: T) {
+  // Supabase-js queries are thenables; some code awaits the builder directly.
+  const result: any = {
+    data,
+    error: null,
+    select: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
+    then: (resolve: any) => Promise.resolve({ data, error: null }).then(resolve),
+    catch: (reject: any) => Promise.resolve({ data, error: null }).catch(reject),
+  };
+  return result;
+}
+
+function createSupabaseMock(): SupabaseMock {
+  const inserted: Array<Record<string, any>> = [];
+
+  const chain = () => {
+    const c: any = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn(),
+    };
+    return c;
+  };
+
+  const mock: SupabaseMock = {
+    inserted,
+    rpc: vi.fn().mockResolvedValue({ data: 10, error: null }),
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: commonHeaders['x-debug-user'] } },
+        error: null,
+      }),
+    },
+    from: vi.fn((table: string) => {
+      // membership lookup (auth context / workspace resolution)
+      if (table === 'workspace_members') {
+        const c = chain();
+        c.maybeSingle.mockResolvedValue({
+          data: { workspace_id: commonHeaders['x-debug-workspace'] },
+          error: null,
+        });
+        return c;
+      }
+
+      // plan resolution (safe default: no subscription -> basic/default)
+      if (table === 'subscriptions') {
+        const c = chain();
+        c.maybeSingle.mockResolvedValue({ data: null, error: null });
+        return c;
+      }
+
+      // upload/init inserts project via RLS client
+      if (table === 'projects') {
+        return {
+          insert: (payload: Record<string, any> | Array<Record<string, any>>) => {
+            const row = Array.isArray(payload)
+              ? { id: nextUuid(), ...(payload[0] ?? {}) }
+              : { id: nextUuid(), ...payload };
+
+            inserted.push(row);
+            return makeInsertResult(row);
+          },
+        };
+      }
+
+      // upload/init enqueues job via RLS client
+      if (table === 'jobs') {
+        return {
+          insert: (payload: Record<string, any> | Array<Record<string, any>>) => {
+            const rows = Array.isArray(payload) ? payload : [payload];
+            rows.forEach((r) => inserted.push(r));
+            return makeInsertResult(rows);
+          },
+        };
+      }
+
+      // safe default
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      };
+    }),
+  };
+
+  return mock;
+}
+
+function mockClients(client: SupabaseMock) {
+  // If the route calls admin client anywhere, point it at the same object.
+  vi.spyOn(supabaseAdmin, 'getAdminClient').mockReturnValue(client as never);
+
+  // RLS/auth client
+  mockSupabaseClientFactory.mockReturnValue(client as any);
+}
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  mockSupabaseClientFactory.mockClear();
+  _uuidCounter = 1;
 });
 
 describe('POST /api/upload/init', () => {
@@ -31,8 +155,9 @@ describe('POST /api/upload/init', () => {
   });
 
   it('file mode: returns signed upload info', async () => {
-    const admin = createAdminMock();
-    mockAdminClient(admin);
+    const client = createSupabaseMock();
+    mockClients(client);
+
     vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
     vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
     vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
@@ -53,11 +178,10 @@ describe('POST /api/upload/init', () => {
     expect(res.body.storagePath).toMatch(/^videos\//);
     expect(res.body.projectId).toMatch(/[0-9a-f\-]{36}/i);
 
-    // Verify usage was checked and recorded
     expect(usageTracker.assertWithinUsage).toHaveBeenCalled();
     expect(usageTracker.recordUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceId: '11111111-1111-1111-1111-111111111111',
+        workspaceId: commonHeaders['x-debug-workspace'],
         metric: 'projects',
         amount: 1,
       }),
@@ -65,8 +189,9 @@ describe('POST /api/upload/init', () => {
   });
 
   it('youtube mode: returns project id and enqueues download job', async () => {
-    const admin = createAdminMock();
-    mockAdminClient(admin);
+    const client = createSupabaseMock();
+    mockClients(client);
+
     vi.spyOn(usageTracker, 'assertWithinUsage').mockResolvedValue(undefined);
     vi.spyOn(usageTracker, 'recordUsage').mockResolvedValue(undefined);
 
@@ -82,10 +207,7 @@ describe('POST /api/upload/init', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.projectId).toMatch(/[0-9a-f\-]{36}/i);
 
-    // Verify that a YouTube download job was enqueued
-    const jobsInserted = admin.inserted.filter(
-      (item) => item.kind === 'YOUTUBE_DOWNLOAD',
-    );
+    const jobsInserted = client.inserted.filter((item) => item.kind === 'YOUTUBE_DOWNLOAD');
     expect(jobsInserted.length).toBe(1);
     expect(jobsInserted[0]).toMatchObject({
       kind: 'YOUTUBE_DOWNLOAD',
@@ -96,11 +218,10 @@ describe('POST /api/upload/init', () => {
       },
     });
 
-    // Verify usage was checked and recorded
     expect(usageTracker.assertWithinUsage).toHaveBeenCalled();
     expect(usageTracker.recordUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceId: '11111111-1111-1111-1111-111111111111',
+        workspaceId: commonHeaders['x-debug-workspace'],
         metric: 'projects',
         amount: 1,
       }),
@@ -108,8 +229,9 @@ describe('POST /api/upload/init', () => {
   });
 
   it('file mode: returns 429 when usage limit exceeded', async () => {
-    const admin = createAdminMock();
-    mockAdminClient(admin);
+    const client = createSupabaseMock();
+    mockClients(client);
+
     vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
     vi.spyOn(usageTracker, 'assertWithinUsage').mockRejectedValue(
       new usageTracker.UsageLimitExceededError('source_minutes', 150, 150),
@@ -121,7 +243,7 @@ describe('POST /api/upload/init', () => {
       .send({
         source: 'file',
         filename: 'demo.mp4',
-        size: 1024 * 1024 * 10, // 10MB
+        size: 1024 * 1024 * 10,
         mime: 'video/mp4',
       });
 
@@ -130,14 +252,14 @@ describe('POST /api/upload/init', () => {
     expect(res.body.error.code).toBe('usage_limit_exceeded');
     expect(res.body.error.metric).toBe('source_minutes');
 
-    // Verify no project was created
-    const projectsInserted = admin.inserted.filter((item) => item.id);
+    const projectsInserted = client.inserted.filter((item) => item.id);
     expect(projectsInserted.length).toBe(0);
   });
 
   it('youtube mode: returns 429 when usage limit exceeded', async () => {
-    const admin = createAdminMock();
-    mockAdminClient(admin);
+    const client = createSupabaseMock();
+    mockClients(client);
+
     vi.spyOn(usageTracker, 'assertWithinUsage').mockRejectedValue(
       new usageTracker.UsageLimitExceededError('projects', 150, 150),
     );
@@ -155,15 +277,13 @@ describe('POST /api/upload/init', () => {
     expect(res.body.error.code).toBe('usage_limit_exceeded');
     expect(res.body.error.metric).toBe('projects');
 
-    // Verify no project was created
-    const projectsInserted = admin.inserted.filter((item) => item.id);
+    const projectsInserted = client.inserted.filter((item) => item.id);
     expect(projectsInserted.length).toBe(0);
   });
 
   it('invalid payload -> 400', async () => {
-    const admin = createAdminMock();
-    mockAdminClient(admin);
-    vi.spyOn(storage, 'getSignedUploadUrl').mockResolvedValue('https://signed.example/upload');
+    const client = createSupabaseMock();
+    mockClients(client);
 
     const res = await supertestHandler(toApiHandler(uploadInit))
       .post('/')
@@ -174,45 +294,3 @@ describe('POST /api/upload/init', () => {
     expect(res.body.ok).toBe(false);
   });
 });
-
-function createAdminMock(): AdminMock {
-  const inserted: Array<Record<string, unknown>> = [];
-
-  const admin: AdminMock = {
-    inserted,
-    rpc: vi.fn().mockResolvedValue({ data: 10, error: null }),
-    from: vi.fn((table: string) => {
-      if (table === 'projects') {
-        return {
-          insert: (payload: Record<string, unknown>) => {
-            inserted.push(payload);
-            return {
-              select: () => ({
-                maybeSingle: async () => ({ data: payload, error: null }),
-              }),
-            };
-          },
-        };
-      }
-
-      if (table === 'jobs') {
-        return {
-          insert: (payload: Record<string, unknown>) => {
-            inserted.push(payload);
-            return {
-              error: null,
-            };
-          },
-        };
-      }
-
-      throw new Error(`Unexpected table: ${table}`);
-    }),
-  };
-
-  return admin;
-}
-
-function mockAdminClient(admin: AdminMock) {
-  vi.spyOn(supabaseAdmin, 'getAdminClient').mockReturnValue(admin as never);
-}

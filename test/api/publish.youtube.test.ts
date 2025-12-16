@@ -20,8 +20,9 @@ const mockAccountId1 = '223e4567-e89b-12d3-a456-426614174001';
 const mockAccountId2 = '323e4567-e89b-12d3-a456-426614174002';
 const mockWorkspaceId = '11111111-1111-1111-1111-111111111111';
 
-const mockExperimentId = 'exp-123';
-const mockVariantId = 'var-123';
+// Use UUID-shaped IDs to satisfy UUID schemas
+const mockExperimentId = '423e4567-e89b-12d3-a456-426614174003';
+const mockVariantId = '523e4567-e89b-12d3-a456-426614174004';
 
 function createAdminClient() {
   const clipsTable = {
@@ -63,15 +64,10 @@ function createAdminClient() {
 
   return {
     from: vi.fn().mockImplementation((table: string) => {
-      if (table === 'clips') {
-        return clipsTable;
-      }
-      if (table === 'jobs') {
-        return jobsTable;
-      }
-      if (table === 'idempotency') {
-        return idempotencyTable;
-      }
+      if (table === 'clips') return clipsTable;
+      if (table === 'jobs') return jobsTable;
+      if (table === 'idempotency') return idempotencyTable;
+
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
@@ -82,8 +78,11 @@ function createAdminClient() {
   };
 }
 
-function mockAdminClient(admin: ReturnType<typeof createAdminClient>) {
+function mockSupabaseClients(admin: ReturnType<typeof createAdminClient>) {
+  // Route uses getAdminClient() for job inserts and may use getRlsClient() for clip lookup.
+  // In unit tests, force BOTH to return our mocked client.
   vi.spyOn(supabase, 'getAdminClient').mockReturnValue(admin as any);
+  vi.spyOn(supabase, 'getRlsClient').mockImplementation(() => admin as any);
 }
 
 describe('POST /api/publish/youtube', () => {
@@ -95,6 +94,7 @@ describe('POST /api/publish/youtube', () => {
     const res = await supertestHandler(toApiHandler(publishYouTubeRoute))
       .post('/')
       .send({});
+
     expect(res.status).toBe(401);
     expect(res.body.ok).toBe(false);
   });
@@ -104,21 +104,22 @@ describe('POST /api/publish/youtube', () => {
       .post('/')
       .set(commonHeaders)
       .send({ clipId: 'invalid' });
+
     expect(res.status).toBe(400);
     expect(res.body.ok).toBe(false);
   });
 
   it('returns 404 when clip not found', async () => {
     const admin = createAdminClient();
+    mockSupabaseClients(admin);
+
     // Override default clip to simulate "not found"
     (admin.from('clips') as any).maybeSingle = vi.fn().mockResolvedValue({
       data: null,
       error: null,
     });
-    mockAdminClient(admin);
 
-    // Return at least one account so we hit the "clip not found" path,
-    // not the "no accounts" path.
+    // Return at least one account so we don't fail on "no accounts"
     vi.spyOn(
       connectedAccountsService,
       'getConnectedAccountsForPublish',
@@ -145,6 +146,7 @@ describe('POST /api/publish/youtube', () => {
       .send({
         clipId: mockClipId,
         visibility: 'public',
+        connectedAccountIds: [mockAccountId1],
       });
 
     expect(res.status).toBe(404);
@@ -153,7 +155,7 @@ describe('POST /api/publish/youtube', () => {
 
   it('enqueues single PUBLISH_YOUTUBE job for single account', async () => {
     const admin = createAdminClient();
-    mockAdminClient(admin);
+    mockSupabaseClients(admin);
 
     vi.spyOn(
       connectedAccountsService,
@@ -186,17 +188,16 @@ describe('POST /api/publish/youtube', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+
     expect(admin.from('jobs').insert).toHaveBeenCalledTimes(1);
     const insertCall = (admin.from('jobs').insert as any).mock.calls[0][0];
     expect(insertCall).toHaveLength(1);
-    expect(insertCall[0].payload.connectedAccountId).toBe(
-      mockAccountId1,
-    );
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
   });
 
   it('enqueues multiple PUBLISH_YOUTUBE jobs for multiple accounts', async () => {
     const admin = createAdminClient();
-    mockAdminClient(admin);
+    mockSupabaseClients(admin);
 
     vi.spyOn(
       connectedAccountsService,
@@ -243,23 +244,19 @@ describe('POST /api/publish/youtube', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+
     expect(admin.from('jobs').insert).toHaveBeenCalledTimes(1);
     const insertCall = (admin.from('jobs').insert as any).mock.calls[0][0];
     expect(insertCall).toHaveLength(2);
-    expect(insertCall[0].payload.connectedAccountId).toBe(
-      mockAccountId1,
-    );
-    expect(insertCall[1].payload.connectedAccountId).toBe(
-      mockAccountId2,
-    );
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
+    expect(insertCall[1].payload.connectedAccountId).toBe(mockAccountId2);
 
-    // Response shape: accountCount is top-level inside data on the body
     expect(res.body.data.accountCount).toBe(2);
   });
 
   it('creates variant_posts when experimentId and variantId provided', async () => {
     const admin = createAdminClient();
-    mockAdminClient(admin);
+    mockSupabaseClients(admin);
 
     vi.spyOn(
       connectedAccountsService,
@@ -328,6 +325,7 @@ describe('POST /api/publish/youtube', () => {
       }),
       expect.any(Object),
     );
+
     expect(createVariantPostsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: mockWorkspaceId,
@@ -343,7 +341,7 @@ describe('POST /api/publish/youtube', () => {
 
   it('uses default accounts when connectedAccountIds not provided', async () => {
     const admin = createAdminClient();
-    mockAdminClient(admin);
+    mockSupabaseClients(admin);
 
     vi.spyOn(
       connectedAccountsService,
@@ -375,6 +373,7 @@ describe('POST /api/publish/youtube', () => {
       });
 
     expect(res.status).toBe(200);
+
     expect(
       connectedAccountsService.getConnectedAccountsForPublish,
     ).toHaveBeenCalledWith(

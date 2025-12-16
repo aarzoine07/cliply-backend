@@ -4,12 +4,17 @@
 /**
  * Next.js API route auth context helper
  * Wraps the shared buildAuthContext to work with Next.js API routes
+ *
+ * IMPORTANT (tests):
+ * - Our API tests use x-debug-user + x-debug-workspace without an Authorization header.
+ * - Surface APIs require an access token to build an RLS client.
+ * - In NODE_ENV=test, we auto-mint a signed Supabase-style JWT from x-debug-user
+ *   and inject it as Authorization: Bearer <jwt> so RLS can work.
  */
+import crypto from "crypto";
 import type { NextApiRequest, NextApiResponse } from "next";
 
-import {
-  buildAuthContext as buildAuthContextShared,
-} from "@cliply/shared/auth/context";
+import { buildAuthContext as buildAuthContextShared } from "@cliply/shared/auth/context";
 import {
   AuthErrorCode,
   type AuthErrorCode as AuthErrorCodeType,
@@ -17,6 +22,29 @@ import {
 } from "@cliply/shared/types/auth";
 
 export type { AuthContext } from "@cliply/shared/types/auth";
+
+function signTestJwt(userId: string): string | null {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    iss: "supabase-demo",
+    aud: "authenticated",
+    role: "authenticated",
+    sub: userId,
+    iat: now,
+    exp: now + 60 * 60, // 1h
+  };
+
+  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const signingInput = `${enc(header)}.${enc(payload)}`;
+  const signature = crypto.createHmac("sha256", secret).update(signingInput).digest("base64url");
+
+  return `${signingInput}.${signature}`;
+}
 
 /**
  * Convert NextApiRequest to a Request-like object for buildAuthContext
@@ -35,6 +63,20 @@ function nextRequestToRequest(req: NextApiRequest): Request {
       }
     } else {
       headers.set(normalizedKey, String(value));
+    }
+  }
+
+  // ✅ Test-only: if debug headers exist but no Authorization header,
+  // mint a JWT so RLS requests work in API tests.
+  if (process.env.NODE_ENV === "test") {
+    const debugUserId = headers.get("x-debug-user")?.trim();
+    const existingAuth = headers.get("authorization")?.trim();
+
+    if (debugUserId && !existingAuth) {
+      const jwt = signTestJwt(debugUserId);
+      if (jwt) {
+        headers.set("authorization", `Bearer ${jwt}`);
+      }
     }
   }
 
@@ -64,8 +106,7 @@ export async function buildAuthContext(req: NextApiRequest) {
     }
 
     // Wrap unexpected errors
-    const message =
-      error instanceof Error ? error.message : "Authentication failed";
+    const message = error instanceof Error ? error.message : "Authentication failed";
     const code: AuthErrorCodeType = AuthErrorCode.INTERNAL_ERROR;
     throw {
       code,
@@ -101,10 +142,6 @@ export function handleAuthError(error: unknown, res: NextApiResponse): void {
   }
 
   // Fallback for unexpected errors
-  const payload = authErrorResponse(
-    AuthErrorCode.INTERNAL_ERROR,
-    "Authentication failed",
-    500,
-  );
+  const payload = authErrorResponse(AuthErrorCode.INTERNAL_ERROR, "Authentication failed", 500);
   res.status(500).json(payload);
 }

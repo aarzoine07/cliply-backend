@@ -37,10 +37,15 @@ Who can see it?
 - Non-members cannot read.
 
 Who can modify it?
-- Same as above (RLS policy is `FOR ALL` with `USING` + `WITH CHECK` membership logic).
+- Same set of users as read.
+- Enforced by `FOR ALL` policy with `USING` + `WITH CHECK` membership logic.
 
 API expectations:
 - Any route that reads/writes `projects` must use `getRlsClient(accessToken)` for the `projects` query.
+
+Examples:
+- Member can read a project in their workspace.
+- User from another workspace cannot read/update that project (RLS denies).
 
 ---
 
@@ -50,11 +55,16 @@ Who can see it?
 - Non-members cannot read.
 
 Who can modify it?
-- Same as above (RLS policy is `FOR ALL` with `USING` + `WITH CHECK` membership logic).
+- Same set of users as read.
+- Enforced by `FOR ALL` policy with `USING` + `WITH CHECK` membership logic.
 
 API expectations:
 - Any route that reads/writes `clips` must use `getRlsClient(accessToken)` for the `clips` query.
 - Service role may still be used for internal inserts (e.g., enqueueing jobs), but NOT for clip reads/updates.
+
+Examples:
+- Member can approve/reject a clip in their workspace (RLS allows).
+- Cross-workspace user is blocked from reading/updating that clip.
 
 ---
 
@@ -64,10 +74,15 @@ Who can see it?
 - Non-members cannot read.
 
 Who can modify it?
-- Same as above (RLS policy is `FOR ALL` with `USING` + `WITH CHECK` membership logic).
+- Same set of users as read.
+- Enforced by `FOR ALL` policy with `USING` + `WITH CHECK` membership logic.
 
 API expectations:
 - Any route that reads/writes `schedules` must use `getRlsClient(accessToken)` for the `schedules` query.
+
+Examples:
+- Member can create/cancel a schedule in their workspace.
+- Cross-workspace user cannot see/modify schedules outside their workspace.
 
 ---
 
@@ -79,17 +94,26 @@ Who can modify it?
 - Authenticated workspace members can insert/update/delete within their workspace (`connected_accounts_workspace_member_modify`).
 
 Service role note:
-- A service-role-only policy exists for full access (intended for backend/internal operations), but web/API “surface” routes should still prefer the RLS client.
+- A service-role-only policy exists for full access (intended for backend/internal operations),
+  but web/API “surface” routes should still prefer the RLS client.
 
 API expectations:
 - Any route that reads/writes `connected_accounts` for the UI must use `getRlsClient(accessToken)`.
 
+Examples:
+- Member can list/update connected accounts for their workspace.
+- Cross-workspace user is blocked from reading/updating those rows.
+
 ---
 
-## Canonical API pattern (example)
+## Canonical API pattern
 
 1) Build auth context and require workspace
 2) Require access token
 3) Use `getRlsClient(accessToken)` for surface tables
 4) Use `getAdminClient()` only for non-surface internals (jobs, webhooks, etc.)
+
+Minimal header contract (conceptual):
+- `Authorization: Bearer <user_access_token>`
+- `X-Workspace-ID: <workspace_uuid>`
 

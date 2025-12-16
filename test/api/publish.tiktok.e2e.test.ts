@@ -73,6 +73,8 @@ function createAdminClient() {
 
 function mockAdminClient(admin: ReturnType<typeof createAdminClient>) {
   vi.spyOn(supabase, 'getAdminClient').mockReturnValue(admin as any);
+  // ✅ critical: route uses getRlsClient for clip lookup under T2
+  vi.spyOn(supabase, 'getRlsClient').mockReturnValue(admin as any);
 }
 
 describe('POST /api/publish/tiktok - E2E Flow', () => {
@@ -317,5 +319,3 @@ describe('TikTok Client Integration Points', () => {
     });
   });
 });
-
-

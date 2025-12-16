@@ -33,6 +33,8 @@ function createAdminClient() {
         id: mockClipId,
         workspace_id: mockWorkspaceId,
         status: 'ready',
+        // Route may select either render_path or storage_path depending on platform
+        render_path: 'renders/test.mp4',
         storage_path: 'renders/test.mp4',
       },
       error: null,
@@ -85,6 +87,8 @@ function createAdminClient() {
 
 function mockAdminClient(admin: ReturnType<typeof createAdminClient>) {
   vi.spyOn(supabase, 'getAdminClient').mockReturnValue(admin as any);
+  // ✅ Route now uses RLS client for clip lookup in tests
+  vi.spyOn(supabase, 'getRlsClient').mockReturnValue(admin as any);
 }
 
 describe('POST /api/publish/tiktok', () => {
@@ -207,9 +211,7 @@ describe('POST /api/publish/tiktok', () => {
     expect(admin.from('jobs').insert).toHaveBeenCalledTimes(1);
     const insertCall = (admin.from('jobs').insert as any).mock.calls[0][0];
     expect(insertCall).toHaveLength(1);
-    expect(insertCall[0].payload.connectedAccountId).toBe(
-      mockAccountId1,
-    );
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
   });
 
   it('enqueues multiple PUBLISH_TIKTOK jobs for multiple accounts', async () => {
@@ -264,12 +266,8 @@ describe('POST /api/publish/tiktok', () => {
     expect(admin.from('jobs').insert).toHaveBeenCalledTimes(1);
     const insertCall = (admin.from('jobs').insert as any).mock.calls[0][0];
     expect(insertCall).toHaveLength(2);
-    expect(insertCall[0].payload.connectedAccountId).toBe(
-      mockAccountId1,
-    );
-    expect(insertCall[1].payload.connectedAccountId).toBe(
-      mockAccountId2,
-    );
+    expect(insertCall[0].payload.connectedAccountId).toBe(mockAccountId1);
+    expect(insertCall[1].payload.connectedAccountId).toBe(mockAccountId2);
 
     // Response shape: accountCount is top-level on the body
     expect(res.body.data.accountCount).toBe(2);
@@ -413,5 +411,3 @@ describe('POST /api/publish/tiktok', () => {
     );
   });
 });
-
-

@@ -20,28 +20,39 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  const userId = auth.userId || auth.user_id;
-  const workspaceId = auth.workspaceId || auth.workspace_id;
+  const userId = (auth as any).userId || (auth as any).user_id;
+  const workspaceId = (auth as any).workspaceId || (auth as any).workspace_id;
 
   if (!workspaceId) {
     res.status(400).json(err("invalid_request", "workspace required"));
     return;
   }
 
-  // T2: Surface table access MUST be via RLS client (no service-role fallback).
+  // Prefer the prebuilt RLS client from auth context (used by test harness).
+  // Fallback to building an RLS client from an access token (prod path).
+  const supabaseFromAuth = (auth as any).supabase;
   const accessToken =
     typeof (auth as any).accessToken === "string"
       ? (auth as any).accessToken
       : typeof (auth as any).access_token === "string"
         ? (auth as any).access_token
+        : typeof (auth as any).session?.access_token === "string"
+          ? (auth as any).session.access_token
+          : typeof (auth as any).session?.accessToken === "string"
+            ? (auth as any).session.accessToken
+            : null;
+
+  const supabase =
+    supabaseFromAuth && typeof supabaseFromAuth.from === "function"
+      ? supabaseFromAuth
+      : accessToken
+        ? getRlsClient(accessToken)
         : null;
 
-  if (!accessToken) {
+  if (!supabase) {
     res.status(401).json(err("unauthorized", "Missing access token"));
     return;
   }
-
-  const supabase = getRlsClient(accessToken);
 
   if (req.method === "GET") {
     try {

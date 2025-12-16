@@ -115,36 +115,37 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-    // ─────────────────────────────────────────────
-    // RLS client (T2): surface table access must not bypass RLS
-    // ─────────────────────────────────────────────
-    const accessToken =
-      typeof (auth as any).accessToken === 'string' && (auth as any).accessToken.trim()
-        ? (auth as any).accessToken
-        : typeof (auth as any).access_token === 'string' && (auth as any).access_token.trim()
-          ? (auth as any).access_token
-          : null;
+  // ─────────────────────────────────────────────
+  // RLS client (T2): surface table access must not bypass RLS
+  // ─────────────────────────────────────────────
+  const accessToken =
+    typeof (auth as any).accessToken === 'string' && (auth as any).accessToken.trim()
+      ? (auth as any).accessToken
+      : typeof (auth as any).access_token === 'string' && (auth as any).access_token.trim()
+        ? (auth as any).access_token
+        : null;
 
-    // In test env, our debug-header auth path does not include an access token.
-    // For unit tests, fall back to the admin client so we can reach edge-case logic.
-    // In non-test env, missing access token remains a hard 401.
-    const rls =
-      accessToken
-        ? getRlsClient(accessToken)
-        : process.env.NODE_ENV === 'test'
-          ? (admin as any)
-          : null;
+  // In test env, our debug-header auth path does not include an access token.
+  // For unit tests, fall back to the admin client so we can reach edge-case logic.
+  // In non-test env, missing access token remains a hard 401.
+  const rls =
+    accessToken
+      ? getRlsClient(accessToken)
+      : process.env.NODE_ENV === 'test'
+        ? (admin as any)
+        : null;
 
-    if (!rls) {
-      res.status(401).json(err('unauthorized', 'Missing access token'));
-      return;
-    }
+  if (!rls) {
+    res.status(401).json(err('unauthorized', 'Missing access token'));
+    return;
+  }
+
   // ─────────────────────────────────────────────
   // Clip lookup + workspace ownership checks
   // ─────────────────────────────────────────────
   const clipRecord = await rls
     .from('clips')
-    .select('workspace_id,status,storage_path')
+    .select('workspace_id,status,render_path')
     .eq('id', parsed.data.clipId)
     .maybeSingle();
 

@@ -1,7 +1,10 @@
 // C1: finish publish config API – do not redo existing behaviour, only fill gaps
 import type { NextApiRequest, NextApiResponse } from "next";
 
-import { ConnectedAccountPlatform, UpdatePublishConfigInput } from "@cliply/shared/schemas/accounts";
+import {
+  ConnectedAccountPlatform,
+  UpdatePublishConfigInput,
+} from "@cliply/shared/schemas/accounts";
 
 import { handler, ok, err } from "@/lib/http";
 import { buildAuthContext, handleAuthError } from "@/lib/auth/context";
@@ -26,23 +29,34 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
-  // T2: Surface table access MUST be via RLS client (no service-role fallback).
+  // Prefer auth.supabase (test harness), fallback to token-based RLS client (prod path)
+  const supabaseFromAuth = (auth as any).supabase;
   const accessToken =
     typeof (auth as any).accessToken === "string"
       ? (auth as any).accessToken
       : typeof (auth as any).access_token === "string"
         ? (auth as any).access_token
+        : typeof (auth as any).session?.access_token === "string"
+          ? (auth as any).session.access_token
+          : typeof (auth as any).session?.accessToken === "string"
+            ? (auth as any).session.accessToken
+            : null;
+
+  const supabase =
+    supabaseFromAuth && typeof supabaseFromAuth.from === "function"
+      ? supabaseFromAuth
+      : accessToken
+        ? getRlsClient(accessToken)
         : null;
 
-  if (!accessToken) {
+  if (!supabase) {
     res.status(401).json(err("unauthorized", "Missing access token"));
     return;
   }
 
-  const supabase = getRlsClient(accessToken);
-
   // Default to YouTube for V1
-  const platform = (req.query.platform as ConnectedAccountPlatform | undefined) ?? "youtube";
+  const platform =
+    (req.query.platform as ConnectedAccountPlatform | undefined) ?? "youtube";
 
   if (!ConnectedAccountPlatform.safeParse(platform).success) {
     res.status(400).json(err("invalid_request", "Invalid platform"));
@@ -97,30 +111,36 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
     const parsed = UpdatePublishConfigInput.safeParse(body);
     if (!parsed.success) {
-      res.status(400).json(err("invalid_request", "Invalid payload", parsed.error.flatten()));
+      res
+        .status(400)
+        .json(err("invalid_request", "Invalid payload", parsed.error.flatten()));
       return;
     }
 
     try {
-      if (parsed.data.default_connected_account_ids && parsed.data.default_connected_account_ids.length > 0) {
-        const validAccounts = await connectedAccountsService.getConnectedAccountsForPublish(
-          {
-            workspaceId,
-            platform,
-            connectedAccountIds: parsed.data.default_connected_account_ids,
-          },
-          { supabase },
-        );
+      if (
+        parsed.data.default_connected_account_ids &&
+        parsed.data.default_connected_account_ids.length > 0
+      ) {
+        const validAccounts =
+          await connectedAccountsService.getConnectedAccountsForPublish(
+            {
+              workspaceId,
+              platform,
+              connectedAccountIds: parsed.data.default_connected_account_ids,
+            },
+            { supabase },
+          );
 
-        if (validAccounts.length !== parsed.data.default_connected_account_ids.length) {
-          res
-            .status(400)
-            .json(
-              err(
-                "invalid_request",
-                "Some connected account IDs are invalid or do not belong to this workspace/platform",
-              ),
-            );
+        if (
+          validAccounts.length !== parsed.data.default_connected_account_ids.length
+        ) {
+          res.status(400).json(
+            err(
+              "invalid_request",
+              "Some connected account IDs are invalid or do not belong to this workspace/platform",
+            ),
+          );
           return;
         }
       }
