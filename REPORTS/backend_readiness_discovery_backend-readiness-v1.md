@@ -34,7 +34,7 @@
 
 **Status Update Proof (2025-12-14)**
 
-Current HEAD: `9712b5d`
+HEAD at time commands were run: `9712b5d`
 
 Latest commit lines for key readiness-related paths:
 
