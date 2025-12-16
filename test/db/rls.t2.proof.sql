@@ -29,16 +29,15 @@ DELETE FROM public.projects           WHERE workspace_id IN (:'w1',:'w2',:'w3') 
 DELETE FROM public.connected_accounts WHERE workspace_id IN (:'w1',:'w2',:'w3') OR display_name LIKE 'T2_RLS_%' OR external_id LIKE 't2_rls_%';
 DELETE FROM public.workspace_members  WHERE workspace_id IN (:'w1',:'w2',:'w3') OR user_id IN (:'u1',:'u2');
 DELETE FROM public.workspaces         WHERE id IN (:'w1',:'w2',:'w3');
-DELETE FROM public.users              WHERE id IN (:'u1',:'u2');
+DELETE FROM auth.users                WHERE id IN (:'u1',:'u2');
 
 -- ------------------------------------------------------------------
--- SEED USERS (public.users) to satisfy FKs from workspace_members/connected_accounts
--- required: email
+-- SEED USERS (auth.users) to satisfy FKs from workspace_members/connected_accounts
 -- ------------------------------------------------------------------
-INSERT INTO public.users (id, email)
+INSERT INTO auth.users (id, email, aud, role, created_at, updated_at)
 VALUES
-  (:'u1', 't2_rls_u1@test.local'),
-  (:'u2', 't2_rls_u2@test.local');
+  (:'u1', 't2_rls_u1@test.local', 'authenticated', 'authenticated', now(), now()),
+  (:'u2', 't2_rls_u2@test.local', 'authenticated', 'authenticated', now(), now());
 
 -- ------------------------------------------------------------------
 -- SEED WORKSPACES + MEMBERSHIP
@@ -132,7 +131,7 @@ DELETE FROM public.projects           WHERE workspace_id IN (:'w1',:'w2',:'w3') 
 DELETE FROM public.connected_accounts WHERE workspace_id IN (:'w1',:'w2',:'w3') OR display_name LIKE 'T2_RLS_%' OR external_id LIKE 't2_rls_%';
 DELETE FROM public.workspace_members  WHERE workspace_id IN (:'w1',:'w2',:'w3') OR user_id IN (:'u1',:'u2');
 DELETE FROM public.workspaces         WHERE id IN (:'w1',:'w2',:'w3');
-DELETE FROM public.users              WHERE id IN (:'u1',:'u2');
+DELETE FROM auth.users                WHERE id IN (:'u1',:'u2');
 
 COMMIT;
 
