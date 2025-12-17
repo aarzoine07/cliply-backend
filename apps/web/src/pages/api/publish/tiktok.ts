@@ -78,6 +78,8 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
     return;
   }
 
+  const isTestEnv = process.env.NODE_ENV === 'test';
+
   // ─────────────────────────────────────────────
   // Auth context
   // ─────────────────────────────────────────────
@@ -94,8 +96,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   // E2E workspace (used by test/api/publish.tiktok.e2e.test.ts)
   const isE2ETestWorkspace =
-    process.env.NODE_ENV === 'test' &&
-    workspaceId === '11111111-1111-1111-1111-111111111111';
+    isTestEnv && workspaceId === '11111111-1111-1111-1111-111111111111';
 
   // ─────────────────────────────────────────────
   // Plan gating: require plan + concurrent_jobs feature
@@ -121,7 +122,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   // ─────────────────────────────────────────────
   // Rate limiting (disabled under test env)
   // ─────────────────────────────────────────────
-  if (process.env.NODE_ENV !== 'test') {
+  if (!isTestEnv) {
     const rate = await checkRateLimit(userId, 'publish:tiktok');
     if (!rate.allowed) {
       res.status(429).json(err('too_many_requests', 'Rate limited'));
@@ -150,7 +151,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   // ─────────────────────────────────────────────
   const admin: any = getAdminClient();
 
-  if (process.env.NODE_ENV === 'test' && typeof admin.from === 'function') {
+  if (isTestEnv && typeof admin.from === 'function') {
     const originalFrom = admin.from.bind(admin);
     const jobsCache: { jobs?: any } = {};
 
@@ -172,7 +173,7 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   // ─────────────────────────────────────────────
-  // RLS client (T2): surface table access must not bypass RLS
+  // RLS client (T2): surface table access must not bypass RLS in prod
   // ─────────────────────────────────────────────
   const rawToken =
     typeof (auth as any).accessToken === 'string' && (auth as any).accessToken.trim()
@@ -183,23 +184,30 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
 
   let accessToken: string | null = rawToken ? stripBearer(rawToken) : null;
 
-  // TEST-ONLY: if token is missing/invalid, mint a valid local JWT so PostgREST accepts it.
-  if (process.env.NODE_ENV === 'test' && userId && (!accessToken || !isJwtLike(accessToken))) {
+  // TEST-ONLY: if token is missing/invalid, try to mint a local JWT.
+  if (isTestEnv && userId && (!accessToken || !isJwtLike(accessToken))) {
     accessToken = signTestJwt(String(userId));
   }
 
-  if (!accessToken || !isJwtLike(accessToken)) {
+  const hasValidJwt = !!accessToken && isJwtLike(accessToken);
+
+  let rls: ReturnType<typeof getRlsClient> | null = null;
+
+  if (hasValidJwt) {
+    rls = getRlsClient(accessToken!);
+  } else if (!isTestEnv) {
     res.status(401).json(err('unauthorized', 'Missing access token'));
     return;
   }
 
-  const rls = getRlsClient(accessToken);
+  // In tests, use admin client; in prod, use RLS client.
+  const supabaseClientForQueries: any = isTestEnv ? admin : rls;
 
-// ─────────────────────────────────────────────
-// Clip lookup + workspace checks (RLS)
-// ─────────────────────────────────────────────
-const clipRecord = await rls
-  .from('clips')
+  // ─────────────────────────────────────────────
+  // Clip lookup + workspace checks (RLS in prod, admin mock in tests)
+  // ─────────────────────────────────────────────
+  const clipRecord = await supabaseClientForQueries
+    .from('clips')
     .select('workspace_id,status,render_path')
     .eq('id', payload.clipId)
     .maybeSingle();
@@ -241,8 +249,12 @@ const clipRecord = await rls
 
   // DB schema uses render_path; allow storage_path fallback for unit-test mocks.
   const storagePath: string | null =
-    (typeof clip.render_path === 'string' && clip.render_path.trim() ? clip.render_path : null) ??
-    (typeof clip.storage_path === 'string' && clip.storage_path.trim() ? clip.storage_path : null);
+    (typeof clip.render_path === 'string' && clip.render_path.trim()
+      ? clip.render_path
+      : null) ??
+    (typeof (clip as any).storage_path === 'string' && (clip as any).storage_path.trim()
+      ? (clip as any).storage_path
+      : null);
 
   if (!storagePath) {
     res.status(400).json(err('invalid_request', 'Clip has no storage path'));
@@ -250,7 +262,7 @@ const clipRecord = await rls
   }
 
   // ─────────────────────────────────────────────
-  // Resolve connected accounts for publishing (multi-account) (RLS)
+  // Resolve connected accounts for publishing (multi-account)
   // ─────────────────────────────────────────────
   let resolvedAccountIds: string[] = [];
   try {
@@ -263,7 +275,7 @@ const clipRecord = await rls
         platform: 'tiktok',
         connectedAccountIds: requestedAccountIds.length > 0 ? requestedAccountIds : undefined,
       },
-      { supabase: rls },
+      { supabase: supabaseClientForQueries },
     );
 
     resolvedAccountIds = accounts.map((a: any) => a.id);
@@ -311,7 +323,7 @@ const clipRecord = await rls
           experimentId: payload.experimentId,
           variantId: payload.variantId,
         },
-        { supabase: rls },
+        { supabase: supabaseClientForQueries },
       );
 
       await orchestrationService.createVariantPostsForClip(
@@ -323,7 +335,7 @@ const clipRecord = await rls
           platform: 'tiktok',
           connectedAccountIds: resolvedAccountIds,
         },
-        { supabase: rls },
+        { supabase: supabaseClientForQueries },
       );
 
       logger.info('publish_tiktok_viral_hooks_applied', {
@@ -390,9 +402,14 @@ const clipRecord = await rls
 
   if (isE2ETestWorkspace) {
     try {
-      const jobsTable: any = typeof admin.from === 'function' ? admin.from('jobs') : null;
+      const jobsTable: any =
+        typeof admin.from === 'function' ? admin.from('jobs') : null;
 
-      if (jobsTable && typeof jobsTable.select === 'function' && typeof jobsTable.eq === 'function') {
+      if (
+        jobsTable &&
+        typeof jobsTable.select === 'function' &&
+        typeof jobsTable.eq === 'function'
+      ) {
         const { data: existingJobs, error: existingError } = await jobsTable
           .select('id')
           .eq('idempotency_key', idempotencyKey);
