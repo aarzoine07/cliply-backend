@@ -27,7 +27,7 @@ export interface ScanResult {
 
 /**
  * Core function to scan and enqueue schedules for publishing.
- * This function is idempotent - it atomically claims schedules to avoid duplicates.
+ * This function is idempotent via job-level dedupe keys.
  */
 export async function scanSchedules(
   supabase: SupabaseClient,
@@ -42,10 +42,12 @@ export async function scanSchedules(
 
   const nowIso = new Date().toISOString();
 
-  // Step 1: Atomically claim all "due" schedules
+  // Step 1: Select and "touch" all due schedules (status=scheduled, run_at<=now)
+  // NOTE: We intentionally do NOT change status here to avoid violating the
+  // schedules_status_check constraint and rely on job-level idempotency instead.
   const { data: claimedSchedules, error: claimError } = await supabase
     .from("schedules")
-    .update({ status: "processing", updated_at: nowIso })
+    .update({ updated_at: nowIso })
     .eq("status", "scheduled")
     .lte("run_at", nowIso)
     .select("id, workspace_id, clip_id, platform, run_at, status");
@@ -97,7 +99,6 @@ export async function scanSchedules(
     claimed_count: dueSchedules.length,
   });
 
-  // If everything we touched is in the future, nothing should be "claimed"
   if (dueSchedules.length === 0) {
     logger.info("cron_scan_schedules_complete", {
       runId,
@@ -214,12 +215,9 @@ export async function scanSchedules(
           connectedAccountId: accountId,
         };
 
-        // Add platform-specific fields if needed
         if (schedule.platform === "youtube") {
-          // Use defaults from publish_config if available
-          // For now, we'll let the worker use defaults
+          // Worker will use defaults from publish_config / engine; no extra fields here yet.
         } else if (schedule.platform === "tiktok") {
-          // Use defaults from publish_config if available
           (payload as { privacyLevel: string }).privacyLevel =
             "PUBLIC_TO_EVERYONE";
         }
@@ -228,7 +226,8 @@ export async function scanSchedules(
           workspaceId: schedule.workspace_id,
           kind: jobKind,
           payload,
-          dedupeKey: `${schedule.id}-${accountId}`, // Ensure idempotency per schedule+account
+          // Ensure idempotency per schedule+account
+          dedupeKey: `${schedule.id}-${accountId}`,
         });
 
         if (result.ok) {

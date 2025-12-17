@@ -33,15 +33,30 @@ const mockClipId = '123e4567-e89b-12d3-a456-426614174000';
 const mockWorkspaceId = '11111111-1111-1111-1111-111111111111';
 
 function createAdminClient(clipData: any) {
+  // For updates: support .update(...).eq(...).select().maybeSingle()
   const updateSpy = vi.fn().mockReturnValue({
-    eq: vi.fn().mockResolvedValue({ error: null }),
+    eq: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        maybeSingle: vi.fn().mockResolvedValue({
+          data: clipData
+            ? {
+                ...clipData,
+                status: 'approved', // after approve, status should be approved
+              }
+            : null,
+          error: null,
+        }),
+      }),
+    }),
   });
+
   const jobInsertSpy = vi.fn().mockResolvedValue({ error: null });
 
   return {
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'clips') {
         return {
+          // Initial lookup: select().eq().maybeSingle()
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
           update: updateSpy,
