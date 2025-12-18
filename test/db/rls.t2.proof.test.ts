@@ -21,6 +21,7 @@ describe("T2 RLS proof (psql)", () => {
       stdout = execFileSync(
         "psql",
         [
+          "-d",
           dbUrl,
           "-v",
           "ON_ERROR_STOP=1",
