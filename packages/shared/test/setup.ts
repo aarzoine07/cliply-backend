@@ -3,6 +3,7 @@ import { dirname, resolve } from "path";
 import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
 import jwt from "jsonwebtoken";
+import { Client } from "pg";
 
 // ✅ Force .env.test load manually (ESM-safe path resolution)
 const __filename = fileURLToPath(import.meta.url);
@@ -26,8 +27,6 @@ function ensureNodeEnvTest(): void {
       enumerable: true,
     });
   } catch {
-    // If we can't set it, tests that depend on shared auth debug fast-path will fail.
-    // Keep noise low but surface the root cause.
     // eslint-disable-next-line no-console
     console.warn("⚠️ Unable to define process.env.NODE_ENV='test' (read-only env).");
   }
@@ -93,6 +92,101 @@ const TEST_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const TEST_OWNER_ID = "00000000-0000-0000-0000-000000000002";
 const TEST_WORKSPACE_WKA = "123e4567-e89b-12d3-a456-426614174000";
 
+// These are referenced directly by multiple tests (connected_accounts, RLS, engine flows, etc.)
+const TEST_USER_WKA_MEMBER = "123e4567-e89b-12d3-a456-426614174001";
+const TEST_USER_NON_MEMBER = "123e4567-e89b-12d3-a456-426614174003";
+
+function resolveLocalDbUrl(): string {
+  // Prefer explicit env
+  if (env.DATABASE_URL) return env.DATABASE_URL;
+
+  // Common local Supabase DB default
+  const defaultLocal = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+
+  // If tests are pointing at local Supabase (127.0.0.1:54321), DB is almost always 54322
+  if ((env.SUPABASE_URL || "").includes("127.0.0.1:54321")) {
+    return defaultLocal;
+  }
+
+  // Fall back (still better than empty in local runs)
+  return defaultLocal;
+}
+
+async function sqlExec(query: string, params?: any[]): Promise<void> {
+  const connectionString = resolveLocalDbUrl();
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query(query, params);
+  } finally {
+    await client.end();
+  }
+}
+
+async function seedAuthUsersDeterministic(): Promise<void> {
+  // We must insert deterministic IDs into auth.users because several tables FK to auth.users(id)
+  // and many tests use hard-coded UUIDs (e.g. 123e...4001).
+  const q = `
+    insert into auth.users (id, email)
+    values
+      ($1, $2),
+      ($3, $4),
+      ($5, $6)
+    on conflict (id) do nothing;
+  `;
+
+  await sqlExec(q, [
+    TEST_OWNER_ID,
+    "test-owner-0002@example.com",
+    TEST_USER_WKA_MEMBER,
+    "test-user-4001@example.com",
+    TEST_USER_NON_MEMBER,
+    "test-user-4003@example.com",
+  ]);
+}
+
+async function seedPublicUsersBestEffort(): Promise<void> {
+  // Some suites query public.users directly (not auth.users).
+  // Keep this best-effort: if schema differs, we’ll adjust based on the error output.
+  const q = `
+    insert into public.users (id, email)
+    values
+      ($1, $2),
+      ($3, $4),
+      ($5, $6)
+    on conflict (id) do nothing;
+  `;
+
+  try {
+    await sqlExec(q, [
+      TEST_OWNER_ID,
+      "test-owner-0002@example.com",
+      TEST_USER_WKA_MEMBER,
+      "test-user-4001@example.com",
+      TEST_USER_NON_MEMBER,
+      "test-user-4003@example.com",
+    ]);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("⚠️ seedPublicUsersBestEffort(): could not seed public.users (will diagnose if tests require it).");
+  }
+}
+
+async function seedWorkspaceMembership(): Promise<void> {
+  // RLS checks membership via public.workspace_members.
+  // If this is empty, “member” tests will correctly see zero rows.
+  const q = `
+    insert into public.workspace_members (workspace_id, user_id, role)
+    values
+      ($1, $2, 'owner'),
+      ($1, $3, 'member'),
+      ($4, $2, 'owner')
+    on conflict (workspace_id, user_id) do nothing;
+  `;
+
+  await sqlExec(q, [TEST_WORKSPACE_WKA, TEST_OWNER_ID, TEST_USER_WKA_MEMBER, TEST_WORKSPACE_ID]);
+}
+
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
   const payload = {
@@ -118,23 +212,13 @@ export async function resetDatabase() {
   console.log("⚙️  resetDatabase() clearing jobs-related tables...");
 
   // FK-safe order: job_events -> jobs
-  const { error: jobEventsError } = await supabaseTest
-    .from("job_events")
-    .delete()
-    .neq("id", 0);
-
+  const { error: jobEventsError } = await supabaseTest.from("job_events").delete().neq("id", 0);
   if (jobEventsError) {
-    throw new Error(
-      `resetDatabase(): failed to clear job_events: ${jobEventsError.message}`,
-    );
+    throw new Error(`resetDatabase(): failed to clear job_events: ${jobEventsError.message}`);
   }
 
   // idempotency_keys may not be exposed via PostgREST schema cache in some local states
-  const { error: idemError } = await supabaseTest
-    .from("idempotency_keys")
-    .delete()
-    .neq("id", 0);
-
+  const { error: idemError } = await supabaseTest.from("idempotency_keys").delete().neq("id", 0);
   if (idemError) {
     const msg = `${idemError.message ?? ""}`.toLowerCase();
     const code = (idemError as any)?.code;
@@ -142,12 +226,10 @@ export async function resetDatabase() {
     const ignorable =
       msg.includes("could not find the table") || // PostgREST schema cache miss
       msg.includes("does not exist") || // DB relation missing
-      code === "PGRST205"; // PostgREST "not found in schema cache" (common)
+      code === "PGRST205"; // PostgREST "not found in schema cache"
 
     if (!ignorable) {
-      throw new Error(
-        `resetDatabase(): failed to clear idempotency_keys: ${idemError.message}`,
-      );
+      throw new Error(`resetDatabase(): failed to clear idempotency_keys: ${idemError.message}`);
     }
   }
 
@@ -155,35 +237,37 @@ export async function resetDatabase() {
     .from("jobs")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
-
   if (jobsError) {
     throw new Error(`resetDatabase(): failed to clear jobs: ${jobsError.message}`);
   }
 
-  // ✅ Seed deterministic workspace used by worker/job tests.
-  const { error: wsError } = await supabaseTest
-    .from("workspaces")
-    .upsert(
-      [
-        {
-          id: TEST_WORKSPACE_ID,
-          name: "Test Workspace",
-          owner_id: TEST_OWNER_ID,
-          org_id: null,
-        },
-        {
-          id: TEST_WORKSPACE_WKA,
-          name: "Test Workspace A",
-          owner_id: TEST_OWNER_ID,
-          org_id: null,
-        },
-      ],
-      { onConflict: "id" },
-    );
+  // ✅ Seed deterministic workspaces used by multiple suites.
+  const { error: wsError } = await supabaseTest.from("workspaces").upsert(
+    [
+      {
+        id: TEST_WORKSPACE_ID,
+        name: "Test Workspace",
+        owner_id: TEST_OWNER_ID,
+        org_id: null,
+      },
+      {
+        id: TEST_WORKSPACE_WKA,
+        name: "Test Workspace A",
+        owner_id: TEST_OWNER_ID,
+        org_id: null,
+      },
+    ],
+    { onConflict: "id" },
+  );
 
   if (wsError) {
     throw new Error(`resetDatabase(): failed to seed workspaces: ${wsError.message}`);
   }
+
+  // ✅ Critical: seed deterministic principals + membership for RLS tests.
+  await seedAuthUsersDeterministic();
+  await seedPublicUsersBestEffort();
+  await seedWorkspaceMembership();
 
   console.log("✅ resetDatabase() done");
 }
@@ -202,16 +286,12 @@ export function resetEnvForTesting(): void {
  * Checks if Supabase test client is configured and usable for real DB operations.
  */
 export function isSupabaseTestConfigured(): boolean {
-  if (!supabaseTest) {
-    return false;
-  }
+  if (!supabaseTest) return false;
 
   const url = env.SUPABASE_URL || "";
-  if (url.includes("/dashboard/")) {
-    return false;
-  }
+  if (url.includes("/dashboard/")) return false;
 
-  if (!url.match(/\.supabase\.(co|io)/)) {
+  if (!url.match(/\.supabase\.(co|io)/) && !url.includes("127.0.0.1")) {
     return false;
   }
 

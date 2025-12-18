@@ -119,16 +119,15 @@ export default handler(async (req: NextApiRequest, res: NextApiResponse) => {
   // Enforce usage (no-op today, future-proof for quotas)
   enforcePlanAccess(plan as any, 'concurrent_jobs' as any);
 
-  // ─────────────────────────────────────────────
-  // Rate limiting (disabled under test env)
-  // ─────────────────────────────────────────────
-  if (!isTestEnv) {
-    const rate = await checkRateLimit(userId, 'publish:tiktok');
-    if (!rate.allowed) {
-      res.status(429).json(err('too_many_requests', 'Rate limited'));
-      return;
-    }
-  }
+// ─────────────────────────────────────────────
+// Rate limiting (safe under tests: checkRateLimit() bypasses Supabase in NODE_ENV==="test")
+// ─────────────────────────────────────────────
+const rate = await checkRateLimit(userId, 'publish:tiktok');
+if (!rate.allowed) {
+  res.status(429).json(err('too_many_requests', 'Rate limited'));
+  return;
+}
+
 
   // ─────────────────────────────────────────────
   // Validate request body

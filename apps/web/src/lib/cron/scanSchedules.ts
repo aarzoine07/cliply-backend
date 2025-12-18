@@ -226,16 +226,22 @@ export async function scanSchedules(
           workspaceId: schedule.workspace_id,
           kind: jobKind,
           payload,
+          // ✅ Critical: pass a STABLE runAt so idempotency keyHash is stable across re-scans
+          // If runAt changes, enqueueJob’s hash changes and dedupe won’t work.
+          runAt: schedule.run_at ?? new Date(0).toISOString(),
           // Ensure idempotency per schedule+account
           dedupeKey: `${schedule.id}-${accountId}`,
         });
 
         if (result.ok) {
-          enqueued++;
-          if (schedule.platform === "tiktok") {
-            enqueuedTiktok++;
-          } else if (schedule.platform === "youtube") {
-            enqueuedYoutube++;
+          // ✅ Only count as "enqueued" when a NEW job was inserted (not an idempotent replay)
+          if (!result.reused) {
+            enqueued++;
+            if (schedule.platform === "tiktok") {
+              enqueuedTiktok++;
+            } else if (schedule.platform === "youtube") {
+              enqueuedYoutube++;
+            }
           }
         } else {
           logger.error("cron_scan_schedules_enqueue_failed", {

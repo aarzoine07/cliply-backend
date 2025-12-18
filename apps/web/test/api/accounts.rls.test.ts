@@ -46,7 +46,9 @@ async function makeJwt(opts: {
 
 async function seedConnectedAccountViaServiceRole(): Promise<void> {
   const supabaseUrl = process.env.SUPABASE_URL;
-  const restUrl = process.env.SUPABASE_REST_URL ?? (supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/rest/v1` : null);
+  const restUrl =
+    process.env.SUPABASE_REST_URL ??
+    (supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/rest/v1` : null);
 
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!restUrl) throw new Error("Missing SUPABASE_URL (or SUPABASE_REST_URL) in env");
@@ -78,12 +80,48 @@ async function seedConnectedAccountViaServiceRole(): Promise<void> {
   }
 }
 
+async function seedWorkspaceMemberViaServiceRole(opts: {
+  workspaceId: string;
+  userId: string;
+  role?: "owner" | "member";
+}): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const restUrl =
+    process.env.SUPABASE_REST_URL ??
+    (supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/rest/v1` : null);
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!restUrl) throw new Error("Missing SUPABASE_URL (or SUPABASE_REST_URL) in env");
+  if (!serviceKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY in env");
+
+  const res = await fetch(`${restUrl}/workspace_members?on_conflict=workspace_id,user_id`, {
+    method: "POST",
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({
+      workspace_id: opts.workspaceId,
+      user_id: opts.userId,
+      role: opts.role ?? "member",
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Seed workspace_members failed: ${res.status} ${res.statusText} :: ${text}`);
+  }
+}
+
 describe("T2 RLS: /api/accounts (connected_accounts)", () => {
   let jwtA = "";
   let jwtC = "";
 
   beforeAll(async () => {
     await seedConnectedAccountViaServiceRole();
+    await seedWorkspaceMemberViaServiceRole({ workspaceId: WKA, userId: USA, role: "member" });
 
     const secret = readJwtSecretFromSupabaseConfig();
     const supabaseUrl = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";

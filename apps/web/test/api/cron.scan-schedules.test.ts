@@ -78,6 +78,7 @@ describe("POST /api/cron/scan-schedules", () => {
     TEST_CLIP_ID_1 = crypto.randomUUID();
     TEST_CLIP_ID_2 = crypto.randomUUID();
     TEST_CLIP_ID_3 = crypto.randomUUID();
+    console.log("TEST_CLIP_ID_3 =", TEST_CLIP_ID_3);
 
     // 2) Seed three clips that belong to that real project + workspace
     const { error: clipsError } = await adminClient.from("clips").insert([

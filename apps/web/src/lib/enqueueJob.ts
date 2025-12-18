@@ -2,7 +2,12 @@ import * as crypto from "crypto";
 
 import { getEnv } from "@cliply/shared/env";
 import type { Database } from "@cliply/shared/types/supabase";
-import { createClient, type PostgrestError, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  type PostgrestError,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
+
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
 type JobKind = string;
 type JobPayload = Record<string, unknown>;
@@ -20,6 +25,8 @@ export interface EnqueueResponse {
   ok: boolean;
   jobId?: string;
   error?: string;
+  // ✅ If true, this response came from an existing idempotency key (no new job insert)
+  reused?: boolean;
 }
 
 const SERVICE_ROUTE = "jobs/enqueue";
@@ -54,7 +61,6 @@ function getServiceClient(): SupabaseClient {
   return cachedClient;
 }
 
-
 function clampPriority(priority: number | undefined): number {
   const defaultPriority = 5;
   if (priority === undefined) return defaultPriority;
@@ -64,7 +70,7 @@ function clampPriority(priority: number | undefined): number {
 }
 
 function normalizeRunAt(
-  runAt?: string
+  runAt?: string,
 ): { ok: true; value: string } | { ok: false; error: string } {
   if (!runAt) {
     return { ok: true, value: new Date().toISOString() };
@@ -97,7 +103,12 @@ function stablePayloadString(payload: JobPayload): string {
   return JSON.stringify(sortKeys(payload));
 }
 
-function buildHash(kind: JobKind, payload: JobPayload, runAt: string, dedupeKey?: string): string {
+function buildHash(
+  kind: JobKind,
+  payload: JobPayload,
+  runAt: string,
+  dedupeKey?: string,
+): string {
   const canonical = `${kind}|${dedupeKey ?? stablePayloadString(payload)}|${runAt}`;
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
@@ -115,7 +126,7 @@ function isEnqueueResponse(value: unknown): value is EnqueueResponse {
 async function fetchIdempotentResponse(
   supabase: SupabaseClient,
   workspaceId: string,
-  keyHash: string
+  keyHash: string,
 ): Promise<{ error?: PostgrestError; response?: EnqueueResponse }> {
   const { data, error } = await supabase
     .from("idempotency_keys")
@@ -131,29 +142,38 @@ async function fetchIdempotentResponse(
 
   const stored = data?.response;
   if (stored && isEnqueueResponse(stored)) {
-    return { response: stored };
+    // ✅ Mark as reused (idempotent replay) for the caller, without changing stored shape
+    return { response: { ...stored, reused: true } };
   }
 
   return {};
 }
 
-export async function enqueueJob(params: EnqueueParams): Promise<EnqueueResponse> {
+export async function enqueueJob(
+  params: EnqueueParams,
+): Promise<EnqueueResponse> {
   const supabase = getServiceClient();
-const priority = clampPriority(params.priority);
-const runAtResult = normalizeRunAt(params.runAt);
-if (!runAtResult.ok) {
-  const errMsg =
-    typeof runAtResult === "object" && "error" in runAtResult
-      ? runAtResult.error
-      : "Invalid runAt value";
-  return { ok: false, error: errMsg };
-}
+
+  const priority = clampPriority(params.priority);
+
+  const runAtResult = normalizeRunAt(params.runAt);
+  if (!runAtResult.ok) {
+    const errMsg =
+      typeof runAtResult === "object" && "error" in runAtResult
+        ? runAtResult.error
+        : "Invalid runAt value";
+    return { ok: false, error: errMsg };
+  }
 
   const runAt = runAtResult.value;
   const keyHash = buildHash(params.kind, params.payload, runAt, params.dedupeKey);
 
   // 1️⃣ Check existing idempotent key
-  const existing = await fetchIdempotentResponse(supabase, params.workspaceId, keyHash);
+  const existing = await fetchIdempotentResponse(
+    supabase,
+    params.workspaceId,
+    keyHash,
+  );
   if (existing.error) {
     return { ok: false, error: existing.error.message };
   }
@@ -178,9 +198,9 @@ if (!runAtResult.ok) {
     return { ok: false, error: insertError?.message ?? "Failed to insert job" };
   }
 
-const response: EnqueueResponse = { ok: true, jobId: String(job.id) };
+  const storedResponse: EnqueueResponse = { ok: true, jobId: String(job.id) };
 
-  // 3️⃣ Store or reuse idempotency key (UPSERT instead of INSERT)
+  // 3️⃣ Store idempotency key (UPSERT)
   const { error: idempotencyError } = await supabase
     .from("idempotency_keys")
     .upsert(
@@ -188,14 +208,19 @@ const response: EnqueueResponse = { ok: true, jobId: String(job.id) };
         workspace_id: params.workspaceId,
         route: SERVICE_ROUTE,
         key_hash: keyHash,
-        response,
+        response: storedResponse,
       },
-      { onConflict: "workspace_id,route,key_hash" }
+      { onConflict: "workspace_id,route,key_hash" },
     );
 
   if (idempotencyError) {
+    // If there was a race, recover by reading existing stored response
     if (idempotencyError.code === "23505") {
-      const retry = await fetchIdempotentResponse(supabase, params.workspaceId, keyHash);
+      const retry = await fetchIdempotentResponse(
+        supabase,
+        params.workspaceId,
+        keyHash,
+      );
       if (!retry.error && retry.response) {
         return retry.response;
       }
@@ -203,5 +228,5 @@ const response: EnqueueResponse = { ok: true, jobId: String(job.id) };
     return { ok: false, error: idempotencyError.message };
   }
 
-  return response;
+  return storedResponse;
 }
