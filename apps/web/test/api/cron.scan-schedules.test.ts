@@ -17,7 +17,7 @@
 import path from "path";
 import * as crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it, beforeAll, vi } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, vi } from "vitest";
 
 // ✅ dotenv loader
 const dotenv = require("dotenv");
@@ -74,6 +74,11 @@ describe("POST /api/cron/scan-schedules", () => {
     TEST_WORKSPACE_ID = project.workspace_id;
     TEST_PROJECT_ID = project.id;
 
+    // ✅ Clean up any existing schedules and jobs for this workspace before starting
+    // This ensures deterministic state across consecutive test runs without DB reset
+    await adminClient.from("schedules").delete().eq("workspace_id", TEST_WORKSPACE_ID);
+    await adminClient.from("jobs").delete().eq("workspace_id", TEST_WORKSPACE_ID);
+
     // Generate stable test clip IDs
     TEST_CLIP_ID_1 = crypto.randomUUID();
     TEST_CLIP_ID_2 = crypto.randomUUID();
@@ -118,6 +123,21 @@ describe("POST /api/cron/scan-schedules", () => {
     // - We do NOT touch `workspaces` (no insert/upsert ⇒ avoids permission denied).
     // - We do NOT touch `connected_accounts` or `publish_config` here.
     //   We will rely on existing data or mocking for those behaviors.
+  });
+
+  // Clean up all schedules and jobs for the workspace before each test
+  // to ensure deterministic state across consecutive test runs without DB reset
+  beforeEach(async () => {
+    if (TEST_WORKSPACE_ID) {
+      await adminClient
+        .from("schedules")
+        .delete()
+        .eq("workspace_id", TEST_WORKSPACE_ID);
+      await adminClient
+        .from("jobs")
+        .delete()
+        .eq("workspace_id", TEST_WORKSPACE_ID);
+    }
   });
 
   describe("Auth & Protection", () => {
@@ -583,13 +603,22 @@ describe("POST /api/cron/scan-schedules", () => {
   });
 
   describe("Future Schedules", () => {
-    it("skips schedules with future run_at", async () => {
+    // Clean up all schedules and jobs for the workspace before each test
+    // to ensure deterministic state (no leftover schedules from previous tests)
+    beforeEach(async () => {
       await adminClient
         .from("schedules")
         .delete()
         .eq("workspace_id", TEST_WORKSPACE_ID);
+      await adminClient
+        .from("jobs")
+        .delete()
+        .eq("workspace_id", TEST_WORKSPACE_ID);
+    });
 
-      const futureTime = new Date(Date.now() + 3600000).toISOString(); // 1 hour in future
+    it("skips schedules with future run_at", async () => {
+      // Use 7 days in future to ensure it stays "future" even on slow runs or reruns
+      const futureTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       await adminClient.from("schedules").insert({
         workspace_id: TEST_WORKSPACE_ID,
         clip_id: TEST_CLIP_ID_1,

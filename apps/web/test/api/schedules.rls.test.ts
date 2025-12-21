@@ -1,5 +1,5 @@
 import path from "path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import schedulesRoute from "../../src/pages/api/schedules";
 import { supertestHandler } from "../../../../test/utils/supertest-next";
@@ -44,6 +44,66 @@ async function makeJwt(opts: {
     .sign(secret);
 }
 
+function getServiceRoleHeaders(serviceKey: string, extraHeaders?: Record<string, string>): Record<string, string> {
+  return {
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+    ...extraHeaders,
+  };
+}
+
+async function ensureWorkspaceExistsViaServiceRole(): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const restUrl =
+    process.env.SUPABASE_REST_URL ??
+    (supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/rest/v1` : null);
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!restUrl) throw new Error("Missing SUPABASE_URL (or SUPABASE_REST_URL) in env");
+  if (!serviceKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY in env");
+
+  // Try to insert workspace; if it already exists (409), that's fine (idempotent)
+  const wsRes = await fetch(`${restUrl}/workspaces`, {
+    method: "POST",
+    headers: getServiceRoleHeaders(serviceKey, {
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    }),
+    body: JSON.stringify({
+      id: WKA,
+      name: "Test Workspace A",
+      owner_id: USA,
+    }),
+  });
+
+  // 409 Conflict means workspace already exists, which is fine for idempotency
+  if (!wsRes.ok && wsRes.status !== 409) {
+    const text = await wsRes.text();
+    throw new Error(`Ensure workspace failed: ${wsRes.status} ${wsRes.statusText} :: ${text}`);
+  }
+
+  // If workspace exists but owner_id differs, update it to ensure consistency
+  if (wsRes.status === 409) {
+    const patchRes = await fetch(`${restUrl}/workspaces?id=eq.${WKA}`, {
+      method: "PATCH",
+      headers: getServiceRoleHeaders(serviceKey, {
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      }),
+      body: JSON.stringify({
+        name: "Test Workspace A",
+        owner_id: USA,
+      }),
+    });
+
+    if (!patchRes.ok) {
+      const text = await patchRes.text();
+      throw new Error(`Update workspace failed: ${patchRes.status} ${patchRes.statusText} :: ${text}`);
+    }
+  }
+}
+
 async function seedScheduleViaServiceRole(): Promise<void> {
   const supabaseUrl = process.env.SUPABASE_URL;
   const restUrl =
@@ -57,15 +117,16 @@ async function seedScheduleViaServiceRole(): Promise<void> {
 
   const ts = Math.floor(Date.now() / 1000);
 
+  // 0) Ensure workspace exists before seeding project
+  await ensureWorkspaceExistsViaServiceRole();
+
   // 1) Seed project
   const prjRes = await fetch(`${restUrl}/projects`, {
     method: "POST",
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
+    headers: getServiceRoleHeaders(serviceKey, {
       "Content-Type": "application/json",
       Prefer: "return=representation",
-    },
+    }),
     body: JSON.stringify({
       workspace_id: WKA,
       title: `t2-schedules-project-${ts}`,
@@ -85,12 +146,10 @@ async function seedScheduleViaServiceRole(): Promise<void> {
   // 2) Seed clip
   const clipRes = await fetch(`${restUrl}/clips`, {
     method: "POST",
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
+    headers: getServiceRoleHeaders(serviceKey, {
       "Content-Type": "application/json",
       Prefer: "return=representation",
-    },
+    }),
     body: JSON.stringify({
       workspace_id: WKA,
       project_id: projectId,
@@ -110,12 +169,10 @@ async function seedScheduleViaServiceRole(): Promise<void> {
   const runAt = new Date(Date.now() + 60_000).toISOString();
   const schRes = await fetch(`${restUrl}/schedules`, {
     method: "POST",
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
+    headers: getServiceRoleHeaders(serviceKey, {
       "Content-Type": "application/json",
       Prefer: "return=representation",
-    },
+    }),
     body: JSON.stringify({
       workspace_id: WKA,
       clip_id: clipId,
@@ -130,11 +187,62 @@ async function seedScheduleViaServiceRole(): Promise<void> {
   }
 }
 
+async function cleanupWorkspaceViaServiceRole(): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const restUrl =
+    process.env.SUPABASE_REST_URL ??
+    (supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/rest/v1` : null);
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!restUrl) throw new Error("Missing SUPABASE_URL (or SUPABASE_REST_URL) in env");
+  if (!serviceKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY in env");
+
+  const srHeaders = getServiceRoleHeaders(serviceKey);
+
+  // Delete in reverse dependency order to avoid FK violations
+  // Best-effort cleanup: ignore 404/204 responses (no rows to delete is fine)
+  const deleteOps = [
+    // 1) Delete schedules
+    fetch(`${restUrl}/schedules?workspace_id=eq.${WKA}`, {
+      method: "DELETE",
+      headers: srHeaders,
+    }),
+    // 2) Delete jobs
+    fetch(`${restUrl}/jobs?workspace_id=eq.${WKA}`, {
+      method: "DELETE",
+      headers: srHeaders,
+    }),
+    // 3) Delete clips (they reference projects)
+    fetch(`${restUrl}/clips?workspace_id=eq.${WKA}`, {
+      method: "DELETE",
+      headers: srHeaders,
+    }),
+    // 4) Delete projects
+    fetch(`${restUrl}/projects?workspace_id=eq.${WKA}`, {
+      method: "DELETE",
+      headers: srHeaders,
+    }),
+    // 5) Delete connected_accounts if any were created by this suite
+    fetch(`${restUrl}/connected_accounts?workspace_id=eq.${WKA}`, {
+      method: "DELETE",
+      headers: srHeaders,
+    }),
+  ];
+
+  // Execute all deletes in parallel (best-effort, ignore errors)
+  await Promise.allSettled(deleteOps);
+}
+
 describe("T2 RLS: /api/schedules (schedules)", () => {
   let jwtA = "";
   let jwtC = "";
 
   beforeAll(async () => {
+    // Clean up any leftover data from previous runs (idempotency)
+    await cleanupWorkspaceViaServiceRole();
+    
+    // Seed test data
     await seedScheduleViaServiceRole();
 
     const secret = readJwtSecretFromSupabaseConfig();
@@ -143,6 +251,11 @@ describe("T2 RLS: /api/schedules (schedules)", () => {
 
     jwtA = await makeJwt({ userId: USA, workspaceId: WKA, issuer, secret });
     jwtC = await makeJwt({ userId: USERC, workspaceId: WKC, issuer, secret });
+  });
+
+  // Clean up workspace-scoped data after all tests to prevent leakage into other test suites
+  afterAll(async () => {
+    await cleanupWorkspaceViaServiceRole();
   });
 
   it("A (workspace member) can read schedules in workspace A", async () => {
