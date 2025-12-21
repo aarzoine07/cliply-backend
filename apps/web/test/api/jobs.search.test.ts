@@ -9,15 +9,12 @@
  *
  * Each test uses unique job markers to ensure isolation from other tests.
  */
-import path from "path";
 import * as crypto from "crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { resetDatabase } from "@cliply/shared/test/setup";
 
-// ✅ dotenv loader (test env)
-const dotenv = require("dotenv");
-dotenv.config({ path: "../../.env.test", override: true });
+// ✅ dotenv is already loaded by packages/shared/test/setup.ts (via vitest setupFiles)
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;

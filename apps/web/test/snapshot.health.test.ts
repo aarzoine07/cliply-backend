@@ -7,7 +7,7 @@
  * Default (RUN_SNAPSHOT_HEALTH !== "true"):
  *   - The suite is skipped so standard `pnpm test` stays green without Docker.
  */
-import "../../../packages/shared/test/loadEnv"; // ✅ load env first
+// ✅ dotenv is already loaded by packages/shared/test/setup.ts (via vitest setupFiles)
 
 import { execSync } from "child_process";
 

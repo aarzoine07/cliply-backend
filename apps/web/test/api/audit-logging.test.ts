@@ -1,6 +1,4 @@
 // @ts-nocheck
-import * as path from "path";
-
 import { createClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { resetDatabase } from "@cliply/shared/test/setup";
@@ -8,13 +6,7 @@ import { logAuditEvent } from "@cliply/shared/logging/audit";
 
 // apps/web/test/api/audit-logging.test.ts
 
-const dotenv = require("dotenv");
-
-// Load .env.test
-dotenv.config({ path: "../../.env.test", override: true });
-
-const envPath = path.resolve(process.cwd(), "../../.env.test");
-console.log(`✅ dotenv loaded from: ${envPath}`);
+// ✅ dotenv is already loaded by packages/shared/test/setup.ts (via vitest setupFiles)
 
 // Supabase service-role client
 const SUPABASE_URL = process.env.SUPABASE_URL!;

@@ -21,7 +21,7 @@ import * as crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import "../../../packages/shared/test/loadEnv";
+// ✅ dotenv is already loaded by packages/shared/test/setup.ts (via vitest setupFiles)
 import { getEnv } from "@cliply/shared/env";
 import { resetDatabase } from "../../../packages/shared/test/setup";
 

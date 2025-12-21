@@ -1,15 +1,9 @@
 // @ts-nocheck
-import path from "path";
-
 import { beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { resetDatabase } from "@cliply/shared/test/setup";
 
-// ✅ dotenv loader (test env)
-const dotenv = require("dotenv");
-dotenv.config({ path: "../../.env.test", override: true });
-const envPath = path.resolve(process.cwd(), "../../.env.test");
-console.log(`✅ dotenv loaded from: ${envPath}`);
+// ✅ dotenv is already loaded by packages/shared/test/setup.ts (via vitest setupFiles)
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;

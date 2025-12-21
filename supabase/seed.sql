@@ -33,7 +33,20 @@ VALUES (
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------
--- 4. Base subscription (basic, active)
+-- 4. Seed a deterministic project for tests
+-- ---------------------------------------------------------
+INSERT INTO projects (id, workspace_id, title, source_type, status)
+VALUES (
+  '00000000-0000-0000-0000-000000000201',
+  '00000000-0000-0000-0000-000000000101',
+  'Seed Project',
+  'file',
+  'ready'
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------
+-- 5. Base subscription (basic, active)
 -- ---------------------------------------------------------
 INSERT INTO subscriptions (
   id,
@@ -64,7 +77,7 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------
--- 5. Second subscription for test scenarios (growth, trialing)
+-- 6. Second subscription for test scenarios (growth, trialing)
 -- ---------------------------------------------------------
 INSERT INTO subscriptions (
   id,

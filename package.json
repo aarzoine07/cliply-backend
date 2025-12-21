@@ -36,7 +36,8 @@
     "jobs:stats": "tsx scripts/jobs/stats.ts",
     "jobs:status": "tsx scripts/jobs/status.ts",
     "workers:status": "tsx scripts/workers/status.ts",
-    "test:engine:e2e": "vitest run test/engine/pipeline-flow-simple.e2e.test.ts"
+    "test:engine:e2e": "vitest run test/engine/pipeline-flow-simple.e2e.test.ts",
+    "test:db:serial": "vitest run --reporter=verbose --config apps/web/vitest.config.ts --no-file-parallelism"
   },
   "workspaces": [
     "apps/*",

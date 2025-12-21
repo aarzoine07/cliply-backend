@@ -91,6 +91,7 @@ export const supabaseTest =
 const TEST_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const TEST_OWNER_ID = "00000000-0000-0000-0000-000000000002";
 const TEST_WORKSPACE_WKA = "123e4567-e89b-12d3-a456-426614174000";
+const TEST_PROJECT_ID = "00000000-0000-0000-0000-000000000010";
 
 // These are referenced directly by multiple tests (connected_accounts, RLS, engine flows, etc.)
 const TEST_USER_WKA_MEMBER = "123e4567-e89b-12d3-a456-426614174001";
@@ -187,6 +188,24 @@ async function seedWorkspaceMembership(): Promise<void> {
   await sqlExec(q, [TEST_WORKSPACE_WKA, TEST_OWNER_ID, TEST_USER_WKA_MEMBER, TEST_WORKSPACE_ID]);
 }
 
+async function seedDeterministicProject(): Promise<void> {
+  // Tests like cron.scan-schedules.test.ts expect at least one project to exist.
+  // Create a minimal deterministic project for TEST_WORKSPACE_ID.
+  const q = `
+    insert into public.projects (id, workspace_id, title, source_type, status)
+    values ($1, $2, $3, $4, $5)
+    on conflict (id) do nothing;
+  `;
+
+  await sqlExec(q, [
+    TEST_PROJECT_ID,
+    TEST_WORKSPACE_ID,
+    "Test Project",
+    "file",
+    "ready",
+  ]);
+}
+
 // ✅ HS256 local JWT generator for Supabase tests
 export function createTestJwt(userId: string, workspaceId: string) {
   const payload = {
@@ -268,6 +287,9 @@ export async function resetDatabase() {
   await seedAuthUsersDeterministic();
   await seedPublicUsersBestEffort();
   await seedWorkspaceMembership();
+
+  // ✅ Seed deterministic project for tests that expect a project to exist.
+  await seedDeterministicProject();
 
   console.log("✅ resetDatabase() done");
 }

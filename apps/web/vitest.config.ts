@@ -51,6 +51,7 @@ export default defineConfig({
 
     setupFiles: ["packages/shared/test/setup.ts"],
     environment: "node",
+    fileParallelism: false,
 
     exclude: [
       "**/node_modules/**",
